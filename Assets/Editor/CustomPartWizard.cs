@@ -7,7 +7,24 @@ using UnityEngine;
 
 public class CustomPartWizard : EditorWindow
 {
-    const string ShellConnectorPath = "Assets/_CustomShips/FirstShip/Components/Shell/ShellConnector.prefab";
+    const string PrefOutputFolder = "CustomPartWizard.OutputFolder";
+
+    // Each entry is a template prefab path whose refs[0]/refs[1] are already correct for that material.
+    // Labels must not contain '/' (Unity treats it as a submenu separator).
+    static readonly string[] MatTemplateLabels = {
+        "Nanocarbon -- Processor  (50 kg per m3)",
+        "Steel -- Furnace  (200 kg per m3)",
+        "Glass -- Furnace  (50 kg per m3)",
+        "Component -- Barge (Reactor/Explosive)",
+        "Component -- Barge (Nanocarbon/Safe)  [experimental]",
+    };
+    static readonly string[] MatTemplatePaths = {
+        "Assets/_CustomShips/FirstShip/Components/Shell/ShellConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/ChassisConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/GlassConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/BargeConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/BargeConnectorLight.prefab",
+    };
 
     string m_PartName = "MyPart";
     string m_OutputFolder = "Assets/_CustomShips/";
@@ -19,12 +36,16 @@ public class CustomPartWizard : EditorWindow
     string m_AddressableGroup = "";
     bool m_KeepOpening = false;
     string m_DisplayName = "";
-    SalvageableComponentAsset m_SalvageableOverride;
+    int m_MatTemplate = 0;
 
     Vector2 m_Scroll;
 
     [MenuItem("Shipbuilder/Create Custom Part Wizard")]
-    static void Open() => GetWindow<CustomPartWizard>("Custom Part Wizard");
+    static void Open()
+    {
+        var w = GetWindow<CustomPartWizard>("Custom Part Wizard");
+        w.m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+    }
 
     void OnGUI()
     {
@@ -32,7 +53,7 @@ public class CustomPartWizard : EditorWindow
 
         GUILayout.Label("Create Custom Ship Part", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "Creates a new part prefab based on ShellConnector with all required game components pre-wired. " +
+            "Creates a new part prefab with all required game components pre-wired. " +
             "Assign your mesh and material, then add the resulting prefab as a child of your ship root prefab.",
             MessageType.Info);
 
@@ -82,19 +103,18 @@ public class CustomPartWizard : EditorWindow
                 "Name shown in the scanner HUD and salvage ledger. Creates OI_<PartName>.asset automatically. Leave blank to inherit from the template."),
             m_DisplayName);
 
-        if (!string.IsNullOrWhiteSpace(m_DisplayName) && string.IsNullOrWhiteSpace(m_AddressableGroup))
-            EditorGUILayout.HelpBox("Set an Addressable Group so the ObjectInfoAsset is included in the mod bundle.", MessageType.Warning);
-
-        m_SalvageableOverride = (SalvageableComponentAsset)EditorGUILayout.ObjectField(
-            new GUIContent("Salvageable Asset",
-                "Assigns a custom salvage value to this part. Creates SP_<PartName>.asset in the output folder and wires it into the part. Requires an Addressable Group."),
-            m_SalvageableOverride, typeof(SalvageableComponentAsset), false);
-
-        if (m_SalvageableOverride != null)
-            EditorGUILayout.HelpBox(
-                $"SP_{m_PartName}.asset will be created with only the Salvageable field set. " +
-                "Open it afterwards and assign IRigidbodyAsset (and other fields) to match the part material you want.",
-                MessageType.Warning);
+        EditorGUILayout.Space();
+        GUILayout.Label("Material Template", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Sets the SP material the game loads for this part, which determines density, salvage destination, cut level, and payout. " +
+            "Defaults to Nanocarbon (same as ShellConnector). " +
+            "Both Barge options route salvage to the Barge. " +
+            "'Reactor/Explosive' uses reactor SP_Mat (heavy, explodes when cut). " +
+            "'Nanocarbon/Safe' uses structural SP_Mat with the barge blueprint — lighter and non-explosive, but unconfirmed whether the game will honour the Barge destination. Test before shipping.",
+            MessageType.None);
+        m_MatTemplate = EditorGUILayout.Popup(
+            new GUIContent("SP Material", "Game StructurePart material to inherit."),
+            m_MatTemplate, MatTemplateLabels);
 
         EditorGUILayout.Space();
         GUILayout.Label("Addressables (Optional)", EditorStyles.boldLabel);
@@ -131,17 +151,18 @@ public class CustomPartWizard : EditorWindow
             return "Output Folder is required.";
         if (!AssetDatabase.IsValidFolder(m_OutputFolder.TrimEnd('/')))
             return $"Output folder does not exist: {m_OutputFolder}";
-        if (!File.Exists(Path.GetFullPath(ShellConnectorPath)))
-            return $"ShellConnector prefab not found at:\n{ShellConnectorPath}";
+        var templatePath = MatTemplatePaths[m_MatTemplate];
+        if (!File.Exists(Path.GetFullPath(templatePath)))
+            return $"Template prefab not found at:\n{templatePath}";
         if ((m_BaseColorMap != null || m_NormalMap != null || m_MaskMap != null) && m_Material == null)
             return "A material must be selected to assign textures.";
-        if (m_SalvageableOverride != null && string.IsNullOrWhiteSpace(m_AddressableGroup))
-            return "Addressable Group is required when specifying a Salvageable Asset.";
         return null;
     }
 
     void CreatePart()
     {
+        EditorPrefs.SetString(PrefOutputFolder, m_OutputFolder);
+
         var outFolder = m_OutputFolder.TrimEnd('/');
         var newPrefabPath = $"{outFolder}/{m_PartName}.prefab";
 
@@ -164,16 +185,11 @@ public class CustomPartWizard : EditorWindow
             }
         }
 
-        // Create assets that need to exist before the prefab scope opens
-        string spAddress = null;
-        if (m_SalvageableOverride != null)
-            spAddress = CreateStructurePartAsset(outFolder);
-
         ObjectInfoAsset oiAsset = null;
         if (!string.IsNullOrWhiteSpace(m_DisplayName))
             oiAsset = CreateObjectInfoAsset(outFolder);
 
-        AssetDatabase.CopyAsset(ShellConnectorPath, newPrefabPath);
+        AssetDatabase.CopyAsset(MatTemplatePaths[m_MatTemplate], newPrefabPath);
         AssetDatabase.SaveAssets();
 
         using (var scope = new PrefabUtility.EditPrefabContentsScope(newPrefabPath))
@@ -203,25 +219,8 @@ public class CustomPartWizard : EditorWindow
                     DestroyImmediate(opening.gameObject);
             }
 
-            // Assign ObjectInfoAsset to the StructurePart override slot
             if (oiAsset != null)
                 SetMonoBehaviourField(root, "m_ObjectInfoAssetOverride", oiAsset);
-
-            // Redirect AddressableSOLoader refs[0] to the new StructurePartAsset
-            if (spAddress != null)
-            {
-                var loader = root.GetComponent<AddressableSOLoader>();
-                if (loader != null)
-                {
-                    var loaderSO = new SerializedObject(loader);
-                    var refsProp = loaderSO.FindProperty("refs");
-                    if (refsProp != null && refsProp.arraySize > 0)
-                    {
-                        refsProp.GetArrayElementAtIndex(0).stringValue = spAddress;
-                        loaderSO.ApplyModifiedProperties();
-                    }
-                }
-            }
         }
 
         // Assign textures to the material asset
@@ -258,7 +257,6 @@ public class CustomPartWizard : EditorWindow
                     entry.address = m_PartName;
                     settings.SetDirty(AddressableAssetSettings.ModificationEvent.EntryMoved, entry, true);
 
-                    // Register ObjectInfoAsset in the same group so it's bundled with the prefab
                     if (oiAsset != null)
                     {
                         var oiPath = AssetDatabase.GetAssetPath(oiAsset);
@@ -284,8 +282,7 @@ public class CustomPartWizard : EditorWindow
             "Next steps:\n" +
             "1. Open the prefab and adjust the Transform (position/rotation)\n" +
             "2. Add it as a child of your ship root prefab\n" +
-            "3. Use Shipbuilder → Build (or Build and Run) to deploy and test in-game" +
-            (m_SalvageableOverride != null ? $"\n\nRemember: open SP_{m_PartName}.asset and assign IRigidbodyAsset (and other data fields) to match the part material." : ""),
+            "3. Use Shipbuilder → Build (or Build and Run) to deploy and test in-game",
             "OK");
     }
 
@@ -302,37 +299,6 @@ public class CustomPartWizard : EditorWindow
         AssetDatabase.SaveAssets();
 
         return oiAsset;
-    }
-
-    // Creates SP_<PartName>.asset in the output folder, sets the salvageable reference,
-    // and registers it in Addressables. Returns the Addressable address (= asset GUID).
-    string CreateStructurePartAsset(string outFolder)
-    {
-        var spPath = $"{outFolder}/SP_{m_PartName}.asset";
-        var spAsset = ScriptableObject.CreateInstance<StructurePartAsset>();
-        AssetDatabase.CreateAsset(spAsset, spPath);
-
-        var spSO = new SerializedObject(spAsset);
-        spSO.FindProperty("Data.m_SalvageableAsset").objectReferenceValue = m_SalvageableOverride;
-        spSO.ApplyModifiedProperties();
-        AssetDatabase.SaveAssets();
-
-        var spGuid = AssetDatabase.AssetPathToGUID(spPath);
-
-        var settings = AddressableAssetSettingsDefaultObject.Settings;
-        var group = settings?.FindGroup(m_AddressableGroup);
-        if (group != null)
-        {
-            var spEntry = settings.CreateOrMoveEntry(spGuid, group);
-            spEntry.address = spGuid;
-            settings.SetDirty(AddressableAssetSettings.ModificationEvent.EntryMoved, spEntry, true);
-        }
-        else
-        {
-            Debug.LogWarning($"[CustomPartWizard] Group '{m_AddressableGroup}' not found; SP_{m_PartName}.asset not registered in Addressables.");
-        }
-
-        return spGuid;
     }
 
     // Finds the first MonoBehaviour on root that has the named serialized field and sets it.

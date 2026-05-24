@@ -7,14 +7,14 @@ import math
 SCALE = 2.0   # uniform scale baked into geometry (Unity transform stays at 1,1,1)
 
 # Bell shape  (wide shallow dish, like the reference)
-THROAT_RADIUS  = 3.22  * SCALE
+THROAT_RADIUS  = 2.22  * SCALE
 EXIT_RADIUS    = 5.20  * SCALE
 NOZZLE_LENGTH  = 5.40  * SCALE
 BELL_POWER     = 0.42            # < 0.5 = deep concave dish profile
 
 # Collar (attaches to ship body)
-COLLAR_RADIUS  = 3.95  * SCALE
-COLLAR_LENGTH  = 0.08  * SCALE
+COLLAR_RADIUS  = 2.22  * SCALE
+COLLAR_LENGTH  = 0.45  * SCALE
 
 # Raised circumferential bands on bell exterior
 BAND_POSITIONS = [0.11, 0.22, 0.33, 0.55, 0.66, 0.88]
@@ -52,7 +52,7 @@ RINGS          = 72
 # Inner turbine structure — hub
 HUB_OUTER_R       = 0.58  * SCALE
 HUB_INNER_R       = 0.52  * SCALE
-HUB_LENGTH        = 6.10  * SCALE
+HUB_LENGTH        = 5.10  * SCALE
 HUB_RING_COUNT    = 10
 HUB_RING_HEIGHT   = 0.050 * SCALE
 HUB_RING_PROTRUDE = 0.042 * SCALE
@@ -61,15 +61,17 @@ HUB_RING_PROTRUDE = 0.042 * SCALE
 VANE_COUNT   = 16
 VANE_THICK   = 0.055 * SCALE
 VANE_HEIGHT  = HUB_LENGTH * 0.80
-VANE_OUTER_R = 2.25 * SCALE   # tip radius — set larger than COLLAR_INNER_R to stick out past collar
+VANE_OUTER_R = 2.35 * SCALE   # tip radius — set larger than COLLAR_INNER_R to stick out past collar
+VANE_SPIRAL  = 0.38           # angular offset in radians between vane top and bottom (positive = swept forward)
 
 # Inner turbine structure — outer collar
 COLLAR_INNER_R = 2.10 * SCALE
 COLLAR_WALL    = 0.10 * SCALE
 COLLAR_TAPER   = 0.82 * SCALE  # how much the collar narrows at the opening (exit) end
 
-EXPORT_OUTER = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell.fbx"
-EXPORT_INNER = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_nozzle.fbx"
+EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell.fbx"
+EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell_col.fbx"
+EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_nozzle.fbx"
 
 # Set to a source image path to generate PBR textures; leave blank to skip
 SOURCE_TEXTURE = "C:/Users/user/Pictures/Screenshots/An EpsteinDrive.png"
@@ -190,13 +192,28 @@ profile.append((-RIM_DEPTH, EXIT_RADIUS + RIM_WIDTH))
 profile.append((-RIM_DEPTH, EXIT_RADIUS))
 
 rings = [add_ring(bm, z, r) for z, r in profile]
-for i in range(len(rings) - 1):
+
+# ── Collar as a solid tube (outer + inner surface + top/bottom annular caps)
+# Built before snapshotting so these faces are excluded from reverse_faces.
+collar_top_outer = rings[0]   # top of collar at NOZZLE_LENGTH + COLLAR_LENGTH
+collar_bot_outer = rings[1]   # bottom of collar at NOZZLE_LENGTH
+collar_top_inner = add_ring(bm, NOZZLE_LENGTH + COLLAR_LENGTH, COLLAR_RADIUS - WALL_THICKNESS)
+collar_bot_inner = add_ring(bm, NOZZLE_LENGTH,                 COLLAR_RADIUS - WALL_THICKNESS)
+
+bridge(bm, collar_bot_outer, collar_top_outer)   # outer wall
+bridge(bm, collar_top_inner, collar_bot_inner)   # inner wall
+annular_cap(bm, collar_top_outer, collar_top_inner, flip=False)  # top annular cap
+annular_cap(bm, collar_bot_outer, collar_bot_inner, flip=True)   # bottom annular cap
+
+bridge(bm, rings[1], rings[2])  # collar-to-throat step (single surface, excluded from reverse)
+
+_after_collar = set(bm.faces)
+for i in range(2, len(rings) - 1):
     bridge(bm, rings[i], rings[i + 1])
 
 bell_exit_ring = rings[bell_exit_profile_idx]
-cap_fan(bm, rings[0], NOZZLE_LENGTH + COLLAR_LENGTH, flip=True)
 
-outer_bell_faces = list(bm.faces)
+outer_bell_faces = [f for f in bm.faces if f not in _after_collar]
 
 # ── Inner bell wall ───────────────────────────────────────────────────────────
 
@@ -362,6 +379,106 @@ print(f"EngineBell: {len(mesh_outer.vertices)} verts / {len(mesh_outer.polygons)
 print(f"Exported → {EXPORT_OUTER}")
 
 # ════════════════════════════════════════════════════════════════════════════
+# PART 1b — COLLISION WEDGE MESH
+# A single 45° arc wedge of the bell wall (outer + inner surface + end caps).
+# Eight copies rotated 0–315° in Unity approximate the full hollow bell.
+# Each wedge is individually convex, so the hull hugs the wall tightly and
+# leaves the throat open.
+# ════════════════════════════════════════════════════════════════════════════
+
+COL_RINGS = 16   # axial resolution of wedge bell curve
+COL_SEGS  = 6    # angular steps within the 45° arc
+WEDGE_ARC = math.pi / 4   # 45°
+
+# Match the main bell profile exactly: collar, throat step, bell curve with
+# bands, and exit rim — so the wedge collision shape tracks all parameters.
+col_pts = []
+col_pts.append((NOZZLE_LENGTH + COLLAR_LENGTH, COLLAR_RADIUS))
+col_pts.append((NOZZLE_LENGTH,                 COLLAR_RADIUS))
+col_pts.append((NOZZLE_LENGTH,                 THROAT_RADIUS))
+
+_col_inserted = set()
+_col_prev_t   = 0.0
+for i in range(1, COL_RINGS + 1):
+    t = i / COL_RINGS
+    for bp in BAND_POSITIONS:
+        if _col_prev_t < bp < t and bp not in _col_inserted:
+            bz, br = bell_at(bp)
+            h = BAND_HEIGHT / 2
+            col_pts.append((bz + h, br))
+            col_pts.append((bz + h, br + BAND_PROTRUDE))
+            col_pts.append((bz - h, br + BAND_PROTRUDE))
+            col_pts.append((bz - h, br))
+            _col_inserted.add(bp)
+    col_pts.append(bell_at(t))
+    _col_prev_t = t
+
+col_pts.append((0.0,        EXIT_RADIUS + RIM_WIDTH * 0.35))
+col_pts.append((0.0,        EXIT_RADIUS + RIM_WIDTH))
+col_pts.append((-RIM_DEPTH, EXIT_RADIUS + RIM_WIDTH))
+col_pts.append((-RIM_DEPTH, EXIT_RADIUS))
+
+bm_col = bmesh.new()
+
+# Build outer and inner rings for each profile point across the 45° arc
+def wedge_ring(bm, z, r_outer, r_inner, arc_start, arc_end, steps):
+    outer, inner = [], []
+    for s in range(steps + 1):
+        a = arc_start + (arc_end - arc_start) * s / steps
+        ca, sa = math.cos(a), math.sin(a)
+        outer.append(bm.verts.new((r_outer * ca, r_outer * sa, z)))
+        inner.append(bm.verts.new((r_inner * ca, r_inner * sa, z)))
+    return outer, inner
+
+arc_start = -WEDGE_ARC / 2
+arc_end   =  WEDGE_ARC / 2
+
+outer_rings, inner_rings = [], []
+for (z, r) in col_pts:
+    o, i = wedge_ring(bm_col, z, r, r - WALL_THICKNESS, arc_start, arc_end, COL_SEGS)
+    outer_rings.append(o)
+    inner_rings.append(i)
+
+# Outer surface
+for i in range(len(outer_rings) - 1):
+    ra, rb = outer_rings[i], outer_rings[i + 1]
+    for s in range(COL_SEGS):
+        bm_col.faces.new([ra[s], ra[s+1], rb[s+1], rb[s]])
+
+# Inner surface
+for i in range(len(inner_rings) - 1):
+    ra, rb = inner_rings[i], inner_rings[i + 1]
+    for s in range(COL_SEGS):
+        bm_col.faces.new([ra[s], rb[s], rb[s+1], ra[s+1]])
+
+# Side caps (the two flat 45° cut faces)
+for i in range(len(outer_rings) - 1):
+    o, io = outer_rings[i], inner_rings[i]
+    on, ion = outer_rings[i+1], inner_rings[i+1]
+    bm_col.faces.new([o[0],  io[0],  ion[0], on[0]])   # start edge
+    bm_col.faces.new([o[-1], on[-1], ion[-1], io[-1]])  # end edge
+
+
+bmesh.ops.recalc_face_normals(bm_col, faces=bm_col.faces[:])
+
+mesh_col = bpy.data.meshes.new("EngineBellMesh_Col")
+obj_col  = bpy.data.objects.new("EngineBell_Col", mesh_col)
+bpy.context.collection.objects.link(obj_col)
+bpy.context.view_layer.objects.active = obj_col
+obj_col.select_set(True)
+bm_col.to_mesh(mesh_col)
+bm_col.free()
+
+bpy.ops.object.select_all(action='DESELECT')
+obj_col.select_set(True)
+export_fbx(EXPORT_OUTER_COL)
+print(f"EngineBell_Col: {len(mesh_col.vertices)} verts / {len(mesh_col.polygons)} faces")
+print(f"Exported → {EXPORT_OUTER_COL}")
+
+bpy.data.objects.remove(obj_col, do_unlink=True)
+bpy.data.meshes.remove(mesh_col)
+
+# ════════════════════════════════════════════════════════════════════════════
 # PART 2 — INNER TURBINE STRUCTURE
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -396,35 +513,45 @@ annular_cap(bm, hub_outer_rings[0],  hub_inner_bot, flip=True)   # bottom (-Z)
 # ── Radial vanes ──────────────────────────────────────────────────────────────
 
 for k in range(VANE_COUNT):
-    a      = 2 * math.pi * k / VANE_COUNT
-    ca, sa = math.cos(a), math.sin(a)
-    px, py = -sa, ca
+    a_top = 2 * math.pi * k / VANE_COUNT
+    a_bot = a_top + VANE_SPIRAL
 
-    def pt(r, side, z):
+    ca_t, sa_t = math.cos(a_top), math.sin(a_top)
+    ca_b, sa_b = math.cos(a_bot), math.sin(a_bot)
+    px_t, py_t = -sa_t, ca_t  # tangent at top
+    px_b, py_b = -sa_b, ca_b  # tangent at bottom
+
+    def pt_top(r, side):
         sign = 1.0 if side == 'A' else -1.0
-        return (r * ca + sign * px * VANE_THICK * 0.5,
-                r * sa + sign * py * VANE_THICK * 0.5,
-                z)
+        return (r * ca_t + sign * px_t * VANE_THICK * 0.5,
+                r * sa_t + sign * py_t * VANE_THICK * 0.5,
+                VANE_TOP_Z)
+
+    def pt_bot(r, side):
+        sign = 1.0 if side == 'A' else -1.0
+        return (r * ca_b + sign * px_b * VANE_THICK * 0.5,
+                r * sa_b + sign * py_b * VANE_THICK * 0.5,
+                VANE_BOT_Z)
 
     vane_tip_bot = VANE_OUTER_R - COLLAR_TAPER
 
     v = [
-        bm.verts.new(pt(HUB_OUTER_R,   'A', VANE_BOT_Z)),  # 0 bot hub  A
-        bm.verts.new(pt(HUB_OUTER_R,   'B', VANE_BOT_Z)),  # 1 bot hub  B
-        bm.verts.new(pt(vane_tip_bot,   'B', VANE_BOT_Z)),  # 2 bot tip  B (tapered)
-        bm.verts.new(pt(vane_tip_bot,   'A', VANE_BOT_Z)),  # 3 bot tip  A (tapered)
-        bm.verts.new(pt(HUB_OUTER_R,   'A', VANE_TOP_Z)),  # 4 top hub  A
-        bm.verts.new(pt(HUB_OUTER_R,   'B', VANE_TOP_Z)),  # 5 top hub  B
-        bm.verts.new(pt(VANE_OUTER_R,   'B', VANE_TOP_Z)),  # 6 top tip  B
-        bm.verts.new(pt(VANE_OUTER_R,   'A', VANE_TOP_Z)),  # 7 top tip  A
+        bm.verts.new(pt_bot(HUB_OUTER_R,  'A')),  # 0 bot hub  A
+        bm.verts.new(pt_bot(HUB_OUTER_R,  'B')),  # 1 bot hub  B
+        bm.verts.new(pt_bot(vane_tip_bot,  'B')),  # 2 bot tip  B
+        bm.verts.new(pt_bot(vane_tip_bot,  'A')),  # 3 bot tip  A
+        bm.verts.new(pt_top(HUB_OUTER_R,  'A')),  # 4 top hub  A
+        bm.verts.new(pt_top(HUB_OUTER_R,  'B')),  # 5 top hub  B
+        bm.verts.new(pt_top(VANE_OUTER_R,  'B')),  # 6 top tip  B
+        bm.verts.new(pt_top(VANE_OUTER_R,  'A')),  # 7 top tip  A
     ]
 
-    bm.faces.new([v[4], v[7], v[3], v[0]])  # side A  (+perp) — winding fixed
-    bm.faces.new([v[1], v[2], v[6], v[5]])  # side B  (-perp)
-    bm.faces.new([v[5], v[6], v[7], v[4]])  # top cap (+Z)
-    bm.faces.new([v[0], v[3], v[2], v[1]])  # bot cap (-Z)
-    bm.faces.new([v[0], v[1], v[5], v[4]])  # hub end (-radial)
-    bm.faces.new([v[3], v[7], v[6], v[2]])  # col end (+radial)
+    bm.faces.new([v[4], v[7], v[3], v[0]])  # side A
+    bm.faces.new([v[1], v[2], v[6], v[5]])  # side B
+    bm.faces.new([v[5], v[6], v[7], v[4]])  # top cap
+    bm.faces.new([v[0], v[3], v[2], v[1]])  # bot cap
+    bm.faces.new([v[0], v[1], v[5], v[4]])  # hub end
+    bm.faces.new([v[3], v[7], v[6], v[2]])  # col end
 
 # ── Outer structural collar ───────────────────────────────────────────────────
 
@@ -434,7 +561,10 @@ collar_inner_bot = add_ring(bm, VANE_BOT_Z, COLLAR_INNER_R - COLLAR_TAPER)
 collar_inner_top = add_ring(bm, VANE_TOP_Z, COLLAR_INNER_R)
 
 bridge(bm, collar_outer_bot, collar_outer_top)
-bridge(bm, collar_inner_top, collar_inner_bot)
+_before_inner_collar = set(bm.faces)
+bridge(bm, collar_inner_bot, collar_inner_top)
+_inner_collar_faces = [f for f in bm.faces if f not in _before_inner_collar]
+bmesh.ops.reverse_faces(bm, faces=_inner_collar_faces)
 annular_cap(bm, collar_outer_top, collar_inner_top, flip=False)
 annular_cap(bm, collar_outer_bot, collar_inner_bot, flip=True)
 
