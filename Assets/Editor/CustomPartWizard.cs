@@ -12,24 +12,30 @@ public class CustomPartWizard : EditorWindow
     // Labels must not contain '/' (Unity treats it as a submenu separator).
     // Format: Material  density  SP_Mat origin  Destination
     static readonly string[] MatTemplateLabels = {
+        // Processor
         "Nanocarbon  50 kg|m3  Panel Ext  Processor",
-        "Steel  200 kg|m3  Chassis Int  Furnace",
-        "Glass  50 kg|m3  Glass Panel  Furnace",
+        // Furnace
         "Aluminum  50 kg|m3  Chassis Aluminum  Furnace",
-        "Reactor Core  200 kg|m3  Reactor  Barge",
+        "Glass  50 kg|m3  Glass Panel  Furnace",
+        "Steel  200 kg|m3  Chassis Int  Furnace",
+        // Barge
         "Nanocarbon  50 kg|m3  Panel Ext  Barge",
         "Steel  200 kg|m3  Chassis Int  Barge",
+        "Reactor Core  200 kg|m3  Reactor  Barge",
         "Thruster Nozzle  50 kg|m3  Class X  Barge",
         "Quasar Thruster  50 kg|m3  Class X Engine  Barge",
     };
     static readonly string[] MatTemplatePaths = {
+        // Processor
         "Assets/_CustomShips/FirstShip/Components/Shell/ShellConnector.prefab",
-        "Assets/_CustomShips/_Common/Templates/ChassisConnector.prefab",
-        "Assets/_CustomShips/_Common/Templates/GlassConnector.prefab",
+        // Furnace
         "Assets/_CustomShips/_Common/Templates/AluminumConnector.prefab",
-        "Assets/_CustomShips/_Common/Templates/BargeConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/GlassConnector.prefab",
+        "Assets/_CustomShips/_Common/Templates/ChassisConnector.prefab",
+        // Barge
         "Assets/_CustomShips/_Common/Templates/BargeConnectorLight.prefab",
         "Assets/_CustomShips/_Common/Templates/BargeConnectorSteel.prefab",
+        "Assets/_CustomShips/_Common/Templates/BargeConnector.prefab",
         "Assets/_CustomShips/_Common/Templates/ThrusterConnectorX.prefab",
         "Assets/_CustomShips/_Common/Templates/QuasarThrusterConnector.prefab",
     };
