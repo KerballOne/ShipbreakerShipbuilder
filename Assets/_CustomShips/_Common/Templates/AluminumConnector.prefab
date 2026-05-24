@@ -16,7 +16,7 @@ GameObject:
   - component: {fileID: 1000000000000000007}
   - component: {fileID: 1000000000000000008}
   m_Layer: 0
-  m_Name: Engine Nozzle
+  m_Name: AluminumConnector
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -43,7 +43,7 @@ MeshFilter:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1000000000000000001}
-  m_Mesh: {fileID: -3606078340013354037, guid: 018afcef3728b54449f19daa7212f9de, type: 3}
+  m_Mesh: {fileID: 0}
 --- !u!23 &1000000000000000004
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -62,8 +62,7 @@ MeshRenderer:
   m_RayTraceProcedural: 0
   m_RenderingLayerMask: 257
   m_RendererPriority: 0
-  m_Materials:
-  - {fileID: 2100000, guid: f37f44928b40cc342824024468e3d70b, type: 2}
+  m_Materials: []
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -98,7 +97,7 @@ MeshCollider:
   serializedVersion: 4
   m_Convex: 1
   m_CookingOptions: 30
-  m_Mesh: {fileID: -3606078340013354037, guid: 018afcef3728b54449f19daa7212f9de, type: 3}
+  m_Mesh: {fileID: 0}
 --- !u!114 &1000000000000000006
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -109,14 +108,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: -1189116286, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   m_StructurePartAsset: {fileID: 0}
   m_BreakableJointFXOffset: {fileID: 0}
   mVirtualRigidbody:
     mPrevParent: {fileID: 0}
   m_MaintainParent: 0
-  m_ObjectInfoAssetOverride: {fileID: 11400000, guid: bff7654413362f649b635beb6484aa2d, type: 2}
+  m_ObjectInfoAssetOverride: {fileID: 0}
 --- !u!114 &1000000000000000007
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -127,8 +126,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: -805965120, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   m_AutoInitialize: 1
   m_BlueprintAsset: {fileID: 0}
   mLastKnownEntityIndex: 0
@@ -144,8 +143,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 65951d5478ae5c04a89e8937f96f23b7, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   onChild: []
   comp:
   - BBI.Unity.Game.StructurePart
@@ -154,5 +153,5 @@ MonoBehaviour:
   - m_StructurePartAsset
   - m_BlueprintAsset
   refs:
-  - 645afb95379f0734d84692c71a811d17
-  - 10334f5f29e4d554ea18c1c8b9071bdc
+  - eccb3d5252825ba4fa246210330e872d
+  - 0298f8cb1a0e06942b40e606b523b400
