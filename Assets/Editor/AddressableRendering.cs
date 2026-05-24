@@ -66,7 +66,7 @@ public class AddressableRendering : MonoBehaviour
                     {
                         hardPoints.Add(hardpoint);
 
-                        if (string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID($"Assets/EditorCache/{hardpoint.AssetRef.AssetGUID}.prefab")))
+                        if (hardpoint.AssetRef != null && string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID($"Assets/EditorCache/{hardpoint.AssetRef.AssetGUID}.prefab")))
                         {
                             needToRefreshCache = true;
                         }
@@ -115,6 +115,7 @@ public class AddressableRendering : MonoBehaviour
 
     async static System.Threading.Tasks.Task<string> LoadHardpoint(HardPoint hardPoint)
     {
+        if (hardPoint.AssetRef == null) return string.Empty;
         if (!string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(hardPoint.AssetRef.AssetGUID)))
         {
             var moduleEntry = AssetDatabase.LoadAssetAtPath<ModuleListAsset>(AssetDatabase.GUIDToAssetPath(hardPoint.AssetRef.AssetGUID)).Data.ModuleEntryContainer.Data.FirstOrDefault();
@@ -203,7 +204,7 @@ public class AddressableRendering : MonoBehaviour
             var res = Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(addressRef));
             await res.Task;
 
-            if (res.IsValid())
+            if (res.Status == UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationStatus.Succeeded && res.Result != null)
             {
                 GameObject result;
 
@@ -256,7 +257,7 @@ public class AddressableRendering : MonoBehaviour
                 return res.Result;
             }
         }
-        else
+        else if (parent != null && !EditorUtility.IsPersistent(parent.gameObject))
         {
             var temp = Instantiate(prefab, parent);
             temp.name = addressRef;

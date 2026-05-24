@@ -35,6 +35,11 @@ public class LogHandler : ILogHandler
     {
         if(message.Contains("Could not Move to directory Library/com.unity.addressables/aa/Windows, directory arlready exists.")) return false;
         if(message.Contains("Unable to resolve type `Unity.Entities.TransformStash. Reason: Unknown.`")) return false;
+        if(message.Contains("Broken text PPtr. GUID 00000000000000000000000000000000")) return false;
+        if(message.Contains("ThemesSettings.get_Database")) return false;
+        if(message.Contains("Could not extract GUID in text file")) return false;
+        if(message.Contains("Unable to load dependent bundle from location")) return false;
+        if(message.Contains("Incorrect file extension") && message.Contains(".fbx")) return false;
 
         return true;
     }
