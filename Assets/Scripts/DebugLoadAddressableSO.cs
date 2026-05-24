@@ -31,7 +31,7 @@ public class DebugLoadAddressableSO : MonoBehaviour
                     FieldInfo fi = comp.GetType().GetField(addressable.field[i], BindingFlags.NonPublic | BindingFlags.Instance);
                     fieldToIndex[fi] = comp;
 
-                    Addressables.LoadAssetAsync<ScriptableObject>(new AssetReferenceScriptableObject(addressable.refs[i])).Completed += res => {
+                    Addressables.LoadAssetAsync<ScriptableObject>(new AssetReference(addressable.refs[i])).Completed += res => {
                         if (res.IsValid())
                         {
                             fi.SetValue(fieldToIndex[fi], res.Result);

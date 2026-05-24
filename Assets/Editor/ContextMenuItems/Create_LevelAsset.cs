@@ -7,6 +7,7 @@ using BBI.Unity.Game;
 using UnityEngine.AddressableAssets;
 using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Settings;
+using UnityEditor.AddressableAssets.Settings.GroupSchemas;
 
 public class Create_LevelAssets : EditorWindow
 {
@@ -149,26 +150,38 @@ public class Create_LevelAssets : EditorWindow
         AssetDatabase.CreateAsset(levelAsset, GetPathForAsset("LevelAsset", folderPath));
         var levelAssetGuid = AssetDatabase.GUIDFromAssetPath(GetPathForAsset("LevelAsset", folderPath)).ToString();
 
-        // Addressables
+        // Addressables - create a dedicated group for this ship
         var addressableSettings = AddressableAssetSettingsDefaultObject.Settings;
         var entriesAdded = new List<AddressableAssetEntry>();
 
-        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(prefabGuid, addressableSettings.DefaultGroup));
-        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(prefabHardpointGuid, addressableSettings.DefaultGroup));
-        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(rootPrefabGuid, addressableSettings.DefaultGroup));
+        var shipGroup = addressableSettings.CreateGroup(levelName, false, false, false, null);
+        var bundledSchema = shipGroup.AddSchema<BundledAssetGroupSchema>();
+        bundledSchema.BuildPath.SetVariableByName(addressableSettings, "LocalBuildPath");
+        bundledSchema.LoadPath.SetVariableByName(addressableSettings, "LocalLoadPath");
+        bundledSchema.BundleMode = BundledAssetGroupSchema.BundlePackingMode.PackTogether;
+        bundledSchema.Compression = BundledAssetGroupSchema.BundleCompressionMode.LZ4;
+        bundledSchema.IncludeInBuild = true;
+        bundledSchema.UseAssetBundleCache = true;
+        bundledSchema.UseAssetBundleCrc = true;
+        bundledSchema.InternalBundleIdMode = BundledAssetGroupSchema.BundleInternalIdMode.GroupGuid;
+        bundledSchema.AssetLoadMode = UnityEngine.ResourceManagement.ResourceProviders.AssetLoadMode.AllPackedAssetsAndDependencies;
 
-        var levelAssetEntry = addressableSettings.CreateOrMoveEntry(levelAssetGuid, addressableSettings.DefaultGroup);
+        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(prefabGuid, shipGroup));
+        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(prefabHardpointGuid, shipGroup));
+        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(rootPrefabGuid, shipGroup));
+
+        var levelAssetEntry = addressableSettings.CreateOrMoveEntry(levelAssetGuid, shipGroup);
         levelAssetEntry.labels.Add("GameMode_Free");
         levelAssetEntry.labels.Add("Release");
         entriesAdded.Add(levelAssetEntry);
 
-        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(thumbnailGuid, addressableSettings.DefaultGroup));
+        entriesAdded.Add(addressableSettings.CreateOrMoveEntry(thumbnailGuid, shipGroup));
 
-        var moduleConstructionAssetEntry = addressableSettings.CreateOrMoveEntry(moduleConstructionAssetGuid, addressableSettings.DefaultGroup);
+        var moduleConstructionAssetEntry = addressableSettings.CreateOrMoveEntry(moduleConstructionAssetGuid, shipGroup);
         moduleConstructionAssetEntry.labels.Add("ModdedLevel");
         entriesAdded.Add(moduleConstructionAssetEntry);
 
-        addressableSettings.DefaultGroup.SetDirty(AddressableAssetSettings.ModificationEvent.EntryMoved, entriesAdded, false, true);
+        shipGroup.SetDirty(AddressableAssetSettings.ModificationEvent.EntryMoved, entriesAdded, false, true);
         addressableSettings.SetDirty(AddressableAssetSettings.ModificationEvent.EntryMoved, entriesAdded, true, false);
 
         AssetDatabase.SaveAssets();

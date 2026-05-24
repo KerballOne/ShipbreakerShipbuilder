@@ -44,7 +44,7 @@ It will be a much better source of information moving forward
 * Congratulations, you've created your first ship!
 
 ## First ship from scratch
-* Open "Scenes/SampleScene"
+* Open "Scenes/SampleScene" (important: the "Bay" object used for positioning is only in this scene)
 * Create a new folder in "_CustomShips", call it "ScratchShip"
 * Add an image to use as the thumbnail to the "ScratchShip" folder
 * Right click an empty space inside your "ScratchShip" folder, click `Create/Shipbreaker/Create custom level` (The shipbreaker menu is at the bottom of the create menu)
@@ -53,17 +53,20 @@ It will be a much better source of information moving forward
 * The new prefab named "ScratchShip" is now selected in the project window. Drag it into the scene hierarchy
 * Create an empty child, name it "Floor", give it a rotation of 0/-90/0
 * To "Floor", add an `Addressable Loader` component, and set it's GUID to "15e523455b134fe40b33c5d6a4346fe8"
-* Save, build and run
+* Save your scene
+* Follow the "Positioning a ship in the bay" steps below to set the spawn location before building - the default position will place the ship off to the side
+* Build and run - note the first build after any clean will take longer as it rebuilds everything from scratch
 
 ## Positioning a ship in the bay
-* With your prefab in the bay, at position 0/0/0
+* Make sure you are in "Scenes/SampleScene" - the Bay object is only present there
+* With your prefab in the scene, at position 0/0/0
 * Click the "Bay" object in the hierarchy, click the checkbox next to "Reload"
 * Close or import TMPPro assets. It doesn't matter either way.
 * Move your prefab to where you want it to sit in the bay
 * Right click your prefab's transform component, click `Copy World Placement` (at the bottom)
 * Double click to open your prefab's RootRef prefab (Inside the Spawn folder), click the Hardpoint, right click the transform component and `Paste World Placement`
 * Close the RootRef prefab editor
-* Reset your prefabs position
+* Reset your prefab's position to 0/0/0 (the floor will appear to shift - this is expected, the spawn position is stored in the RootRef Hardpoint, not the prefab root)
 
 ## Custom ship notes
 * The game doesn't work with negative scales (Scaling is weird, tends to break things in general)
@@ -111,10 +114,11 @@ Read it to get a better understanding of how the systems fit together (especiall
 Find me on the [Shipbreaker discord - #modding-discussion](https://discord.gg/shipbreakergame)
 
 ## Expected Unity Exceptions
-There are a bunch of exceptions that I haven't managed to clean up yet, but will not impact the process, as follows:
-* "Broken text PPtr. GUID 000...": Appears when something is referring directly to in-game content that needs to be properly referenced or cloned.
-* "Could not extract GUID in text file": As above
+There are a bunch of exceptions that will not impact the process, as follows. Those marked **[suppressed]** are filtered by the project's LogHandler and will not appear in the console.
+* "Broken text PPtr. GUID 000..." **[suppressed]**: Appears when something is referring directly to in-game content that needs to be properly referenced or cloned.
+* "Could not extract GUID in text file" **[suppressed]**: As above
 * "Burst error BC1054: Unable to resolve type": Unknown, harmless
 * "System.Reflection.ReflectionTypeLoadException" followed by "System.NullReferenceException": Unknown, harmless
-* "Could not Move to directory Library/com.unity.addressables/aa/Windows, directory arlready exists.": Unknown, harmless
+* "Could not Move to directory Library/com.unity.addressables/aa/Windows, directory arlready exists." **[suppressed]**: Unknown, harmless
 * "Cannot instantiate objects with a parent which is persistent. New object will be created without a parent.": Due to the way I am caching game assets, harmless
+* "ThemesSettings.get_Database / ThemeManager" NullReferenceException **[suppressed]**: Triggered by Doozy UI components on game assets loaded into the editor, harmless

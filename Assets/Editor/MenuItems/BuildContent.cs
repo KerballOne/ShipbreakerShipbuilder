@@ -38,7 +38,15 @@ public class BuildContent
 
         AddressableAssetSettingsDefaultObject.Settings.activeProfileId = AddressableAssetSettingsDefaultObject.Settings.profileSettings.GetProfileId("Default");
 
+        // Clear stale bundles so the CRC in the catalog always matches the deployed file
+        var builtShipContentPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BuiltShipContent"));
+        if (Directory.Exists(builtShipContentPath))
+        {
+            Directory.Delete(builtShipContentPath, true);
+        }
+
         Debug.Log("Starting to build player content...");
+        AddressableAssetSettings.CleanPlayerContent(AddressableAssetSettingsDefaultObject.Settings.ActivePlayerDataBuilder);
         AddressableAssetSettings.BuildPlayerContent(out AddressablesPlayerBuildResult result);
         bool success = string.IsNullOrEmpty(result.Error);
 
@@ -49,16 +57,36 @@ public class BuildContent
             
             var manifest = GenerateManifest();
 
-            // Move the default bundle, if it exists
-            var builtShipContentPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BuiltShipContent"));
-            var defaultCatalogBundle = Directory.GetFiles(builtShipContentPath, "*.bundle", SearchOption.TopDirectoryOnly).FirstOrDefault();
-            if(defaultCatalogBundle != null)
+            // Move root-level bundles (Unity Addressables flat output: each group builds to root as {name}_assets_all_{hash}.bundle)
+            var mainCatalogPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "com.unity.addressables", "aa", "Windows", "catalog.json"));
+            var rootBundles = Directory.GetFiles(builtShipContentPath, "*_assets_all_*.bundle", SearchOption.TopDirectoryOnly);
+
+            // Determine which ship names this build will produce, then delete stale deploy folders for this author
+            var modPath = Path.Combine("BepInEx", "plugins", "ModdedShipLoader", "Ships");
+            var shipsBaseDir = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath);
+            var builtShipNames = new HashSet<string>(rootBundles.Select(b => {
+                var name = Path.GetFileNameWithoutExtension(b).Split(new string[] { "_assets_all_" }, StringSplitOptions.None)[0];
+                return (char.ToUpper(name[0]) + name.Substring(1)) + "." + Settings.buildSettings.Author;
+            }), StringComparer.OrdinalIgnoreCase);
+            foreach (var staleDir in Directory.GetDirectories(shipsBaseDir, "*." + Settings.buildSettings.Author))
             {
-                MoveShipBundle("Common", Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "com.unity.addressables", "aa", "Windows", "catalog.json")), defaultCatalogBundle, manifest);
+                if (!builtShipNames.Contains(Path.GetFileName(staleDir)))
+                {
+                    Debug.Log($"Removing stale ship folder: {staleDir}");
+                    Directory.Delete(staleDir, true);
+                }
             }
-            else
+            if (rootBundles.Length == 0)
             {
-                Debug.LogWarning("Default catalog bundle not found in " + builtShipContentPath);
+                Debug.LogWarning("No ship bundles found in " + builtShipContentPath);
+            }
+            foreach (var rootBundle in rootBundles)
+            {
+                var bundleFileName = Path.GetFileNameWithoutExtension(rootBundle);
+                var shipNameRaw = bundleFileName.Split(new string[] { "_assets_all_" }, StringSplitOptions.None)[0];
+                var shipName = char.ToUpper(shipNameRaw[0]) + shipNameRaw.Substring(1);
+                Debug.Log($"Processing root bundle for ship: {shipName} ({rootBundle})");
+                MoveShipBundle(shipName, mainCatalogPath, rootBundle, manifest);
             }
 
             // Move each custom bundle
@@ -120,12 +148,12 @@ public class BuildContent
             Directory.CreateDirectory(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath));
         }
 
-        string targetPath = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, bundlePath.Split('\\').Last());
+        string targetPath = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, shipName + "_assets_all.bundle");
         string pathToGameFolder = Settings.buildSettings.ShipbreakerPath;
-        
+
         if(SystemInfo.operatingSystem.ToLower().Contains("linux"))
         {
-            targetPath = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, bundlePath.Split('/').Last());
+            targetPath = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, shipName + "_assets_all.bundle");
             pathToGameFolder = Settings.buildSettings.WindowsShipbreakerPathOnLinux;
         }
         
