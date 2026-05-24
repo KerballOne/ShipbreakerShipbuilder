@@ -22,7 +22,7 @@ BAND_HEIGHT    = 0.10  * SCALE
 BAND_PROTRUDE  = 0.05  * SCALE
 
 # Bell wall thickness
-WALL_THICKNESS = 0.34  * SCALE
+WALL_THICKNESS = 0.20  * SCALE
 
 # Exit rim (U-channel flange)
 RIM_WIDTH      = 0.20  * SCALE
@@ -40,19 +40,19 @@ RIM_STRUT_DEPTH    = 0.03  * SCALE  # radial depth of strut
 # Flare panels hanging from the inner nozzle collar bottom
 FLARE_COUNT      = 24             # number of panels around the collar
 FLARE_BASE_WIDTH = 0.14  * SCALE  # tangential half-width at base (collar end)
-FLARE_TIP_WIDTH  = 0.07  * SCALE  # tangential half-width at tip
+FLARE_TIP_WIDTH  = 0.04  * SCALE  # tangential half-width at tip
 FLARE_HEIGHT     = 0.50  * SCALE  # axial+radial extent downward from collar
 FLARE_THICKNESS  = 0.03  * SCALE  # panel thickness
 FLARE_TILT       = -0.10           # inward tilt in radians (~17°) — tip angles toward axis
 
 # Resolution
-SEGMENTS       = 128
-RINGS          = 72
+SEGMENTS       = 32
+RINGS          = 24
 
 # Inner turbine structure — hub
 HUB_OUTER_R       = 0.58  * SCALE
-HUB_INNER_R       = 0.52  * SCALE
-HUB_LENGTH        = 5.10  * SCALE
+HUB_INNER_R       = 0.42  * SCALE
+HUB_LENGTH        = 6.10  * SCALE
 HUB_RING_COUNT    = 10
 HUB_RING_HEIGHT   = 0.050 * SCALE
 HUB_RING_PROTRUDE = 0.042 * SCALE
@@ -61,13 +61,13 @@ HUB_RING_PROTRUDE = 0.042 * SCALE
 VANE_COUNT   = 16
 VANE_THICK   = 0.055 * SCALE
 VANE_HEIGHT  = HUB_LENGTH * 0.80
-VANE_OUTER_R = 2.35 * SCALE   # tip radius — set larger than COLLAR_INNER_R to stick out past collar
+VANE_OUTER_R = 1.95 * SCALE   # tip radius — set larger than COLLAR_INNER_R to stick out past collar
 VANE_SPIRAL  = 0.38           # angular offset in radians between vane top and bottom (positive = swept forward)
 
 # Inner turbine structure — outer collar
-COLLAR_INNER_R = 2.10 * SCALE
+COLLAR_INNER_R = 1.70 * SCALE
 COLLAR_WALL    = 0.10 * SCALE
-COLLAR_TAPER   = 0.82 * SCALE  # how much the collar narrows at the opening (exit) end
+COLLAR_TAPER   = 0.65 * SCALE  # how much the collar narrows at the opening (exit) end
 
 EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell.fbx"
 EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell_col.fbx"
