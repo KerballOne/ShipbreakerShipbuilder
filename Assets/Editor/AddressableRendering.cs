@@ -201,7 +201,16 @@ public class AddressableRendering : MonoBehaviour
 
         if (!prefab)
         {
-            var res = Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(addressRef));
+            var locations = Addressables.LoadResourceLocationsAsync(addressRef, typeof(GameObject));
+            await locations.Task;
+
+            if (locations.Status != UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationStatus.Succeeded || locations.Result == null || locations.Result.Count == 0)
+            {
+                Debug.LogError($"[AddressableRendering] No GameObject location for {addressRef}");
+                return null;
+            }
+
+            var res = Addressables.LoadAssetAsync<GameObject>(locations.Result[0]);
             await res.Task;
 
             if (res.Status == UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationStatus.Succeeded && res.Result != null)
@@ -255,6 +264,11 @@ public class AddressableRendering : MonoBehaviour
                 }
 
                 return res.Result;
+            }
+            else
+            {
+                Debug.LogError($"[AddressableRendering] Failed to load {addressRef}: status={res.Status} exception={res.OperationException?.Message}");
+                return null;
             }
         }
         else if (parent != null && !EditorUtility.IsPersistent(parent.gameObject))
