@@ -31,9 +31,6 @@ public class SelectAddressableParent : MonoBehaviour
             UnityEditor.Selection.objects = new Object[] { parent };
     }
 
-    void OnDrawGizmosSelected()
-    {
-        SelectParent();
-    }
+
 #endif
 }

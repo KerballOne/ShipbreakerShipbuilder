@@ -124,7 +124,7 @@ public class AddressableRendering : MonoBehaviour
         if (!string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(hardPoint.AssetRef.AssetGUID)))
         {
             var moduleEntry = AssetDatabase.LoadAssetAtPath<ModuleListAsset>(AssetDatabase.GUIDToAssetPath(hardPoint.AssetRef.AssetGUID)).Data.ModuleEntryContainer.Data.FirstOrDefault();
-            // if (moduleEntry == null) return;
+            if (moduleEntry == null) return "";
             if (moduleEntry.GetType() == typeof(ModuleEntryDefinition))
             {
                 prefabToHardpoint[((ModuleEntryDefinition)moduleEntry).ModuleDefRef.AssetGUID] = hardPoint.AssetRef.AssetGUID;
@@ -170,7 +170,7 @@ public class AddressableRendering : MonoBehaviour
         if (res.IsValid())
         {
             var moduleEntry = res.Result.Data.ModuleEntryContainer.Data.FirstOrDefault();
-            // if (moduleEntry == null) return;
+            if (moduleEntry == null) return "";
             if (moduleEntry.GetType() == typeof(ModuleEntryDefinition))
             {
                 return ((ModuleEntryDefinition)moduleEntry).ModuleDefRef.AssetGUID;
@@ -280,8 +280,8 @@ public class AddressableRendering : MonoBehaviour
         else if (parent != null && !EditorUtility.IsPersistent(parent.gameObject))
         {
             var temp = Instantiate(prefab, parent);
-            temp.name = addressRef;
-            temp.hideFlags = HideFlags.DontSave | HideFlags.HideInHierarchy;
+            temp.name = !string.IsNullOrEmpty(assetPath) ? assetPath : addressRef;
+            temp.hideFlags = HideFlags.DontSave;
 
             if (treatAsHardpointPosition)
                 temp.transform.GetChild(0).localPosition = Vector3.zero;
@@ -320,14 +320,13 @@ public class AddressableRendering : MonoBehaviour
             temp.AddComponent<FakePrefabDisplay>();
             fakes.Add(temp);
 
-            if(isHardpoint)
+            if (isHardpoint)
             {
                 foreach (var hardpoint in temp.GetComponentsInChildren<FakeHardpoint>())
                 {
-                    if(currentRecursiveDepth++ < GameRenderWindow.maxLoopDepth)
-                    {
-                        var hardpointPrefab = await LoadAddress(hardpoint.AssetGUID, hardpoint.transform, true);
-                    }
+                    if (hardpoint == null) continue;
+                    if (currentRecursiveDepth++ < GameRenderWindow.maxLoopDepth)
+                        await LoadAddress(hardpoint.AssetGUID, hardpoint.transform, true);
                     currentRecursiveDepth--;
                 }
             }
@@ -344,12 +343,18 @@ public class AddressableRendering : MonoBehaviour
 
         if (!prefab)
         {
-            prefab = new GameObject(address);
+            // Use a temporary wrapper so CloneMeshTree's root node becomes the prefab root
+            var tempWrapper = new GameObject("_temp");
+            await CloneMeshTree(address, obj.transform, tempWrapper.transform, cachePath);
 
-            await CloneMeshTree(address, obj.transform, prefab.transform, cachePath);
-
-            PrefabUtility.SaveAsPrefabAsset(prefab, $"Assets/EditorCache/{cachePath}.prefab");
-            DestroyImmediate(prefab);
+            if (tempWrapper.transform.childCount > 0)
+            {
+                var prefabRoot = tempWrapper.transform.GetChild(0).gameObject;
+                prefabRoot.transform.SetParent(null);
+                PrefabUtility.SaveAsPrefabAsset(prefabRoot, $"Assets/EditorCache/{cachePath}.prefab");
+                DestroyImmediate(prefabRoot);
+            }
+            DestroyImmediate(tempWrapper);
             prefab = AssetDatabase.LoadAssetAtPath<GameObject>($"Assets/EditorCache/{cachePath}.prefab");
         }
 
@@ -367,13 +372,14 @@ public class AddressableRendering : MonoBehaviour
 
         foreach (var hardpoint in prefab.GetComponentsInChildren<FakeHardpoint>())
         {
+            if (hardpoint == null) continue;
             await LoadAddress(hardpoint.AssetGUID, hardpoint.transform, isHardpoint);
         }
     }
 
     private async static System.Threading.Tasks.Task CloneMeshTree(string address, Transform inTransform, Transform outParent, string cachePath)
     {
-        var newPrefabChild = new GameObject($"{inTransform.name}_{address}");
+        var newPrefabChild = new GameObject(inTransform.name);
         newPrefabChild.transform.parent = outParent;
         newPrefabChild.transform.localPosition = inTransform.localPosition;
         newPrefabChild.transform.localRotation = inTransform.localRotation;
