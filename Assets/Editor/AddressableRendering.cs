@@ -86,14 +86,19 @@ public class AddressableRendering : MonoBehaviour
                     {
                         foreach (var addressable in addressablesToLoad)
                         {
-                            await LoadAddress(addressable.assetGUID ?? addressable.refs[0], addressable.transform, false, addressable.childPath, addressable.disabledChildren);
+                            try { await LoadAddress(addressable.assetGUID ?? addressable.refs[0], addressable.transform, false, addressable.childPath, addressable.disabledChildren); }
+                            catch (System.Exception ex) { Debug.LogError($"[AddressableRendering] Skipped {addressable.assetGUID}: {ex.Message}"); }
                         }
 
                         foreach (var hardpoint in hardPoints)
                         {
-                            var assetGUID = await LoadHardpoint(hardpoint);
-                            if (!string.IsNullOrEmpty(assetGUID))
-                                await LoadAddress(assetGUID, hardpoint.transform, true);
+                            try
+                            {
+                                var assetGUID = await LoadHardpoint(hardpoint);
+                                if (!string.IsNullOrEmpty(assetGUID))
+                                    await LoadAddress(assetGUID, hardpoint.transform, true);
+                            }
+                            catch (System.Exception ex) { Debug.LogError($"[AddressableRendering] Skipped hardpoint: {ex.Message}"); }
                         }
                     }
                     else
@@ -180,7 +185,8 @@ public class AddressableRendering : MonoBehaviour
             }
         }
 
-        throw new System.Exception("LoadHardpointGuidFromModuleListAsset");
+        Debug.LogWarning($"[AddressableRendering] Could not resolve hardpoint GUID {moduleListAssetGuid} (handle valid: {res.IsValid()})");
+        return "";
     }
 
     async static System.Threading.Tasks.Task<GameObject> LoadAddress(string addressRef, Transform parent, bool isHardpoint, string assetPath = "", List<string> disabledChildren = null)

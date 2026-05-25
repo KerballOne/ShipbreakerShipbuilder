@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEditor;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 using BBI.Unity.Game;
 using System.Collections.Generic;
 using UnityEditor.IMGUI.Controls;
@@ -35,17 +36,33 @@ public class AddressableLoaderEditor : Editor
     void LoadAddressable()
     {
         var address = serializedObject.FindProperty("assetGUID").stringValue;
-        if(address != null && address != "" && address != paintedAddress)
+        if (string.IsNullOrEmpty(address) || address == paintedAddress)
+            return;
+
+        var locOp = Addressables.LoadResourceLocationsAsync(address, typeof(GameObject));
+        locOp.Completed += locRes =>
         {
-            Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(address)).Completed += res =>
+            if (locRes.Status != AsyncOperationStatus.Succeeded
+                || locRes.Result == null || locRes.Result.Count == 0)
             {
+                Debug.LogError($"[AddressableLoaderEditor] No GameObject location found for {address}");
+                return;
+            }
+
+            Addressables.LoadAssetAsync<GameObject>(locRes.Result[0]).Completed += res =>
+            {
+                if (res.Result == null)
+                {
+                    Debug.LogError($"[AddressableLoaderEditor] Load failed for {address}: {res.OperationException?.Message}");
+                    return;
+                }
+
                 loadedGameObject = res.Result;
                 needToPaintObject = true;
                 paintedAddress = address;
-                
                 m_SimpleTreeView = new GameObjectTreeView(m_TreeViewState, loadedGameObject, serializedObject);
             };
-        }
+        };
     }
 
     override public bool RequiresConstantRepaint()
@@ -121,7 +138,11 @@ class GameObjectTreeView : TreeView
         // have a depth of -1, and the rest of the items increment from that.
         var root = new GameObjectTreeViewItem {id = 0, depth = -1, displayName = "Root"};
 
-        if(baseObject?.name == null) return root;
+        if (baseObject?.name == null)
+        {
+            root.children = new List<TreeViewItem>();
+            return root;
+        }
 
         var GORoot = new GameObjectTreeViewItem { id = currentId++, displayName = baseObject.name, displayState = childPath == "" ? GameObjectTreeViewItem.DisplayState.RootObject : GameObjectTreeViewItem.DisplayState.Disabled };
         root.AddChild(GORoot);
