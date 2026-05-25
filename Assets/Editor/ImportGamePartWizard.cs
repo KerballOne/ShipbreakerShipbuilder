@@ -2,6 +2,8 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
+using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 using BBI.Unity.Game;
@@ -9,36 +11,76 @@ using BBI.Unity.Game;
 public class ImportGamePartWizard : EditorWindow
 {
     const string PrefOutputFolder = "ImportGamePartWizard.OutputFolder";
-    const int MaxResults = 100;
+    const int    MaxResults       = 100;
 
-    string m_Search = "";
-    string m_LastSearch = null;
-    bool m_PrefabsOnly = true;
-    Vector2 m_Scroll;
-    string m_OutputFolder = "Assets/_CustomShips/";
+    enum SearchMode { DisplayName, PartName, Path }
+    enum SortColumn { DisplayName, PartName, DimX, DimY, DimZ, Volume, Mass }
 
-    // Multi-select: guid → (path, displayName)
-    readonly Dictionary<string, (string path, string displayName)> m_Selection =
+    // Fixed column widths; Display Name and Part Name share remaining flexible space equally
+    const float W_SEL  = 22f;
+    const float W_DIM  = 54f;
+    const float W_VOL  = 60f;
+    const float W_MASS = 60f;
+
+    string     m_Search      = "";
+    string     m_LastSearch  = null;
+    bool       m_PrefabsOnly = true;
+    SearchMode m_SearchMode  = SearchMode.DisplayName;
+    bool       m_UseRegex    = false;
+    string     m_RegexError  = null;
+    Vector2    m_Scroll;
+    string     m_OutputFolder = "Assets/_CustomShips/";
+
+    SortColumn m_SortCol = SortColumn.DisplayName;
+    bool       m_SortAsc = true;
+
+    readonly Dictionary<string, (string path, string partName)> m_Selection =
         new Dictionary<string, (string, string)>();
 
-    readonly List<(string guid, string path, string displayName)> m_Results =
-        new List<(string, string, string)>();
-
-    static readonly GUIStyle s_PathStyle = new GUIStyle(EditorStyles.miniLabel)
+    struct ResultRow
     {
-        wordWrap = true,
-        richText = false,
-    };
+        public string guid, path, partName, displayName;
+        public float  dimX, dimY, dimZ, volume, mass;
+    }
+    readonly List<ResultRow> m_Results = new List<ResultRow>();
+
+    Dictionary<string, EnrichedPart> m_Enriched;
+
+    static GUIStyle s_PathStyle;
+
+    void EnsureStyles()
+    {
+        if (s_PathStyle != null) return;
+        s_PathStyle = new GUIStyle(EditorStyles.miniLabel) { wordWrap = false };
+    }
 
     [MenuItem("Shipbuilder/Import Game Part Wizard")]
     static void Open()
     {
         var w = GetWindow<ImportGamePartWizard>("Import Game Part");
         w.m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+        w.LoadEnrichedData();
+    }
+
+    void LoadEnrichedData()
+    {
+        var path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "known_assets_enriched.json"));
+        if (!File.Exists(path)) { m_Enriched = new Dictionary<string, EnrichedPart>(); return; }
+        try
+        {
+            m_Enriched = JsonConvert.DeserializeObject<Dictionary<string, EnrichedPart>>(
+                File.ReadAllText(path)) ?? new Dictionary<string, EnrichedPart>();
+        }
+        catch { m_Enriched = new Dictionary<string, EnrichedPart>(); }
+        m_LastSearch = null;
     }
 
     void OnGUI()
     {
+        EnsureStyles();
+
+        if (m_Enriched == null) LoadEnrichedData();
+
         if (LoadGameAssets.knownAssetMap == null || LoadGameAssets.knownAssetMap.Count == 0)
         {
             EditorGUILayout.HelpBox(
@@ -51,15 +93,32 @@ public class ImportGamePartWizard : EditorWindow
         GUILayout.Label("Search Game Library", EditorStyles.boldLabel);
 
         EditorGUILayout.BeginHorizontal();
-        var newSearch = EditorGUILayout.TextField("Name", m_Search);
-        var newPrefabsOnly = EditorGUILayout.ToggleLeft("Prefabs only", m_PrefabsOnly, GUILayout.Width(100));
+        var newSearch  = EditorGUILayout.TextField("Name", m_Search);
+        var newPrefabs = EditorGUILayout.ToggleLeft("Prefabs only", m_PrefabsOnly, GUILayout.Width(100));
         EditorGUILayout.EndHorizontal();
 
-        if (newSearch != m_Search || newPrefabsOnly != m_PrefabsOnly || m_LastSearch == null)
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label("Search by", GUILayout.Width(60));
+        var newMode  = (SearchMode)EditorGUILayout.EnumPopup(m_SearchMode, GUILayout.Width(120));
+        var newRegex = EditorGUILayout.ToggleLeft("Regex", m_UseRegex, GUILayout.Width(55));
+        int enrichedCount = m_Enriched?.Count ?? 0;
+        EditorGUILayout.LabelField(
+            enrichedCount > 0 ? $"{enrichedCount} enriched" : "no enriched data",
+            EditorStyles.miniLabel);
+        if (GUILayout.Button("↺", GUILayout.Width(22))) LoadEnrichedData();
+        EditorGUILayout.EndHorizontal();
+
+        if (m_RegexError != null)
+            EditorGUILayout.HelpBox($"Regex: {m_RegexError}", MessageType.Error);
+
+        if (newSearch != m_Search || newPrefabs != m_PrefabsOnly ||
+            newMode != m_SearchMode || newRegex != m_UseRegex || m_LastSearch == null)
         {
-            m_Search = newSearch;
-            m_PrefabsOnly = newPrefabsOnly;
-            m_LastSearch = m_Search;
+            m_Search      = newSearch;
+            m_PrefabsOnly = newPrefabs;
+            m_SearchMode  = newMode;
+            m_UseRegex    = newRegex;
+            m_LastSearch  = m_Search;
             RebuildResults();
         }
 
@@ -69,27 +128,54 @@ public class ImportGamePartWizard : EditorWindow
             (m_Selection.Count > 0 ? $"  —  {m_Selection.Count} selected" : ""),
             EditorStyles.miniLabel);
 
-        // ── Results list ─────────────────────────────────────────────────────
-        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, GUILayout.Height(260));
-        foreach (var (guid, path, displayName) in m_Results)
+        // ── Column layout ─────────────────────────────────────────────────────
+        // -20 window padding, -16 vertical scrollbar, -4 safety margin
+        float viewW    = EditorGUIUtility.currentViewWidth - 40f;
+        float flexW    = Mathf.Max(120f, viewW - W_SEL - W_DIM * 3 - W_VOL - W_MASS);
+        float nameColW = Mathf.Floor(flexW * 0.5f);
+
+        // ── Table header ──────────────────────────────────────────────────────
+        EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+        GUILayout.Space(W_SEL + 2f);
+        SortHeader("Display Name", SortColumn.DisplayName, nameColW);
+        SortHeader("Part Name",    SortColumn.PartName,    nameColW);
+        SortHeader("X",            SortColumn.DimX,        W_DIM);
+        SortHeader("Y",            SortColumn.DimY,        W_DIM);
+        SortHeader("Z",            SortColumn.DimZ,        W_DIM);
+        SortHeader("Vol",          SortColumn.Volume,      W_VOL);
+        SortHeader("Mass",         SortColumn.Mass,        W_MASS);
+        EditorGUILayout.EndHorizontal();
+
+        // ── Results scroll ────────────────────────────────────────────────────
+        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, GUILayout.Height(300));
+        foreach (var r in m_Results)
         {
-            bool selected = m_Selection.ContainsKey(guid);
+            bool sel = m_Selection.ContainsKey(r.guid);
 
-            EditorGUILayout.BeginVertical(selected ? GUI.skin.box : GUIStyle.none);
+            EditorGUILayout.BeginVertical(sel ? GUI.skin.box : GUIStyle.none);
 
-            if (GUILayout.Button(selected ? $"✓  {displayName}" : displayName,
-                    selected ? EditorStyles.boldLabel : EditorStyles.label))
-            {
-                if (selected)
-                    m_Selection.Remove(guid);
-                else
-                    m_Selection[guid] = (path, displayName);
-            }
-
-            // Indented, small path
+            // Row 1 — data fields
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(20f);
-            GUILayout.Label(path, s_PathStyle);
+            if (GUILayout.Button(sel ? "✓" : " ",
+                    EditorStyles.miniButton, GUILayout.Width(W_SEL)))
+            {
+                if (sel) m_Selection.Remove(r.guid);
+                else     m_Selection[r.guid] = (r.path, r.partName);
+            }
+            var lbl = sel ? EditorStyles.boldLabel : EditorStyles.label;
+            GUILayout.Label(r.displayName,      lbl, GUILayout.Width(nameColW));
+            GUILayout.Label(r.partName,         lbl, GUILayout.Width(nameColW));
+            GUILayout.Label(FmtDim(r.dimX),     lbl, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtDim(r.dimY),     lbl, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtDim(r.dimZ),     lbl, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtVol(r.volume),   lbl, GUILayout.Width(W_VOL));
+            GUILayout.Label(FmtMass(r.mass),    lbl, GUILayout.Width(W_MASS));
+            EditorGUILayout.EndHorizontal();
+
+            // Row 2 — path
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(W_SEL + 4f);
+            GUILayout.Label(r.path, s_PathStyle);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
@@ -101,14 +187,10 @@ public class ImportGamePartWizard : EditorWindow
         // ── Selection summary ─────────────────────────────────────────────────
         GUILayout.Label("Selected", EditorStyles.boldLabel);
         if (m_Selection.Count == 0)
-        {
-            EditorGUILayout.HelpBox("Click results above to select (click again to deselect).", MessageType.None);
-        }
+            EditorGUILayout.HelpBox("Click ✓ to select (click again to deselect).", MessageType.None);
         else
-        {
             foreach (var kv in m_Selection)
-                EditorGUILayout.LabelField(kv.Value.displayName, EditorStyles.miniLabel);
-        }
+                EditorGUILayout.LabelField(kv.Value.partName, EditorStyles.miniLabel);
 
         EditorGUILayout.Space();
 
@@ -130,45 +212,116 @@ public class ImportGamePartWizard : EditorWindow
 
         EditorGUILayout.Space();
 
-        // ── Import button ─────────────────────────────────────────────────────
+        // ── Import buttons ────────────────────────────────────────────────────
         string error = Validate();
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Cancel", GUILayout.Height(32), GUILayout.Width(90)))
+            Close();
+        GUILayout.FlexibleSpace();
         GUI.enabled = error == null;
-        var label = m_Selection.Count > 1
-            ? $"Import {m_Selection.Count} Parts"
-            : "Import Selected";
-        if (GUILayout.Button(label, GUILayout.Height(32)))
+        var importLabel = m_Selection.Count > 1 ? $"Import {m_Selection.Count} Parts" : "Import Selected";
+        if (GUILayout.Button(importLabel, GUILayout.Height(32), GUILayout.Width(150)))
             DoImport();
+        if (GUILayout.Button("Import & Close", GUILayout.Height(32), GUILayout.Width(130)))
+        {
+            if (DoImport()) Close();
+        }
         GUI.enabled = true;
-
-        if (error != null)
-            EditorGUILayout.HelpBox(error, MessageType.Error);
+        EditorGUILayout.EndHorizontal();
+        if (error != null) EditorGUILayout.HelpBox(error, MessageType.Error);
     }
+
+    void SortHeader(string label, SortColumn col, float width)
+    {
+        string text = m_SortCol == col ? $"{label} {(m_SortAsc ? "↑" : "↓")}" : label;
+        if (GUILayout.Button(text, EditorStyles.toolbarButton, GUILayout.Width(width)))
+        {
+            if (m_SortCol == col) m_SortAsc = !m_SortAsc;
+            else { m_SortCol = col; m_SortAsc = true; }
+            ApplySort();
+        }
+    }
+
+    static string FmtDim(float v)  => v > 0f ? $"{v:F2}m" : "—";
+    static string FmtVol(float v)  => v > 0f ? $"{v:F2}" : "—";
+    static string FmtMass(float v) => v > 0f ? $"{v:F1}" : "—";
 
     void RebuildResults()
     {
         m_Results.Clear();
+        m_RegexError = null;
         var term = m_Search.Trim();
+
+        Regex regex = null;
+        if (m_UseRegex && !string.IsNullOrEmpty(term))
+        {
+            try   { regex = new Regex(term, RegexOptions.IgnoreCase); }
+            catch (System.Exception e) { m_RegexError = e.Message; return; }
+        }
 
         foreach (var kv in LoadGameAssets.knownAssetMap)
         {
             var path = kv.Value;
-
             if (m_PrefabsOnly && !path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (!string.IsNullOrEmpty(term) &&
-                path.IndexOf(term, System.StringComparison.OrdinalIgnoreCase) < 0)
-                continue;
+            var partName = Path.GetFileNameWithoutExtension(path);
+            EnrichedPart enriched = null;
+            m_Enriched?.TryGetValue(kv.Key, out enriched);
+            var displayName = enriched?.DisplayName ?? "";
 
-            var displayName = Path.GetFileNameWithoutExtension(path);
-            m_Results.Add((kv.Key, path, displayName));
+            if (!string.IsNullOrEmpty(term))
+            {
+                string target = m_SearchMode switch
+                {
+                    SearchMode.Path     => path,
+                    SearchMode.PartName => partName,
+                    _                   => displayName,   // DisplayName mode only matches real names
+                };
+                bool match = regex != null
+                    ? regex.IsMatch(target)
+                    : target.IndexOf(term, System.StringComparison.OrdinalIgnoreCase) >= 0;
+                if (!match) continue;
+            }
 
-            if (m_Results.Count >= MaxResults)
-                break;
+            float[] d = enriched?.Dims;
+            m_Results.Add(new ResultRow
+            {
+                guid        = kv.Key,
+                path        = path,
+                partName    = partName,
+                displayName = displayName,
+                dimX        = d != null && d.Length > 0 ? d[0] : 0f,
+                dimY        = d != null && d.Length > 1 ? d[1] : 0f,
+                dimZ        = d != null && d.Length > 2 ? d[2] : 0f,
+                volume      = enriched?.Volume ?? 0f,
+                mass        = enriched?.Mass   ?? 0f,
+            });
+
+            if (m_Results.Count >= MaxResults) break;
         }
 
+        ApplySort();
+    }
+
+    void ApplySort()
+    {
         m_Results.Sort((a, b) =>
-            string.Compare(a.displayName, b.displayName, System.StringComparison.OrdinalIgnoreCase));
+        {
+            int cmp = m_SortCol switch
+            {
+                SortColumn.PartName => string.Compare(a.partName, b.partName,
+                                           System.StringComparison.OrdinalIgnoreCase),
+                SortColumn.DimX    => a.dimX.CompareTo(b.dimX),
+                SortColumn.DimY    => a.dimY.CompareTo(b.dimY),
+                SortColumn.DimZ    => a.dimZ.CompareTo(b.dimZ),
+                SortColumn.Volume  => a.volume.CompareTo(b.volume),
+                SortColumn.Mass    => a.mass.CompareTo(b.mass),
+                _                  => string.Compare(a.displayName, b.displayName,
+                                           System.StringComparison.OrdinalIgnoreCase),
+            };
+            return m_SortAsc ? cmp : -cmp;
+        });
     }
 
     string Validate()
@@ -182,19 +335,16 @@ public class ImportGamePartWizard : EditorWindow
         return null;
     }
 
-    void DoImport()
+    bool DoImport()
     {
         EditorPrefs.SetString(PrefOutputFolder, m_OutputFolder);
-
         var outRoot = m_OutputFolder.TrimEnd('/');
 
-        // Collect any name conflicts upfront
         var conflicts = new List<string>();
         foreach (var kv in m_Selection)
         {
-            var name = kv.Value.displayName;
-            var prefabPath = $"{outRoot}/{name}/{name}.prefab";
-            if (File.Exists(Path.GetFullPath(prefabPath)))
+            var name = kv.Value.partName;
+            if (File.Exists(Path.GetFullPath($"{outRoot}/{name}/{name}.prefab")))
                 conflicts.Add(name);
         }
 
@@ -204,27 +354,24 @@ public class ImportGamePartWizard : EditorWindow
                 ? $"{conflicts[0]} already exists. Overwrite?"
                 : $"{conflicts.Count} parts already exist:\n{string.Join(", ", conflicts)}\n\nOverwrite all?";
             if (!EditorUtility.DisplayDialog("Overwrite?", msg, "Yes", "Cancel"))
-                return;
+                return false;
         }
 
         var created = new List<GameObject>();
-
         foreach (var kv in m_Selection)
         {
-            var guid = kv.Key;
-            var (_, displayName) = kv.Value;
+            var guid       = kv.Key;
+            var partName   = kv.Value.partName;
+            var partFolder = $"{outRoot}/{partName}";
+            var prefabPath = $"{partFolder}/{partName}.prefab";
 
-            var partFolder = $"{outRoot}/{displayName}";
-            var prefabPath = $"{partFolder}/{displayName}.prefab";
-
-            // Create subfolder
             if (!AssetDatabase.IsValidFolder(partFolder))
-                AssetDatabase.CreateFolder(outRoot, displayName);
+                AssetDatabase.CreateFolder(outRoot, partName);
 
             if (File.Exists(Path.GetFullPath(prefabPath)))
                 AssetDatabase.DeleteAsset(prefabPath);
 
-            var go = new GameObject(displayName);
+            var go     = new GameObject(partName);
             var loader = go.AddComponent<AddressableLoader>();
             loader.assetGUID = guid;
 
@@ -232,8 +379,7 @@ public class ImportGamePartWizard : EditorWindow
             DestroyImmediate(go);
 
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-            if (prefab != null)
-                created.Add(prefab);
+            if (prefab != null) created.Add(prefab);
         }
 
         AssetDatabase.SaveAssets();
@@ -255,6 +401,16 @@ public class ImportGamePartWizard : EditorWindow
             "OK");
 
         m_Selection.Clear();
+        return true;
+    }
+
+    class EnrichedPart
+    {
+        [JsonProperty("partName")]    public string  PartName;
+        [JsonProperty("displayName")] public string  DisplayName;
+        [JsonProperty("dims")]        public float[] Dims;
+        [JsonProperty("volume")]      public float   Volume;
+        [JsonProperty("mass")]        public float   Mass;
     }
 }
 
