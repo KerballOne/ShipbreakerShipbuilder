@@ -1,6 +1,7 @@
 import bpy
 import bmesh
 import math
+import os
 
 # ── Parameters ───────────────────────────────────────────────────────────────
 
@@ -69,9 +70,9 @@ COLLAR_INNER_R = 1.70 * SCALE
 COLLAR_WALL    = 0.10 * SCALE
 COLLAR_TAPER   = 0.65 * SCALE  # how much the collar narrows at the opening (exit) end
 
-EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell.fbx"
-EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_bell_col.fbx"
-EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/rocinante_engine_nozzle.fbx"
+EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell.fbx"
+EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell_col.fbx"
+EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_nozzle.fbx"
 
 # Set to a source image path to generate PBR textures; leave blank to skip
 SOURCE_TEXTURE = "C:/Users/user/Pictures/Screenshots/An EpsteinDrive.png"
@@ -128,6 +129,7 @@ def annular_cap(bm, outer_ring, inner_ring, flip=False):
             bm.faces.new([outer_ring[i], outer_ring[j], inner_ring[j], inner_ring[i]])
 
 def export_fbx(filepath):
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     bpy.ops.export_scene.fbx(
         filepath            = filepath,
         use_selection       = True,
@@ -680,7 +682,8 @@ if SOURCE_TEXTURE:
         smooth,
     ], axis=-1)
 
-    out_dir = os.path.dirname(EXPORT_OUTER)
+    out_dir = os.path.join(os.path.dirname(os.path.dirname(EXPORT_OUTER)), "Textures")
+    os.makedirs(out_dir, exist_ok=True)
 
     def save_tex(name, data, linear=False):
         img = bpy.data.images.new(name, width=W, height=H, alpha=True)
