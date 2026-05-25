@@ -102,6 +102,7 @@ public class BuildContent
             Debug.Log("Moving ship bundles completed");
 
             LoadGameAssets.ReloadAssets();
+            AddressableRendering.UpdateViewList();
             Debug.Log("Build Complete");
             return true;
         }

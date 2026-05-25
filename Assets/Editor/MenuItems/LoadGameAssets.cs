@@ -78,7 +78,7 @@ public class LoadGameAssets
         AssetDatabase.Refresh();
     }
 
-    [MenuItem("Shipbreaker/Force View Refresh", priority = 1)]
+    [MenuItem("Shipbreaker/Force View Refresh %&r", priority = 1)]
     static void ViewRefresh()
     {
         lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
