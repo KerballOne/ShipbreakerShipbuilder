@@ -14,7 +14,7 @@ public static class OrganizeShipFolder
     static readonly Dictionary<string, string> ExtToFolder = new Dictionary<string, string>(
         System.StringComparer.OrdinalIgnoreCase)
     {
-        { ".mat",  "Materials" },
+        { ".mat",  "Models"    },
         { ".png",  "Textures"  },
         { ".jpg",  "Textures"  },
         { ".jpeg", "Textures"  },
@@ -24,11 +24,11 @@ public static class OrganizeShipFolder
         { ".exr",  "Textures"  },
         { ".hdr",  "Textures"  },
         { ".psd",  "Textures"  },
-        { ".fbx",  "Meshes"    },
-        { ".obj",  "Meshes"    },
-        { ".blend","Meshes"    },
-        { ".3ds",  "Meshes"    },
-        { ".dae",  "Meshes"    },
+        { ".fbx",  "Models"    },
+        { ".obj",  "Models"    },
+        { ".blend","Models"    },
+        { ".3ds",  "Models"    },
+        { ".dae",  "Models"    },
         { ".asset","Data"      },
     };
 

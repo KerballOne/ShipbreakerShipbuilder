@@ -176,8 +176,10 @@ public class CustomPartWizard : EditorWindow
     {
         EditorPrefs.SetString(PrefOutputFolder, m_OutputFolder);
 
-        var outFolder = m_OutputFolder.TrimEnd('/');
-        var newPrefabPath = $"{outFolder}/{m_PartName}.prefab";
+        var outFolder    = m_OutputFolder.TrimEnd('/');
+        var prefabsFolder = $"{outFolder}/Prefabs";
+        var customFolder  = $"{prefabsFolder}/CUSTOM";
+        var newPrefabPath = $"{customFolder}/{m_PartName}.prefab";
 
         if (File.Exists(Path.GetFullPath(newPrefabPath)))
         {
@@ -185,6 +187,15 @@ public class CustomPartWizard : EditorWindow
                 return;
             AssetDatabase.DeleteAsset(newPrefabPath);
         }
+
+        var dataFolder = $"{outFolder}/Data";
+
+        if (!AssetDatabase.IsValidFolder(prefabsFolder))
+            AssetDatabase.CreateFolder(outFolder, "Prefabs");
+        if (!AssetDatabase.IsValidFolder(customFolder))
+            AssetDatabase.CreateFolder(prefabsFolder, "CUSTOM");
+        if (!AssetDatabase.IsValidFolder(dataFolder))
+            AssetDatabase.CreateFolder(outFolder, "Data");
 
         if (m_Mesh != null)
         {
@@ -199,7 +210,7 @@ public class CustomPartWizard : EditorWindow
 
         ObjectInfoAsset oiAsset = null;
         if (!string.IsNullOrWhiteSpace(m_DisplayName))
-            oiAsset = CreateObjectInfoAsset(outFolder);
+            oiAsset = CreateObjectInfoAsset(dataFolder);
 
         AssetDatabase.CopyAsset(MatTemplatePaths[m_MatTemplate], newPrefabPath);
         AssetDatabase.SaveAssets();
@@ -248,7 +259,7 @@ public class CustomPartWizard : EditorWindow
 
         string resolvedGroup = m_AddressableGroup;
         if (string.IsNullOrWhiteSpace(resolvedGroup))
-            resolvedGroup = GuessAddressableGroup(outFolder);
+            resolvedGroup = GuessAddressableGroup(customFolder);
 
         if (!string.IsNullOrWhiteSpace(resolvedGroup))
         {
