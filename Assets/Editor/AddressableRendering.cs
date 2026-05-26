@@ -10,6 +10,8 @@ public class AddressableRendering : MonoBehaviour
 {
     public static List<RenderableMapping> rooms = new List<RenderableMapping>();
     public static List<RenderableMapping> roomOverlaps = new List<RenderableMapping>();
+    public static List<JointGizmoData> jointData = new List<JointGizmoData>();
+    public static List<JointGizmoData> bakedJointData = new List<JointGizmoData>();
 
     static bool isUpdating = false;
     static int currentRecursiveDepth = 0;
@@ -20,16 +22,44 @@ public class AddressableRendering : MonoBehaviour
 
     static Dictionary<string, Mesh> meshCache = new Dictionary<string, Mesh>();
 
+    public class JointGizmoData
+    {
+        public enum JointType { Root, Standard, CutPoint }
+        public Matrix4x4 worldMatrix;
+        public Bounds bounds;
+        public JointType type;
+    }
+
     public static void ClearView()
     {
         foreach (var fakePrefab in fakes)
         {
-            DestroyImmediate(fakePrefab.gameObject);
+            if (fakePrefab != null)
+                DestroyImmediate(fakePrefab.gameObject);
+        }
+        fakes.Clear();
+
+        // Catch orphaned fakes: scan direct children of every AddressableLoader in the
+        // scene. EditorCache fakes are always parented to their loader wrapper, and every
+        // EditorCache node has SelectAddressableParent baked in — reliable across edits.
+        foreach (var root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+        {
+            foreach (var loader in root.GetComponentsInChildren<BBI.Unity.Game.AddressableLoader>())
+            {
+                for (int i = loader.transform.childCount - 1; i >= 0; i--)
+                {
+                    var child = loader.transform.GetChild(i);
+                    if (child.GetComponent<SelectAddressableParent>() != null ||
+                        child.GetComponent<FakePrefabDisplay>() != null)
+                        DestroyImmediate(child.gameObject);
+                }
+            }
         }
 
-        fakes.Clear();
         rooms.Clear();
         roomOverlaps.Clear();
+        jointData.Clear();
+        bakedJointData.Clear();
     }
 
     public static void ForceResetUpdateFlag()
@@ -86,6 +116,8 @@ public class AddressableRendering : MonoBehaviour
                     {
                         roomOverlaps.Add(RenderableMapping.RoomMapping(roomOverlap.transform, false));
                     }
+
+                    CollectBakedStructureParts(rootGameObject.transform);
 
                     if (!needToRefreshCache || LoadGameAssets.CheckHandlesValid())
                     {
@@ -259,6 +291,11 @@ public class AddressableRendering : MonoBehaviour
 
                 await TryCacheAsset(addressRef, result, treatAsHardpointPosition, addressRef + assetPath.Replace("/", "_"));
 
+                // Collect StructurePart data from the loaded game asset (result.localPosition is 0 here,
+                // correctly treating the result as anchored at the parent wrapper's world position).
+                if (parent != null && !EditorUtility.IsPersistent(parent.gameObject))
+                    CollectStructurePartData(result.transform, parent.localToWorldMatrix, true);
+
                 result.transform.localPosition = cachedPosition;
 
                 foreach (var hardpoint in result.GetComponentsInChildren<HardPoint>())
@@ -301,6 +338,17 @@ public class AddressableRendering : MonoBehaviour
                 roomOverlaps.Add(RenderableMapping.RoomMapping(roomOverlap.transform, treatAsHardpointPosition));
             }
 
+            // Collect joint data from FakeStructurePart components baked into the EditorCache prefab.
+            foreach (var fsp in temp.GetComponentsInChildren<FakeStructurePart>(true))
+            {
+                jointData.Add(new JointGizmoData
+                {
+                    worldMatrix = fsp.transform.localToWorldMatrix,
+                    bounds = fsp.localColliderBounds,
+                    type = (JointGizmoData.JointType)fsp.type
+                });
+            }
+
             if (disabledChildren != null)
             {
                 foreach (var disabledChild in disabledChildren)
@@ -340,6 +388,58 @@ public class AddressableRendering : MonoBehaviour
         return prefab;
     }
 
+    // Collects baked StructureParts (e.g. InvisibleJoints) directly in the scene hierarchy,
+    // skipping subtrees rooted at AddressableLoader since those are covered by EditorCache FakeStructureParts.
+    static void CollectBakedStructureParts(Transform t)
+    {
+        if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return;
+
+        if (t.TryGetComponent<StructurePart>(out _))
+        {
+            Bounds bounds = new Bounds(Vector3.zero, Vector3.one * 0.05f);
+            if (t.TryGetComponent<MeshCollider>(out var mc) && mc.sharedMesh != null)
+                bounds = mc.sharedMesh.bounds;
+            else if (t.TryGetComponent<BoxCollider>(out var bc))
+                bounds = new Bounds(bc.center, bc.size);
+
+            bakedJointData.Add(new JointGizmoData
+            {
+                worldMatrix = t.localToWorldMatrix,
+                bounds = bounds,
+                type = JointGizmoData.JointType.Standard
+            });
+        }
+
+        foreach (Transform child in t)
+            CollectBakedStructureParts(child);
+    }
+
+    // Traverses the game prefab hierarchy (not in scene) and collects StructurePart data into jointData.
+    // parentWorld is the local-to-world matrix of the ancestor scene transform (AddressableLoader wrapper).
+    static void CollectStructurePartData(Transform t, Matrix4x4 parentWorld, bool isRoot)
+    {
+        var world = parentWorld * Matrix4x4.TRS(t.localPosition, t.localRotation, t.localScale);
+
+        if (t.TryGetComponent<StructurePart>(out _))
+        {
+            Bounds bounds = new Bounds(Vector3.zero, Vector3.one * 0.1f);
+            if (t.TryGetComponent<MeshCollider>(out var mc) && mc.sharedMesh != null)
+                bounds = mc.sharedMesh.bounds;
+            else if (t.TryGetComponent<BoxCollider>(out var bc))
+                bounds = new Bounds(bc.center, bc.size);
+
+            var jtype = isRoot ? JointGizmoData.JointType.Root
+                      : t.name.IndexOf("cutpoint", System.StringComparison.OrdinalIgnoreCase) >= 0
+                        ? JointGizmoData.JointType.CutPoint
+                        : JointGizmoData.JointType.Standard;
+
+            jointData.Add(new JointGizmoData { worldMatrix = world, bounds = bounds, type = jtype });
+        }
+
+        foreach (Transform child in t)
+            CollectStructurePartData(child, world, false);
+    }
+
     static int count = 0;
     async static System.Threading.Tasks.Task TryCacheAsset(string address, GameObject obj, bool isHardpoint, string cachePath)
     {
@@ -350,7 +450,7 @@ public class AddressableRendering : MonoBehaviour
         {
             // Use a temporary wrapper so CloneMeshTree's root node becomes the prefab root
             var tempWrapper = new GameObject("_temp");
-            await CloneMeshTree(address, obj.transform, tempWrapper.transform, cachePath);
+            await CloneMeshTree(address, obj.transform, tempWrapper.transform, cachePath, true);
 
             if (tempWrapper.transform.childCount > 0)
             {
@@ -382,7 +482,7 @@ public class AddressableRendering : MonoBehaviour
         }
     }
 
-    private async static System.Threading.Tasks.Task CloneMeshTree(string address, Transform inTransform, Transform outParent, string cachePath)
+    private async static System.Threading.Tasks.Task CloneMeshTree(string address, Transform inTransform, Transform outParent, string cachePath, bool isRoot = false)
     {
         var newPrefabChild = new GameObject(inTransform.name);
         newPrefabChild.transform.parent = outParent;
@@ -454,6 +554,23 @@ public class AddressableRendering : MonoBehaviour
                 var newHardpoint = newPrefabChild.AddComponent<FakeHardpoint>();
                 newHardpoint.AssetGUID = assetGUID;
             }
+        }
+
+        // Bake StructurePart collider data into the EditorCache prefab for joint visualization.
+        if (inTransform.TryGetComponent<StructurePart>(out _))
+        {
+            Bounds colliderBounds = new Bounds(Vector3.zero, Vector3.one * 0.1f);
+            if (inTransform.TryGetComponent<MeshCollider>(out var mc) && mc.sharedMesh != null)
+                colliderBounds = mc.sharedMesh.bounds;
+            else if (inTransform.TryGetComponent<BoxCollider>(out var bc))
+                colliderBounds = new Bounds(bc.center, bc.size);
+
+            var fsp = newPrefabChild.AddComponent<FakeStructurePart>();
+            fsp.localColliderBounds = colliderBounds;
+            fsp.type = isRoot ? FakeStructurePart.JointType.Root
+                     : inTransform.name.IndexOf("cutpoint", System.StringComparison.OrdinalIgnoreCase) >= 0
+                       ? FakeStructurePart.JointType.CutPoint
+                       : FakeStructurePart.JointType.Standard;
         }
     }
 

@@ -198,7 +198,7 @@ public class BuildContent
             System.Diagnostics.Process.Start(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker.exe"));
     }
 
-    [MenuItem("Shipbreaker/Update game catalog", priority = 1000)]
+    [MenuItem("Shipbreaker/Actions/Update game catalog", priority = 60)]
     static void UpdateGameCatalog()
     {
         var catalog = File.ReadAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker_Data", "StreamingAssets", "aa", "catalog.json"));
@@ -218,7 +218,7 @@ public class BuildContent
         Debug.Log($"Game catalog recreated and written to {path}");
     }
 
-    [MenuItem("Shipbreaker/Update known assets", priority = 1001)]
+    [MenuItem("Shipbreaker/Actions/Update known assets", priority = 61)]
     static void UpdateKnownAssets()
     {
         List<string> output = new List<string>() { "{" };
@@ -255,7 +255,7 @@ public class BuildContent
         Debug.Log($"Known asset list recreated and written to {path}");
     }
 
-    [MenuItem("Shipbreaker/Reload Build Settings", priority = 1002)]
+    [MenuItem("Shipbreaker/Actions/Reload Build Settings", priority = 62)]
     static void ReloadBuildSettings()
     {
         Settings.ReloadBuildSettings();

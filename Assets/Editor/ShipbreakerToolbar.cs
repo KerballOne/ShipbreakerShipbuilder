@@ -56,7 +56,7 @@ public static class ShipbreakerToolbar
     {
         var tip = new GUIContent("↺", "Force View Refresh  (Ctrl+Alt+R)");
         if (GUI.Button(new Rect(0, 0, 34, 22), tip, EditorStyles.toolbarButton))
-            EditorApplication.ExecuteMenuItem("Shipbreaker/Force View Refresh");
+            EditorApplication.ExecuteMenuItem("Shipbreaker/Actions/Force View Refresh");
     }
 }
 #endif
