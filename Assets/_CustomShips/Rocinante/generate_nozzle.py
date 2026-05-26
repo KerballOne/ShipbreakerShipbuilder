@@ -78,10 +78,15 @@ EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_Cu
 SOURCE_TEXTURE   = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Textures/EpsDrive.png"
 
 # Texture generation parameters
-TEX_NORMAL_STRENGTH = 8.0   # surface bump intensity in normal map
-TEX_METALLIC_BASE   = 0.90  # base metallic value (0–1)
-TEX_SMOOTH_BASE     = 0.95  # base smoothness (0=rough, 1=mirror)
-TEX_SMOOTH_SCALE    = 0.10  # how much luminance contributes to smoothness
+TEX_NORMAL_STRENGTH    = 6.0   # Sobel normal map intensity
+TEX_HEIGHT_BLUR        = 4.0   # Gaussian sigma for macro height extraction
+TEX_HEIGHT_MICRO       = 3.0   # micro-detail amplification in height map
+TEX_METALLIC_BASE      = 0.85  # metallic for fully desaturated (grey) pixels
+TEX_METALLIC_SAT_SCALE = 0.60  # how much colour saturation pulls metallic down
+TEX_SMOOTH_BASE        = 0.90  # smoothness for flat (low-variance) areas
+TEX_SMOOTH_SCALE       = 0.80  # how much local roughness reduces smoothness
+TEX_AO_RADIUS          = 16    # pixel radius for AO horizon sampling
+TEX_AO_SAMPLES         = 12    # number of AO ray directions
 
 # ── Derived ───────────────────────────────────────────────────────────────────
 
@@ -668,14 +673,42 @@ if SOURCE_TEXTURE:
     src.pixels.foreach_get(raw)
     px   = raw.reshape(H, W, 4)
 
-    lum  = (0.2126 * px[...,0] + 0.7152 * px[...,1] + 0.0722 * px[...,2]).astype(np.float64)
+    rgb  = px[..., :3].astype(np.float64)
+    lum  = 0.2126 * rgb[...,0] + 0.7152 * rgb[...,1] + 0.0722 * rgb[...,2]
 
-    # Normal map via luminance gradient (Sobel-equivalent)
-    dy, dx = np.gradient(lum)
-    dx    *= TEX_NORMAL_STRENGTH
-    dy    *= TEX_NORMAL_STRENGTH
-    dz     = np.ones_like(dx)
-    mag    = np.sqrt(dx**2 + dy**2 + dz**2)
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def gauss_blur(arr, sigma):
+        """Separable Gaussian blur — pure numpy, no scipy."""
+        if sigma <= 0:
+            return arr.copy()
+        radius = max(1, int(3 * sigma + 0.5))
+        x = np.arange(-radius, radius + 1, dtype=np.float64)
+        k = np.exp(-0.5 * (x / sigma) ** 2);  k /= k.sum()
+        out = np.apply_along_axis(lambda r: np.convolve(r, k, mode='same'), 1, arr)
+        return  np.apply_along_axis(lambda c: np.convolve(c, k, mode='same'), 0, out)
+
+    def conv3x3(arr, kernel):
+        """3×3 convolution via unrolled array slicing — no scipy needed."""
+        p = np.pad(arr, 1, mode='edge')
+        return (kernel[0,0]*p[0:-2,0:-2] + kernel[0,1]*p[0:-2,1:-1] + kernel[0,2]*p[0:-2,2:] +
+                kernel[1,0]*p[1:-1,0:-2] + kernel[1,1]*p[1:-1,1:-1] + kernel[1,2]*p[1:-1,2:] +
+                kernel[2,0]*p[2:, 0:-2] + kernel[2,1]*p[2:, 1:-1] + kernel[2,2]*p[2:, 2:])
+
+    # ── Height map ────────────────────────────────────────────────────────────
+    # Macro shape from blurred lum blended with boosted micro-detail
+    height = np.clip(
+        gauss_blur(lum, TEX_HEIGHT_BLUR) * 0.7 +
+        (0.5 + (lum - gauss_blur(lum, 2.0)) * TEX_HEIGHT_MICRO) * 0.3,
+        0.0, 1.0)
+
+    # ── Normal map via 3×3 Sobel ──────────────────────────────────────────────
+    Kx = np.array([[-1,0,1],[-2,0,2],[-1,0,1]], dtype=np.float64)
+    Ky = np.array([[-1,-2,-1],[0,0,0],[1,2,1]], dtype=np.float64)
+    dx = conv3x3(height, Kx) * TEX_NORMAL_STRENGTH
+    dy = conv3x3(height, Ky) * TEX_NORMAL_STRENGTH
+    dz = np.ones_like(dx)
+    mag = np.sqrt(dx**2 + dy**2 + dz**2)
     norm_px = np.stack([
         (dx / mag * 0.5 + 0.5).astype(np.float32),
         (dy / mag * 0.5 + 0.5).astype(np.float32),
@@ -683,16 +716,32 @@ if SOURCE_TEXTURE:
         np.ones((H, W), dtype=np.float32),
     ], axis=-1)
 
-    # MaskMap — HDRP convention: R=Metallic, G=AO, B=Detail (0.5), A=Smoothness
-    metallic = np.clip(TEX_METALLIC_BASE + (lum - 0.5) * 0.3, 0.0, 1.0).astype(np.float32)
-    smooth   = np.clip(TEX_SMOOTH_BASE   +  lum * TEX_SMOOTH_SCALE,     0.0, 1.0).astype(np.float32)
-    ao       = np.clip(lum * 1.2, 0.0, 1.0).astype(np.float32)  # bright areas = no occlusion
-    mask_px  = np.stack([
-        metallic,
-        ao,
-        np.full((H, W), 0.5, dtype=np.float32),
-        smooth,
-    ], axis=-1)
+    # ── AO via horizon sampling ───────────────────────────────────────────────
+    # Cast rays in TEX_AO_SAMPLES directions; neighbours higher than centre occlude it.
+    _ao_acc = np.zeros((H, W), dtype=np.float64)
+    for _i in range(TEX_AO_SAMPLES):
+        _a  = 2 * np.pi * _i / TEX_AO_SAMPLES
+        _sx = int(round(TEX_AO_RADIUS * np.cos(_a)))
+        _sy = int(round(TEX_AO_RADIUS * np.sin(_a)))
+        _nb = np.roll(np.roll(height, -_sy, axis=0), -_sx, axis=1)
+        _ao_acc += np.clip((_nb - height) * 4.0, 0.0, 1.0)
+    ao = np.clip(1.0 - _ao_acc / TEX_AO_SAMPLES, 0.0, 1.0).astype(np.float32)
+
+    # ── Smoothness from local variance (flat area = smooth, detailed = rough) ─
+    _lm  = gauss_blur(lum, 2.0)
+    _lm2 = gauss_blur(lum ** 2, 2.0)
+    smooth = np.clip(
+        TEX_SMOOTH_BASE - np.sqrt(np.clip(_lm2 - _lm**2, 0.0, None)) * 8.0 * TEX_SMOOTH_SCALE,
+        0.0, 1.0).astype(np.float32)
+
+    # ── Metallic from colour desaturation (grey/neutral = metal, saturated = non-metal)
+    _maxc = np.max(rgb, axis=-1)
+    _minc = np.min(rgb, axis=-1)
+    _sat  = np.where(_maxc > 1e-6, (_maxc - _minc) / _maxc, 0.0)
+    metallic = np.clip(TEX_METALLIC_BASE - _sat * TEX_METALLIC_SAT_SCALE, 0.0, 1.0).astype(np.float32)
+
+    # ── MaskMap (HDRP: R=Metallic, G=AO, B=Detail 0.5, A=Smoothness) ─────────
+    mask_px = np.stack([metallic, ao, np.full((H, W), 0.5, np.float32), smooth], axis=-1)
 
     out_dir = os.path.join(os.path.dirname(os.path.dirname(EXPORT_OUTER)), "Textures")
     os.makedirs(out_dir, exist_ok=True)
@@ -710,7 +759,7 @@ if SOURCE_TEXTURE:
         bpy.data.images.remove(img)
         print(f"Saved → {path}")
 
-    save_tex("T_Engine_BaseColor", px,       linear=False)
-    save_tex("T_Engine_Normal",    norm_px,  linear=True)
-    save_tex("T_Engine_MaskMap",   mask_px,  linear=True)
+    save_tex("T_Engine_BaseColor", px.astype(np.float32), linear=False)
+    save_tex("T_Engine_Normal",    norm_px,               linear=True)
+    save_tex("T_Engine_MaskMap",   mask_px,               linear=True)
     print("Texture generation complete.")
