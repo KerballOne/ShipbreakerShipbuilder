@@ -32,7 +32,7 @@ public static class OrganizeShipFolder
         { ".asset","Data"      },
     };
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Organize Ship Folder...", priority = -10)]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Organize Ship Folder...", priority = 10)]
     static void Run()
     {
         // Ask user to pick a folder

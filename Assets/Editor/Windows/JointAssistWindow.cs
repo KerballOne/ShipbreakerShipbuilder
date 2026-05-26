@@ -11,10 +11,13 @@ public class JointAssistWindow : EditorWindow
     enum OverlapAxis { AutoDetect, PosX, NegX, PosY, NegY, PosZ, NegZ }
     OverlapAxis axis = OverlapAxis.AutoDetect;
 
+    GameObject invisibleJointPrefab;
+    GameObject jointParent;
+
     string statusMessage = "";
     MessageType statusType = MessageType.None;
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Joint Assist", priority = -10)]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Joint Assist", priority = 10)]
     static void Open() => GetWindow<JointAssistWindow>("Joint Assist");
 
     void OnSelectionChange() => Repaint();
@@ -72,6 +75,32 @@ public class JointAssistWindow : EditorWindow
 
         EditorGUI.EndDisabledGroup();
 
+        // ── InvisibleJoint placement ─────────────────────────────────────────
+        EditorGUILayout.Space(10);
+        EditorGUILayout.LabelField("InvisibleJoint", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Places an InvisibleJoint prefab at the A/B interface. " +
+            "The joint's StructurePart collider bridges cross-part connections at runtime " +
+            "by overlapping with the MJ Clamp SM_ colliders on addressable ShipKit parts.",
+            MessageType.None);
+
+        invisibleJointPrefab = (GameObject)EditorGUILayout.ObjectField(
+            "InvisibleJoint Prefab", invisibleJointPrefab, typeof(GameObject), false);
+        jointParent = (GameObject)EditorGUILayout.ObjectField(
+            "Parent (optional)", jointParent, typeof(GameObject), true);
+
+        bool canPlace = canApply && invisibleJointPrefab != null;
+        using (new EditorGUI.DisabledScope(!canPlace))
+        {
+            if (GUILayout.Button("Place InvisibleJoint at Interface", GUILayout.Height(28)))
+                PlaceInvisibleJoint();
+        }
+
+        if (invisibleJointPrefab == null)
+            EditorGUILayout.HelpBox(
+                "Assign the InvisibleJoint prefab (Assets/_CustomShips/Swordfish/Components/InvisibleJoint/).",
+                MessageType.Info);
+
         if (!string.IsNullOrEmpty(statusMessage))
         {
             EditorGUILayout.Space(4);
@@ -110,6 +139,31 @@ public class JointAssistWindow : EditorWindow
         Repaint();
     }
 
+    void PlaceInvisibleJoint()
+    {
+        Bounds bA = GetBounds(objectToMove);
+        Bounds bB = GetBounds(targetObject);
+        Vector3 dir = GetDirection(bA, bB);
+
+        // Midpoint between the two facing surfaces in world space
+        Vector3 faceA = bA.center + dir * ReachInDir(bA, dir);
+        Vector3 faceB = bB.center - dir * ReachInDir(bB, dir);
+        Vector3 placePos = (faceA + faceB) * 0.5f;
+
+        Transform parent = jointParent != null
+            ? jointParent.transform
+            : (objectToMove.transform.parent ?? objectToMove.transform);
+
+        var instance = (GameObject)PrefabUtility.InstantiatePrefab(invisibleJointPrefab, parent);
+        instance.transform.position = placePos;
+        Undo.RegisterCreatedObjectUndo(instance, "Place InvisibleJoint");
+        Selection.activeGameObject = instance;
+
+        statusMessage = $"Placed InvisibleJoint at {placePos:F3} under '{parent.name}'.";
+        statusType = MessageType.Info;
+        Repaint();
+    }
+
     Vector3 GetDirection(Bounds bA, Bounds bB)
     {
         if (axis != OverlapAxis.AutoDetect)
@@ -126,7 +180,6 @@ public class JointAssistWindow : EditorWindow
             };
         }
 
-        // Auto: find which world axis has the smallest face-to-face gap
         Vector3[] axes = { Vector3.right, Vector3.left, Vector3.up, Vector3.down, Vector3.forward, Vector3.back };
         float bestGap = float.MaxValue;
         Vector3 bestDir = Vector3.up;
@@ -139,15 +192,12 @@ public class JointAssistWindow : EditorWindow
                 bestDir = a;
             }
         }
-        // If all negative (all overlapping), pick smallest absolute gap in the direction of B
         if (bestGap == float.MaxValue)
             bestDir = ClosestCardinalDirection(bB.center - bA.center);
 
         return bestDir;
     }
 
-    // Gap = space between the face of A pointing toward dir and the face of B pointing away from dir.
-    // Positive = gap between them. Negative = already overlapping.
     float CalculateGap(Bounds bA, Bounds bB, Vector3 dir)
     {
         float faceA = Vector3.Dot(bA.center, dir) + ReachInDir(bA, dir);

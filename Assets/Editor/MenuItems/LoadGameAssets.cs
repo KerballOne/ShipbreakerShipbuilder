@@ -27,14 +27,30 @@ public class LoadGameAssets
         EditorApplication.hierarchyChanged += OnHierarchyChanged;
     }
 
-    [MenuItem("Shipbreaker/Rebuild Addressables", priority = 2)]
-    public static void RebuildAddressables()
+    [MenuItem("Shipbreaker/Actions/Force View Refresh %&r", priority = 1)]
+    static void ViewRefresh()
     {
-        AddressableAssetSettings.BuildPlayerContent();
-        ReloadAssets();
+        lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
+        AddressableRendering.ForceResetUpdateFlag();
+        AddressableRendering.UpdateViewList();
     }
 
-    [MenuItem("Shipbreaker/Reload Assets", priority = 4)]
+    [MenuItem("Shipbreaker/Actions/Clear Editor Cache", priority = 20)]
+    static void ClearAssetCache()
+    {
+        AssetDatabase.DeleteAssets(new string[] { "Assets/EditorCache" }, new List<string>());
+        AssetDatabase.CreateFolder("Assets", "EditorCache");
+        AddressableRendering.ClearView();
+        AssetDatabase.Refresh();
+    }
+
+    [MenuItem("Shipbreaker/Actions/Clear View", priority = 21)]
+    static void ClearView()
+    {
+        AddressableRendering.ClearView();
+    }
+
+    [MenuItem("Shipbreaker/Actions/Reload Assets", priority = 40)]
     public static void ReloadAssets()
     {
         AssetBundle.UnloadAllAssetBundles(false);
@@ -78,20 +94,11 @@ public class LoadGameAssets
         }
     }
 
-    [MenuItem("Shipbreaker/Clear Asset Cache", priority = 20)]
-    static void ClearAssetCache()
+    [MenuItem("Shipbreaker/Actions/Rebuild Addressables", priority = 41)]
+    public static void RebuildAddressables()
     {
-        AssetDatabase.DeleteAssets(new string[] { "Assets/EditorCache" }, new List<string>());
-        AssetDatabase.CreateFolder("Assets", "EditorCache");
-        AssetDatabase.Refresh();
-    }
-
-    [MenuItem("Shipbreaker/Force View Refresh %&r", priority = 1)]
-    static void ViewRefresh()
-    {
-        lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
-        AddressableRendering.ForceResetUpdateFlag();
-        AddressableRendering.UpdateViewList();
+        AddressableAssetSettings.BuildPlayerContent();
+        ReloadAssets();
     }
 
     static int lastNumRoot;

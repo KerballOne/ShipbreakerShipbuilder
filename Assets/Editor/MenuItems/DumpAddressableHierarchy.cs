@@ -8,58 +8,68 @@ using System.Text;
 
 public static class DumpAddressableHierarchy
 {
-    [MenuItem("Shipbreaker/Dump Selected Addressable Hierarchy", priority = 20)]
-    static void DumpSelected()
+    [MenuItem("Shipbreaker/Dump Selected Components", priority = 200)]
+    static void DumpSelectedComponents()
     {
         var go = Selection.activeGameObject;
-        if (go == null) { Debug.LogWarning("Select a GameObject with AddressableLoader first."); return; }
+        if (go == null) { Debug.LogWarning("[DumpComponents] Select a GameObject first."); return; }
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"[DumpComponents] Component tree for '{go.name}' (EditorCache/scene version):");
+        WalkComponents(go.transform, "", sb);
+        Debug.Log(sb.ToString());
+    }
+
+    [MenuItem("Shipbreaker/Dump Addressable Components (live)", priority = 200)]
+    static void DumpAddressableComponents()
+    {
+        var go = Selection.activeGameObject;
+        if (go == null) { Debug.LogWarning("[DumpAddressable] Select an AddressableLoader GameObject first."); return; }
 
         var loader = go.GetComponent<AddressableLoader>();
-        if (loader == null) { Debug.LogWarning($"{go.name} has no AddressableLoader component."); return; }
+        if (loader == null) { Debug.LogWarning($"[DumpAddressable] {go.name} has no AddressableLoader."); return; }
 
-        var guid = loader.assetGUID;
-        var name = go.name;
-        Debug.Log($"[DumpHierarchy] Looking up locations for {name} ({guid})...");
+        var guid = loader.assetGUID ?? (loader.refs?.Count > 0 ? loader.refs[0] : null);
+        if (string.IsNullOrEmpty(guid)) { Debug.LogWarning("[DumpAddressable] No GUID found on AddressableLoader."); return; }
+
+        Debug.Log($"[DumpAddressable] Loading {go.name} ({guid}) from Addressables...");
 
         var locOp = Addressables.LoadResourceLocationsAsync(guid, typeof(GameObject));
         locOp.Completed += locRes =>
         {
             if (locRes.Status != AsyncOperationStatus.Succeeded || locRes.Result == null || locRes.Result.Count == 0)
             {
-                Debug.LogError($"[DumpHierarchy] No location found for {guid}. Run Shipbreaker → Reload Assets first.");
+                Debug.LogError($"[DumpAddressable] No location for {guid}. Run Shipbreaker → Actions → Reload Assets first.");
                 return;
             }
-
-            Debug.Log($"[DumpHierarchy] Found location, loading asset...");
 
             var loadOp = Addressables.LoadAssetAsync<GameObject>(locRes.Result[0]);
             loadOp.Completed += res =>
             {
                 if (res.Status != AsyncOperationStatus.Succeeded || res.Result == null)
                 {
-                    Debug.LogError($"[DumpHierarchy] Asset load failed for {guid}: {res.OperationException?.Message}");
+                    Debug.LogError($"[DumpAddressable] Load failed: {res.OperationException?.Message}");
                     return;
                 }
 
                 var sb = new StringBuilder();
-                sb.AppendLine($"[DumpHierarchy] Child paths for {name} (GUID: {guid}) — paste into Child Path field:");
-                WalkHierarchy(res.Result.transform, "", sb);
+                sb.AppendLine($"[DumpAddressable] LIVE component tree for '{go.name}' (GUID: {guid}):");
+                WalkComponents(res.Result.transform, "", sb);
                 Debug.Log(sb.ToString());
             };
         };
     }
 
-    static void WalkHierarchy(Transform t, string path, StringBuilder sb)
+    static void WalkComponents(Transform t, string indent, StringBuilder sb)
     {
-        foreach (Transform child in t)
-        {
-            var childPath = path == "" ? child.name : path + "/" + child.name;
-            sb.AppendLine($"  {childPath}");
-            WalkHierarchy(child, childPath, sb);
-        }
-    }
+        var comps = t.GetComponents<Component>();
+        var names = new System.Collections.Generic.List<string>();
+        foreach (var c in comps)
+            if (c != null) names.Add(c.GetType().Name);
 
-    [MenuItem("Shipbreaker/Dump Selected Addressable Hierarchy", validate = true)]
-    static bool ValidateDump() => Selection.activeGameObject?.GetComponent<AddressableLoader>() != null;
+        sb.AppendLine($"{indent}{t.name}  [{string.Join(", ", names)}]");
+        foreach (Transform child in t)
+            WalkComponents(child, indent + "  ", sb);
+    }
 }
 #endif

@@ -50,12 +50,12 @@ public class RoomGizmos
                     Gizmos.matrix = transformMatrix;
 
                     Gizmos.color = GameRenderWindow.roomOverlapColor;
-                    
+
                     float overlapBorderSize = 0.02f;
 
                     Gizmos.DrawCube(new Vector3(-.5f, 0, 0), new Vector3(overlapBorderSize, 1f, 1f));
                     Gizmos.DrawCube(new Vector3(.5f, 0, 0), new Vector3(overlapBorderSize, 1f, 1f));
-                    
+
                     Gizmos.DrawCube(new Vector3(0, 0, -.5f), new Vector3(1f, 1f, overlapBorderSize));
                     Gizmos.DrawCube(new Vector3(0, 0, .5f), new Vector3(1f, 1f, overlapBorderSize));
 
@@ -67,6 +67,41 @@ public class RoomGizmos
                     }
                 }
             }
+        }
+
+        if (GameRenderWindow.drawJoints)
+        {
+            foreach (var jd in AddressableRendering.jointData)
+            {
+                // Clamp near-zero size components so the matrix stays non-degenerate.
+                var sz = jd.bounds.size;
+                sz.x = Mathf.Max(sz.x, 0.05f);
+                sz.y = Mathf.Max(sz.y, 0.05f);
+                sz.z = Mathf.Max(sz.z, 0.05f);
+
+                Gizmos.matrix = jd.worldMatrix * Matrix4x4.TRS(jd.bounds.center, Quaternion.identity, sz);
+                Gizmos.color = jd.type == AddressableRendering.JointGizmoData.JointType.Root     ? GameRenderWindow.jointRootColor
+                             : jd.type == AddressableRendering.JointGizmoData.JointType.CutPoint ? GameRenderWindow.jointCutColor
+                             : GameRenderWindow.jointStandardColor;
+                Gizmos.DrawWireCube(Vector3.zero, Vector3.one);
+            }
+            Gizmos.matrix = Matrix4x4.identity;
+        }
+
+        if (GameRenderWindow.drawBakedJoints)
+        {
+            foreach (var jd in AddressableRendering.bakedJointData)
+            {
+                var sz = jd.bounds.size;
+                sz.x = Mathf.Max(sz.x, 0.05f);
+                sz.y = Mathf.Max(sz.y, 0.05f);
+                sz.z = Mathf.Max(sz.z, 0.05f);
+
+                Gizmos.matrix = jd.worldMatrix * Matrix4x4.TRS(jd.bounds.center, Quaternion.identity, sz);
+                Gizmos.color = GameRenderWindow.bakedJointColor;
+                Gizmos.DrawCube(Vector3.zero, Vector3.one);
+            }
+            Gizmos.matrix = Matrix4x4.identity;
         }
     }
 }
