@@ -1,76 +1,108 @@
 using UnityEditor;
 using UnityEngine;
 
-public static class SetupBellColliders
+public class CylindricalColliderSegments : EditorWindow
 {
-    const string PREFAB_PATH = "Assets/_CustomShips/Rocinante/Engine Bell.prefab";
-    const string COL_MESH_PATH = "Assets/_CustomShips/Rocinante/rocinante_engine_bell_col.fbx";
-    const int WEDGE_COUNT = 8;
+    GameObject m_Prefab;
+    Mesh       m_ColMesh;
+    float      m_SegmentAngle = 45f;
 
-    [MenuItem("Shipbuilder/Setup Engine Bell Colliders")]
-    static void Run()
+    int WedgeCount => Mathf.Max(1, Mathf.RoundToInt(360f / m_SegmentAngle));
+
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Cylindrical Collider Segments", priority = -10)]
+    static void Open()
     {
-        var importer = AssetImporter.GetAtPath(COL_MESH_PATH) as ModelImporter;
-        if (importer == null)
+        var w = GetWindow<CylindricalColliderSegments>("Cylindrical Collider Segments");
+        w.minSize = new Vector2(340, 170);
+    }
+
+    void OnGUI()
+    {
+        EditorGUILayout.Space(6);
+        m_Prefab       = (GameObject)EditorGUILayout.ObjectField("Base Part Prefab",  m_Prefab,  typeof(GameObject), false);
+        m_ColMesh      = (Mesh)      EditorGUILayout.ObjectField("Collider Segment",  m_ColMesh, typeof(Mesh),       false);
+        m_SegmentAngle = EditorGUILayout.FloatField("Segment Angle (deg)", m_SegmentAngle);
+
+        using (new EditorGUI.DisabledScope(true))
+            EditorGUILayout.IntField("Wedge Count", WedgeCount);
+
+        EditorGUILayout.Space(8);
+
+        bool ready = m_Prefab != null && m_ColMesh != null && m_SegmentAngle > 0f;
+        using (new EditorGUI.DisabledScope(!ready))
         {
-            Debug.LogError($"Collision mesh not found at {COL_MESH_PATH} — run the Blender script first.");
-            return;
-        }
-        if (!importer.isReadable)
-        {
-            importer.isReadable = true;
-            importer.SaveAndReimport();
+            if (GUILayout.Button("Setup Colliders", GUILayout.Height(32)))
+                Apply();
         }
 
-        var colMesh = AssetDatabase.LoadAssetAtPath<Mesh>(COL_MESH_PATH);
-        if (colMesh == null)
+        if (!ready)
         {
-            Debug.LogError($"Could not load mesh from {COL_MESH_PATH}");
+            EditorGUILayout.HelpBox(
+                m_Prefab       == null   ? "Assign a base part prefab." :
+                m_ColMesh      == null   ? "Assign a collider segment mesh." :
+                m_SegmentAngle <= 0f     ? "Segment angle must be > 0." : "",
+                MessageType.Info);
+        }
+    }
+
+    void Apply()
+    {
+        string prefabPath = AssetDatabase.GetAssetPath(m_Prefab);
+        if (string.IsNullOrEmpty(prefabPath))
+        {
+            Debug.LogError("Prefab is not a project asset.");
             return;
         }
 
-        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PREFAB_PATH);
-        if (prefab == null)
+        // Ensure the source mesh asset is read-enabled
+        string meshPath = AssetDatabase.GetAssetPath(m_ColMesh);
+        if (!string.IsNullOrEmpty(meshPath))
         {
-            Debug.LogError($"Prefab not found at {PREFAB_PATH}");
-            return;
+            var importer = AssetImporter.GetAtPath(meshPath) as ModelImporter;
+            if (importer != null && !importer.isReadable)
+            {
+                importer.isReadable = true;
+                importer.SaveAndReimport();
+            }
         }
 
-        using var scope = new PrefabUtility.EditPrefabContentsScope(PREFAB_PATH);
+        using var scope = new PrefabUtility.EditPrefabContentsScope(prefabPath);
         var root = scope.prefabContentsRoot;
 
-        // Remove any previously generated wedge collider children
+        // Remove previously generated segment collider children
+        string prefix = root.name + "_Col_";
         for (int i = root.transform.childCount - 1; i >= 0; i--)
         {
             var child = root.transform.GetChild(i);
-            if (child.name.StartsWith("BellCollider_"))
+            if (child.name.StartsWith(prefix))
                 Object.DestroyImmediate(child.gameObject);
         }
 
-        // Disable the existing convex MeshCollider on the root — it covers the
-        // full bell and blocks entry. The wedge children replace it for physics.
+        // Keep root convex MeshCollider enabled as a trigger so barge deposit
+        // detection fires; segment children handle all physical collisions instead.
         var rootCol = root.GetComponent<MeshCollider>();
         if (rootCol != null)
-            rootCol.enabled = false;
-
-        for (int i = 0; i < WEDGE_COUNT; i++)
         {
-            float angleDeg = i * (360f / WEDGE_COUNT);
+            rootCol.enabled   = true;
+            rootCol.isTrigger = true;
+        }
 
-            var child = new GameObject($"BellCollider_{i:D2}");
+        int wedgeCount = WedgeCount;
+        for (int i = 0; i < wedgeCount; i++)
+        {
+            float angleDeg = i * m_SegmentAngle;
+
+            var child = new GameObject($"{prefix}{i:D2}");
             child.transform.SetParent(root.transform, false);
             child.transform.localPosition = Vector3.zero;
             child.transform.localScale    = Vector3.one;
-
-            // Bell is exported with Z-up from Blender → FBX importer rotates to Y-up.
-            // Wedges need to spin around the bell's axis which is local Y in Unity.
             child.transform.localRotation = Quaternion.Euler(0f, 0f, angleDeg);
 
             var mc = child.AddComponent<MeshCollider>();
-            mc.sharedMesh = colMesh;
+            mc.sharedMesh = m_ColMesh;
             mc.convex     = true;
         }
 
-        Debug.Log($"Engine Bell: added {WEDGE_COUNT} wedge colliders, disabled root MeshCollider.");
+        Debug.Log($"Cylindrical Collider Segments: added {wedgeCount} segments to '{m_Prefab.name}', root MeshCollider set to trigger.");
     }
 }

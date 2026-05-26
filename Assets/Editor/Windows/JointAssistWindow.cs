@@ -14,7 +14,7 @@ public class JointAssistWindow : EditorWindow
     string statusMessage = "";
     MessageType statusType = MessageType.None;
 
-    [MenuItem("Shipbreaker/Joint Assist", priority = 50)]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Joint Assist", priority = -10)]
     static void Open() => GetWindow<JointAssistWindow>("Joint Assist");
 
     void OnSelectionChange() => Repaint();

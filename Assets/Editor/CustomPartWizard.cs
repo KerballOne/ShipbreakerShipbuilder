@@ -54,7 +54,7 @@ public class CustomPartWizard : EditorWindow
 
     Vector2 m_Scroll;
 
-    [MenuItem("Shipbuilder/Create Custom Part Wizard")]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Create Custom Part Wizard", priority = -10)]
     static void Open()
     {
         var w = GetWindow<CustomPartWizard>("Custom Part Wizard");
