@@ -89,7 +89,7 @@ public class ImportGamePartWizard : EditorWindow
         s_ChildBgStyle.normal.background = tex;
     }
 
-    [MenuItem("Shipbuilder/Import Game Part Wizard")]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Import Game Part Wizard", priority = -10)]
     static void Open()
     {
         var w = GetWindow<ImportGamePartWizard>("Import Game Part");

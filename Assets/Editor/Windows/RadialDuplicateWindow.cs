@@ -9,7 +9,7 @@ public class RadialDuplicateWindow : EditorWindow
     Axis _axis = Axis.Y;
     int _count = 4;
 
-    [MenuItem("Shipbuilder/Radial Duplicate")]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Radial Duplicate", priority = -10)]
     static void Open() => GetWindow<RadialDuplicateWindow>("Radial Duplicate");
 
     void OnGUI()
