@@ -23,7 +23,7 @@ BAND_HEIGHT    = 0.10  * SCALE
 BAND_PROTRUDE  = 0.05  * SCALE
 
 # Bell wall thickness
-WALL_THICKNESS = 0.20  * SCALE
+WALL_THICKNESS = 0.60  * SCALE
 
 # Exit rim (U-channel flange)
 RIM_WIDTH      = 0.20  * SCALE
@@ -53,7 +53,7 @@ RINGS          = 24
 # Inner turbine structure — hub
 HUB_OUTER_R       = 0.58  * SCALE
 HUB_INNER_R       = 0.42  * SCALE
-HUB_LENGTH        = 6.10  * SCALE
+HUB_LENGTH        = 5.10  * SCALE
 HUB_RING_COUNT    = 10
 HUB_RING_HEIGHT   = 0.050 * SCALE
 HUB_RING_PROTRUDE = 0.042 * SCALE
@@ -75,7 +75,7 @@ EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_Cu
 EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_nozzle.fbx"
 
 # Set to a source image path to generate PBR textures; leave blank to skip
-SOURCE_TEXTURE = "C:/Users/user/Pictures/Screenshots/An EpsteinDrive.png"
+SOURCE_TEXTURE   = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Textures/EpsDrive.png"
 
 # Texture generation parameters
 TEX_NORMAL_STRENGTH = 8.0   # surface bump intensity in normal map
@@ -316,6 +316,18 @@ for k in range(RIM_PANEL_COUNT):
 
 bmesh.ops.reverse_faces(bm, faces=outer_bell_faces)
 bm.normal_update()
+
+# Cylindrical UV — U = angle / 2π, V = normalized Z
+uv_layer = bm.loops.layers.uv.new("UVMap")
+_z_min = -RIM_DEPTH
+_z_rng = NOZZLE_LENGTH + COLLAR_LENGTH - _z_min
+for face in bm.faces:
+    us = [(math.atan2(lp.vert.co.y, lp.vert.co.x) / (2 * math.pi)) % 1.0
+          for lp in face.loops]
+    if max(us) - min(us) > 0.5:  # face straddles the seam — shift low side up
+        us = [u + 1.0 if u < 0.5 else u for u in us]
+    for lp, u in zip(face.loops, us):
+        lp[uv_layer].uv = (u, (lp.vert.co.z - _z_min) / _z_rng)
 
 mesh_outer = bpy.data.meshes.new("EngineBellMesh")
 obj_outer  = bpy.data.objects.new("EngineBell", mesh_outer)
@@ -687,9 +699,10 @@ if SOURCE_TEXTURE:
 
     def save_tex(name, data, linear=False):
         img = bpy.data.images.new(name, width=W, height=H, alpha=True)
-        img.pixels.foreach_set(data.ravel())
         if linear:
             img.colorspace_settings.name = 'Non-Color'
+        img.pixels.foreach_set(data.ravel().tolist())
+        img.update()
         path = os.path.join(out_dir, name + ".png")
         img.filepath_raw = path
         img.file_format  = 'PNG'

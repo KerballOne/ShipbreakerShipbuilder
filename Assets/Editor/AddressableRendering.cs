@@ -32,6 +32,11 @@ public class AddressableRendering : MonoBehaviour
         roomOverlaps.Clear();
     }
 
+    public static void ForceResetUpdateFlag()
+    {
+        isUpdating = false;
+    }
+
     public async static void UpdateViewList()
     {
         if (isUpdating) return;
@@ -112,10 +117,10 @@ public class AddressableRendering : MonoBehaviour
         {
             Debug.LogException(ex);
         }
-
-
-
-        isUpdating = false;
+        finally
+        {
+            isUpdating = false;
+        }
     }
 
     async static System.Threading.Tasks.Task<string> LoadHardpoint(HardPoint hardPoint)
@@ -308,7 +313,7 @@ public class AddressableRendering : MonoBehaviour
                         foundChild = children.Where(c => c.name.StartsWith(childPathPart)).FirstOrDefault()?.gameObject;
                         if(foundChild == null)
                         {
-                            Debug.LogError($"Error: {parent.name} does not have a child at path {disabledChild}");
+                            break;
                         }
                         children = foundChild.transform.Cast<Transform>();
                     }

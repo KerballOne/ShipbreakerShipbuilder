@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
+using UnityEditor.AddressableAssets.Settings;
 
 [InitializeOnLoad]
 public class LoadGameAssets
@@ -24,6 +25,13 @@ public class LoadGameAssets
         finalizer = new Finalizer();
         ReloadAssets();
         EditorApplication.hierarchyChanged += OnHierarchyChanged;
+    }
+
+    [MenuItem("Shipbreaker/Rebuild Addressables", priority = 2)]
+    public static void RebuildAddressables()
+    {
+        AddressableAssetSettings.BuildPlayerContent();
+        ReloadAssets();
     }
 
     [MenuItem("Shipbreaker/Reload Assets", priority = 4)]
@@ -82,6 +90,7 @@ public class LoadGameAssets
     static void ViewRefresh()
     {
         lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
+        AddressableRendering.ForceResetUpdateFlag();
         AddressableRendering.UpdateViewList();
     }
 
