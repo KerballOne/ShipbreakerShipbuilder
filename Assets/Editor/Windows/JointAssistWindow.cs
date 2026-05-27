@@ -5,20 +5,22 @@ using UnityEditor;
 
 public class JointAssistWindow : EditorWindow
 {
-    // Snap state
-    GameObject[] snapCandidates;
-    int movingIndex = -1;
+    // Cut point state
+    GameObject cutPointPrefab;
+    bool pickingCutPoint;
+
+    // Face snap state — each face stores the picked point, normal, and source object
+    struct PickedFace { public Vector3 point; public Vector3 normal; public GameObject source; }
+    PickedFace? snapFaceA;
+    PickedFace? snapFaceB;
+    int pickingSnapFace; // 0 = none, 1 = A, 2 = B
     float overlapAmount = 0.025f;
-    enum OverlapAxis { AutoDetect, PosX, NegX, PosY, NegY, PosZ, NegZ }
-    OverlapAxis axis = OverlapAxis.AutoDetect;
 
     // Joint placement state
     GameObject invisibleJointPrefab;
-    GameObject cutPointPrefab;
-    bool useCutPoints;
-    string jointGroup           = "";
-    float autoOverlapThreshold  = 0.02f;
-    float autoDedupRadius       = 0.05f;
+    string jointGroup          = "";
+    float autoOverlapThreshold = 0.02f;
+    float autoDedupRadius      = 0.05f;
 
     string statusMessage = "";
     MessageType statusType = MessageType.None;
@@ -28,9 +30,6 @@ public class JointAssistWindow : EditorWindow
     const string PrefKey    = "JointAssist.InvisibleJointPrefabGUID";
     const string CutPrefKey = "JointAssist.CutPointPrefabGUID";
 
-    GameObject ActivePrefab    => useCutPoints && cutPointPrefab != null ? cutPointPrefab : invisibleJointPrefab;
-    bool       IsUsingCutPoints => useCutPoints && cutPointPrefab != null;
-
     [MenuItem("Shipbreaker/Shipbuilder Tools/Joint Assist", priority = 10)]
     static void Open() => GetWindow<JointAssistWindow>("Joint Assist");
 
@@ -39,6 +38,14 @@ public class JointAssistWindow : EditorWindow
         minSize = new Vector2(260f, 100f);
         invisibleJointPrefab = LoadPref(PrefKey);
         cutPointPrefab       = LoadPref(CutPrefKey);
+        SceneView.duringSceneGui += OnSceneGUI;
+    }
+
+    void OnDisable()
+    {
+        SceneView.duringSceneGui -= OnSceneGUI;
+        pickingCutPoint  = false;
+        pickingSnapFace  = 0;
     }
 
     static GameObject LoadPref(string key)
@@ -58,84 +65,85 @@ public class JointAssistWindow : EditorWindow
 
     void OnGUI()
     {
-        // Vertical scroll only — suppress horizontal bar
         scrollPos = GUILayout.BeginScrollView(
             scrollPos, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
 
-        var selBtnStyle = new GUIStyle(GUI.skin.button) { wordWrap = true, alignment = TextAnchor.MiddleLeft };
+        // ── Cut Point Prefab ──────────────────────────────────────────────────
+        EditorGUI.BeginChangeCheck();
+        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(
+            "Cut Point Prefab", cutPointPrefab, typeof(GameObject), false);
+        if (EditorGUI.EndChangeCheck()) SavePref(CutPrefKey, cutPointPrefab);
+
+        using (new EditorGUI.DisabledScope(cutPointPrefab == null))
+        {
+            var prevBG = GUI.backgroundColor;
+            if (pickingCutPoint) GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
+            if (GUILayout.Button(pickingCutPoint ? "Cancel Pick" : "Place Cut Point", GUILayout.Height(28)))
+            {
+                pickingCutPoint  = !pickingCutPoint;
+                pickingSnapFace  = 0;
+                if (pickingCutPoint) { statusMessage = ""; SceneView.lastActiveSceneView?.Focus(); }
+            }
+            GUI.backgroundColor = prevBG;
+        }
+
+        // ── Section break ─────────────────────────────────────────────────────
+        GUILayout.Space(12);
+        DrawSeparator();
+        GUILayout.Space(8);
 
         // ── Face Snapping ─────────────────────────────────────────────────────
         EditorGUILayout.LabelField("Face Snapping", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            "Select 2 parts, click Snap, then choose which one moves.",
-            MessageType.None);
-
         EditorGUILayout.Space(4);
 
+        var activeColor  = new Color(0.3f, 0.6f, 1f);
+        var pickedColor  = new Color(0.2f, 0.7f, 0.3f);
+        var errorColor   = new Color(0.9f, 0.4f, 0.2f);
+
         int selCount = Selection.gameObjects.Length;
+        EditorGUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(selCount != 2))
         {
-            if (GUILayout.Button($"Snap 2 Faces Together  ({selCount} selected)", GUILayout.Height(28)))
+            if (GUILayout.Button($"Auto-Detect Faces  ({selCount} selected)", GUILayout.Height(26)))
+                AutoDetectFaces();
+        }
+        using (new EditorGUI.DisabledScope(!snapFaceA.HasValue && !snapFaceB.HasValue))
+        {
+            if (GUILayout.Button("⇆", GUILayout.Height(26), GUILayout.Width(28)))
             {
-                snapCandidates = Selection.gameObjects.ToArray();
-                movingIndex = -1;
-                bool hasFake = snapCandidates.Any(g => g.GetComponent<FakePrefabDisplay>() != null || g.GetComponent<SelectAddressableParent>() != null);
-                if (hasFake)
-                {
-                    statusMessage = "One or more selected objects are fake display children — face snapping still works, but they will be destroyed on Redraw.";
-                    statusType = MessageType.Warning;
-                }
-                Repaint();
+                var tmp = snapFaceA;
+                snapFaceA = snapFaceB;
+                snapFaceB = tmp;
             }
         }
+        EditorGUILayout.EndHorizontal();
 
-        if (snapCandidates != null && snapCandidates.Length == 2 &&
-            snapCandidates[0] != null && snapCandidates[1] != null)
+        EditorGUILayout.Space(4);
+        DrawFacePickButton(1, "Face A", "Moving",     ref snapFaceA, activeColor, pickedColor);
+        DrawFacePickButton(2, "Face B", "Flush with", ref snapFaceB, activeColor, pickedColor);
+
+        bool bothPicked = snapFaceA.HasValue && snapFaceB.HasValue;
+
+        if (bothPicked)
         {
-            EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Which object moves?", EditorStyles.miniLabel);
-
-            var prevColor = GUI.backgroundColor;
-            var selColor  = new Color(0.3f, 0.6f, 1f);
-
-            GUI.backgroundColor = movingIndex == 0 ? selColor : prevColor;
-            if (GUILayout.Button(snapCandidates[0].name, selBtnStyle))
-                movingIndex = movingIndex == 0 ? -1 : 0;
-
-            GUI.backgroundColor = movingIndex == 1 ? selColor : prevColor;
-            if (GUILayout.Button(snapCandidates[1].name, selBtnStyle))
-                movingIndex = movingIndex == 1 ? -1 : 1;
-
-            GUI.backgroundColor = prevColor;
-
-            EditorGUILayout.Space(4);
-            axis = (OverlapAxis)EditorGUILayout.EnumPopup("Direction", axis);
-
-            if (movingIndex >= 0)
-                ShowPreview();
-
             EditorGUILayout.Space(4);
 
             EditorGUILayout.BeginHorizontal();
             var savedLW = EditorGUIUtility.labelWidth;
             var savedFW = EditorGUIUtility.fieldWidth;
             EditorGUIUtility.labelWidth = 75f;
-            EditorGUIUtility.fieldWidth = 30f;
+            EditorGUIUtility.fieldWidth = 40f;
             overlapAmount = EditorGUILayout.FloatField("Overlap (m)", overlapAmount);
             EditorGUIUtility.labelWidth = savedLW;
             EditorGUIUtility.fieldWidth = savedFW;
-            using (new EditorGUI.DisabledScope(movingIndex < 0))
-            {
-                if (GUILayout.Button("Snap to Overlap", GUILayout.MaxWidth(120)))
-                    ApplyMove(overlapAmount);
-            }
+            if (GUILayout.Button("Snap", GUILayout.MaxWidth(60)))
+                ApplyFaceSnap(overlapAmount);
             EditorGUILayout.EndHorizontal();
 
-            using (new EditorGUI.DisabledScope(movingIndex < 0))
-            {
-                if (GUILayout.Button("Snap Flush  (0 gap)", GUILayout.Height(32)))
-                    ApplyMove(0f);
-            }
+            EditorGUILayout.Space(4);
+
+            if (GUILayout.Button("Snap Flush  (0 gap)", GUILayout.Height(32)))
+                ApplyFaceSnap(0f);
         }
 
         // ── Section break ─────────────────────────────────────────────────────
@@ -145,7 +153,6 @@ public class JointAssistWindow : EditorWindow
 
         // ── Joint Placement ───────────────────────────────────────────────────
         EditorGUILayout.LabelField("Joint Placement", EditorStyles.boldLabel);
-
         EditorGUILayout.Space(4);
 
         EditorGUI.BeginChangeCheck();
@@ -153,50 +160,19 @@ public class JointAssistWindow : EditorWindow
             "InvisibleJoint Prefab", invisibleJointPrefab, typeof(GameObject), false);
         if (EditorGUI.EndChangeCheck()) SavePref(PrefKey, invisibleJointPrefab);
 
-        EditorGUI.BeginChangeCheck();
-        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(
-            "Cut Point Prefab", cutPointPrefab, typeof(GameObject), false);
-        if (EditorGUI.EndChangeCheck()) SavePref(CutPrefKey, cutPointPrefab);
-
-        if (invisibleJointPrefab == null && cutPointPrefab == null)
-            EditorGUILayout.HelpBox("Assign at least one prefab above.", MessageType.Info);
-
-        if (invisibleJointPrefab != null && cutPointPrefab != null)
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Place as", GUILayout.Width(60));
-            var prevBG = GUI.backgroundColor;
-            GUI.backgroundColor = !useCutPoints ? new Color(0.3f, 0.6f, 1f) : prevBG;
-            if (GUILayout.Button("Invisible Joint", EditorStyles.miniButtonLeft))  useCutPoints = false;
-            GUI.backgroundColor =  useCutPoints ? new Color(0.3f, 0.6f, 1f) : prevBG;
-            if (GUILayout.Button("Cut Point",       EditorStyles.miniButtonRight)) useCutPoints = true;
-            GUI.backgroundColor = prevBG;
-            EditorGUILayout.EndHorizontal();
-        }
-        else
-            useCutPoints = cutPointPrefab != null;
+        if (invisibleJointPrefab == null)
+            EditorGUILayout.HelpBox("Assign an InvisibleJoint prefab above.", MessageType.Info);
 
         EditorGUILayout.Space(6);
 
-        bool canPlace = movingIndex >= 0 && ActivePrefab != null;
-        using (new EditorGUI.DisabledScope(!canPlace))
-        {
-            string lbl = IsUsingCutPoints ? "Place Cut Point at Snap Face" : "Place Invisible Joint at Snap Face";
-            if (GUILayout.Button(lbl, GUILayout.Height(26)))
-                PlaceJoint();
-        }
-        if (movingIndex < 0)
-            EditorGUILayout.HelpBox("Set moving and target objects in the Snap section first.", MessageType.None);
-
-        EditorGUILayout.Space(8);
         EditorGUILayout.LabelField("Auto-Placement", EditorStyles.miniBoldLabel);
         EditorGUILayout.HelpBox(
             "Select 2+ parts in the hierarchy, then click Auto-Place. " +
             "Existing joints at the same positions are not duplicated.",
             MessageType.None);
 
-        jointGroup = EditorGUILayout.TextField(
-            new GUIContent("Joints Subfolder", "If set, joints are placed under Joints/<name> for organization. Leave empty to place directly under Joints."),
+        jointGroup           = EditorGUILayout.TextField(
+            new GUIContent("Joints Subfolder", "If set, joints are placed under Joints/<name>. Leave empty to place directly under Joints."),
             jointGroup);
         autoOverlapThreshold = EditorGUILayout.FloatField("Adjacency Threshold (m)", autoOverlapThreshold);
         autoDedupRadius      = EditorGUILayout.FloatField("Dedup Radius (m)",        autoDedupRadius);
@@ -204,29 +180,16 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.Space(4);
 
         int autoSel = Selection.gameObjects.Length;
-        bool canAuto = ActivePrefab != null && autoSel >= 2;
+        bool canAuto = invisibleJointPrefab != null && autoSel >= 2;
         if (autoSel >= 2)
         {
-            bool anyAsync  = Selection.gameObjects.Any(IsAsyncPart);
-            bool cutPoints = Selection.gameObjects
-                .SelectMany(g => g.GetComponentsInChildren<FakeStructurePart>(true))
-                .Any(fsp => fsp.type == FakeStructurePart.JointType.CutPoint);
+            bool anyAsync   = Selection.gameObjects.Any(IsAsyncPart);
             int islandCount = Selection.gameObjects.Sum(g => GetIslandFSPs(g).Count);
-
-            string advice;
             if (anyAsync)
-                advice = cutPoints
-                    ? $"{autoSel} selected ({islandCount} islands) — async parts detected. Invisible Joints needed at interfaces. Cut points found — baked cuttable seams available."
-                    : $"{autoSel} selected ({islandCount} islands) — async parts detected. Invisible Joints needed at interfaces.";
-            else
-                advice = cutPoints
-                    ? $"{autoSel} selected ({islandCount} islands) — all baked. Cut points found — may form cuttable seams if SP_Mats are compatible."
-                    : $"{autoSel} selected ({islandCount} islands) — all baked. May auto-joint if SP_Mats are compatible.";
-
-            EditorGUILayout.HelpBox(advice, anyAsync ? MessageType.Warning : MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    $"{autoSel} selected ({islandCount} islands) — async parts detected. Invisible Joints needed at interfaces.",
+                    MessageType.Warning);
         }
-        else
-            EditorGUILayout.HelpBox("Select 2 or more parts in the hierarchy first.", MessageType.Warning);
 
         using (new EditorGUI.DisabledScope(!canAuto))
         {
@@ -257,156 +220,219 @@ public class JointAssistWindow : EditorWindow
         GUILayout.EndScrollView();
     }
 
-    static void DrawSeparator()
+    void DrawFacePickButton(int slot, string label, string staticPrefix, ref PickedFace? face, Color activeColor, Color pickedColor)
     {
-        var rect = EditorGUILayout.GetControlRect(false, 1);
-        EditorGUI.DrawRect(rect, new Color(0.5f, 0.5f, 0.5f, 1f));
+        bool isPickingThis = pickingSnapFace == slot;
+        var prevBG = GUI.backgroundColor;
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(staticPrefix, GUILayout.Width(68));
+
+        string btnText;
+        if (isPickingThis)
+        {
+            GUI.backgroundColor = activeColor;
+            btnText = $"Cancel";
+        }
+        else if (face.HasValue)
+        {
+            GUI.backgroundColor = pickedColor;
+            string name = face.Value.source != null ? face.Value.source.name : "?";
+            if (name.Length > 20) name = name.Substring(0, 18) + "…";
+            btnText = name;
+        }
+        else
+        {
+            btnText = $"Pick {label}";
+        }
+
+        if (GUILayout.Button(btnText, GUILayout.Height(26)))
+        {
+            if (isPickingThis)
+            {
+                pickingSnapFace = 0;
+            }
+            else
+            {
+                pickingSnapFace = slot;
+                pickingCutPoint = false;
+                statusMessage   = "";
+                SceneView.lastActiveSceneView?.Focus();
+            }
+        }
+
+        GUI.backgroundColor = prevBG;
+        EditorGUILayout.EndHorizontal();
     }
 
-    // ── Snap helpers ──────────────────────────────────────────────────────────
+    // ── Scene picking ─────────────────────────────────────────────────────────
 
-    GameObject ObjectToMove => movingIndex >= 0 && snapCandidates != null ? snapCandidates[movingIndex] : null;
-    GameObject TargetObject => movingIndex >= 0 && snapCandidates != null ? snapCandidates[1 - movingIndex] : null;
-
-    void ShowPreview()
+    void OnSceneGUI(SceneView sv)
     {
-        var a = ObjectToMove; var b = TargetObject;
-        if (a == null || b == null) return;
-        Bounds bA = GetBounds(a), bB = GetBounds(b);
-        Vector3 dir = GetDirection(bA, bB);
-        float gap = CalculateGap(bA, bB, dir);
-        EditorGUILayout.HelpBox(
-            $"Direction: {FormatDir(dir)}   Current gap: {gap * 100f:F1} cm",
-            MessageType.None);
+        bool anyPicking = pickingCutPoint || pickingSnapFace != 0;
+        if (!anyPicking) return;
+
+        // Crosshair
+        Handles.BeginGUI();
+        var r = sv.position;
+        EditorGUI.DrawRect(new Rect(r.width * 0.5f - 10, r.height * 0.5f - 1, 20, 2), Color.cyan);
+        EditorGUI.DrawRect(new Rect(r.width * 0.5f - 1, r.height * 0.5f - 10, 2, 20), Color.cyan);
+        Handles.EndGUI();
+
+        var e = Event.current;
+        if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+        {
+            Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+            GameObject picked = HandleUtility.PickGameObject(e.mousePosition, false);
+
+            bool hit = false;
+            Vector3 hitPoint = Vector3.zero, hitNormal = Vector3.up;
+
+            if (picked != null)
+            {
+                float bestDist = float.MaxValue;
+                foreach (var mf in picked.GetComponentsInChildren<MeshFilter>())
+                {
+                    if (mf.sharedMesh == null) continue;
+                    var lm = mf.transform.worldToLocalMatrix;
+                    Vector3 lo = lm.MultiplyPoint3x4(ray.origin);
+                    Vector3 ld = lm.MultiplyVector(ray.direction).normalized;
+                    var tris    = mf.sharedMesh.triangles;
+                    var verts   = mf.sharedMesh.vertices;
+                    var normals = mf.sharedMesh.normals;
+                    for (int ti = 0; ti < tris.Length; ti += 3)
+                    {
+                        Vector3 v0 = verts[tris[ti]], v1 = verts[tris[ti+1]], v2 = verts[tris[ti+2]];
+                        if (!RayTriangle(lo, ld, v0, v1, v2, out float t, out float u, out float v)) continue;
+                        if (t < 0 || t >= bestDist) continue;
+                        bestDist  = t;
+                        hitPoint  = mf.transform.TransformPoint(lo + ld * t);
+                        Vector3 ln = normals.Length > 0
+                            ? ((1 - u - v) * normals[tris[ti]] + u * normals[tris[ti+1]] + v * normals[tris[ti+2]]).normalized
+                            : Vector3.Cross(v1 - v0, v2 - v0).normalized;
+                        hitNormal = mf.transform.TransformDirection(ln).normalized;
+                    }
+                }
+                hit = bestDist < float.MaxValue;
+            }
+
+            if (pickingCutPoint)
+            {
+                if (hit)
+                {
+                    Transform parent = ResolveParent(picked, "");
+                    var inst = (GameObject)PrefabUtility.InstantiatePrefab(cutPointPrefab, parent);
+                    inst.transform.localScale = Vector3.one;
+                    inst.transform.position   = hitPoint;
+                    inst.transform.rotation   = CutPointRotation(hitNormal);
+                    Undo.RegisterCreatedObjectUndo(inst, "Place Cut Point");
+                    Selection.activeGameObject = inst;
+                    statusMessage = $"Placed Cut Point at {hitPoint:F3}.";
+                    statusType    = MessageType.Info;
+                }
+                else
+                {
+                    statusMessage = picked == null ? "Nothing under cursor." : $"No mesh hit on '{picked.name}'.";
+                    statusType    = MessageType.Warning;
+                }
+                pickingCutPoint = false;
+            }
+            else if (pickingSnapFace != 0)
+            {
+                int slot = pickingSnapFace;
+                if (hit)
+                {
+                    var pf = new PickedFace { point = hitPoint, normal = hitNormal, source = picked };
+                    if (slot == 1) snapFaceA = pf;
+                    else           snapFaceB = pf;
+                    statusMessage = $"Face {(slot == 1 ? "A" : "B")} picked on '{picked.name}'.";
+                    statusType    = MessageType.Info;
+                }
+                else
+                {
+                    statusMessage = picked == null ? "Nothing under cursor." : $"No mesh hit on '{picked.name}'.";
+                    statusType    = MessageType.Warning;
+                }
+                pickingSnapFace = 0;
+            }
+
+            Repaint();
+            e.Use();
+        }
+
+        if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape)
+        {
+            pickingCutPoint = false;
+            pickingSnapFace = 0;
+            Repaint();
+            e.Use();
+        }
+
+        sv.Repaint();
     }
 
-    void ApplyMove(float overlap)
+    // ── Face snap ─────────────────────────────────────────────────────────────
+
+    void AutoDetectFaces()
     {
-        var a = ObjectToMove; var b = TargetObject;
-        if (a == null || b == null) return;
-        Bounds bA = GetBounds(a), bB = GetBounds(b);
-        Vector3 dir = GetDirection(bA, bB);
-        float move = CalculateGap(bA, bB, dir) + overlap;
-        Undo.RecordObject(a.transform, "Joint Assist Snap");
-        a.transform.position += dir * move;
-        statusMessage = $"Moved '{a.name}' {move * 100f:F1} cm toward '{b.name}'.";
-        statusType = MessageType.Info;
+        var sel = Selection.gameObjects;
+        if (sel.Length != 2) return;
+
+        Bounds bA = GetBounds(sel[0]), bB = GetBounds(sel[1]);
+        Vector3 dir = GetDirection(bA, bB); // direction from A toward B
+
+        // Face center on A: the face pointing toward B
+        Vector3 faceAPoint = bA.center + dir * ReachInDir(bA, dir);
+        // Face center on B: the face pointing toward A
+        Vector3 faceBPoint = bB.center - dir * ReachInDir(bB, dir);
+
+        snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = sel[0] };
+        snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = sel[1] };
+
+        statusMessage = $"Auto-detected faces: '{sel[0].name}' → '{sel[1].name}'.";
+        statusType    = MessageType.Info;
+        Repaint();
+    }
+
+    void ApplyFaceSnap(float overlap)
+    {
+        if (!snapFaceA.HasValue || !snapFaceB.HasValue) return;
+        var fA = snapFaceA.Value;
+        var fB = snapFaceB.Value;
+        if (fA.source == null) { statusMessage = "Face A source object is missing."; statusType = MessageType.Warning; Repaint(); return; }
+
+        Transform moveRoot = fA.source.transform;
+
+        Undo.RecordObject(moveRoot, "Face Snap");
+
+        // Rotate so fA.normal aligns flush with -fB.normal, pivoting around the picked face point.
+        Quaternion alignRot = Quaternion.FromToRotation(fA.normal, -fB.normal);
+        Vector3 pivotWorld  = fA.point;
+        Vector3 toRoot      = moveRoot.position - pivotWorld;
+        moveRoot.rotation   = alignRot * moveRoot.rotation;
+        moveRoot.position   = pivotWorld + alignRot * toRoot;
+
+        // Translate so the face point lands on B's face point (+ overlap along B's inward normal).
+        Vector3 targetPos   = fB.point + fB.normal * overlap;
+        moveRoot.position  += targetPos - pivotWorld;
+
+        statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm overlap).";
+        statusType    = MessageType.Info;
         Repaint();
     }
 
     // ── Joint placement ───────────────────────────────────────────────────────
 
-    void PlaceJoint()
-    {
-        var a = ObjectToMove; var b = TargetObject;
-        var prefab = ActivePrefab;
-        if (a == null || b == null || prefab == null) return;
-        Bounds bA = GetBounds(a), bB = GetBounds(b);
-        Vector3 dir = GetDirection(bA, bB);
-        Vector3 pos = bB.center - dir * ReachInDir(bB, dir);
-        Transform parent = ResolveParent(a);
-        var inst = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
-        inst.transform.localScale = Vector3.one;
-        inst.transform.position = pos;
-        if (IsUsingCutPoints)
-            inst.transform.rotation = CutPointRotation(dir);
-        else
-            CenterColliderOnPos(inst);
-        Undo.RegisterCreatedObjectUndo(inst, "Place Joint");
-        Selection.activeGameObject = inst;
-        statusMessage = $"Placed {(IsUsingCutPoints ? "Cut Point" : "Invisible Joint")} at {pos:F3}.";
-        statusType = MessageType.Info;
-        Repaint();
-    }
-
-    // Collects top-level AddressableLoader transforms (stops recursion at each loader found).
-    static void CollectTopLevelLoaders(Transform t, List<Transform> result)
-    {
-        if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _))
-        {
-            result.Add(t);
-            return;
-        }
-        foreach (Transform child in t)
-            CollectTopLevelLoaders(child, result);
-    }
-
-    // Returns FSP world bounds grouped by island for a selected GameObject.
-    // Each direct child of an EditorCache fake that contains FSPs is a separate island.
-    // If the fake is flat (no child grouping), the whole loader is one island.
-    static List<List<Bounds>> GetIslandFSPs(GameObject go)
-    {
-        var result = new List<List<Bounds>>();
-        var loaders = new List<Transform>();
-        CollectTopLevelLoaders(go.transform, loaders);
-
-        if (loaders.Count == 0)
-        {
-            // Baked object — all its own FSPs are one island.
-            var fsps = go.GetComponentsInChildren<FakeStructurePart>(true)
-                         .Select(fsp => TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds))
-                         .ToList();
-            if (fsps.Count > 0) result.Add(fsps);
-            return result;
-        }
-
-        foreach (var loader in loaders)
-        {
-            // Find the EditorCache fake — direct child with FakePrefabDisplay or SelectAddressableParent.
-            Transform fake = null;
-            for (int c = 0; c < loader.childCount; c++)
-            {
-                var ch = loader.GetChild(c);
-                if (ch.TryGetComponent<FakePrefabDisplay>(out _) || ch.TryGetComponent<SelectAddressableParent>(out _))
-                    { fake = ch; break; }
-            }
-
-            if (fake == null) { result.Add(new List<Bounds>()); continue; }
-
-            var allFSPs = fake.GetComponentsInChildren<FakeStructurePart>(true)
-                              .Select(fsp => TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds))
-                              .ToList();
-            if (allFSPs.Count == 0) continue;
-
-            // Spatial union-find: FSPs whose expanded bounds touch are in the same island.
-            float spatialGap = 0.05f;
-            int[] ufS = Enumerable.Range(0, allFSPs.Count).ToArray();
-            int SFind(int x) { while (ufS[x] != x) { ufS[x] = ufS[ufS[x]]; x = ufS[x]; } return x; }
-
-            for (int a = 0; a < allFSPs.Count; a++)
-            {
-                var expanded = new Bounds(allFSPs[a].center, allFSPs[a].size + Vector3.one * spatialGap * 2f);
-                for (int b = a + 1; b < allFSPs.Count; b++)
-                    if (expanded.Intersects(allFSPs[b]))
-                        ufS[SFind(a)] = SFind(b);
-            }
-
-            var spatialGroups = new Dictionary<int, List<Bounds>>();
-            for (int a = 0; a < allFSPs.Count; a++)
-            {
-                int root = SFind(a);
-                if (!spatialGroups.ContainsKey(root)) spatialGroups[root] = new List<Bounds>();
-                spatialGroups[root].Add(allFSPs[a]);
-            }
-            foreach (var g in spatialGroups.Values)
-                result.Add(g);
-        }
-
-        return result;
-    }
-
     void AutoPlaceInvisibleJoints()
     {
         var selected = Selection.gameObjects;
-        Transform parent = ResolveParent(selected[0]);
+        Transform parent = ResolveParent(selected[0], jointGroup);
 
-        // Expand each selected object into its async islands.
         var perObject = new List<List<Bounds>>();
         foreach (var go in selected)
             perObject.AddRange(GetIslandFSPs(go));
         int n = perObject.Count;
 
-        // Build all candidate edges (one best interface per object pair), sorted by overlap area descending.
         var edges = new List<(float area, int i, int j, Vector3 pos, Vector3 sepDir)>();
         for (int i = 0; i < n; i++)
         {
@@ -458,7 +484,6 @@ public class JointAssistWindow : EditorWindow
             }
         }
 
-        // Kruskal's: sort edges by area descending, union-find to connect components with minimum joints.
         edges.Sort((a, b) => b.area.CompareTo(a.area));
         var uf = new int[n];
         for (int k = 0; k < n; k++) uf[k] = k;
@@ -466,26 +491,21 @@ public class JointAssistWindow : EditorWindow
         int Find(int x) { while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; }
         void Union(int a, int b) { uf[Find(a)] = Find(b); }
 
-        var placed = IsUsingCutPoints
-            ? new List<Vector3>()
-            : Object.FindObjectsOfType<InvisibleJointMarker>().Select(m => m.transform.position).ToList();
-        int count = 0;
+        var placed = Object.FindObjectsOfType<InvisibleJointMarker>().Select(m => m.transform.position).ToList();
+        int count  = 0;
 
         Undo.SetCurrentGroupName("Auto-Place InvisibleJoints");
         int undoGroup = Undo.GetCurrentGroup();
 
         foreach (var (area, i, j, pos, sepDir) in edges)
         {
-            if (Find(i) == Find(j)) continue; // already connected
+            if (Find(i) == Find(j)) continue;
             if (placed.Any(p => Vector3.Distance(p, pos) < autoDedupRadius)) { Union(i, j); continue; }
 
-            var inst = (GameObject)PrefabUtility.InstantiatePrefab(ActivePrefab, parent);
+            var inst = (GameObject)PrefabUtility.InstantiatePrefab(invisibleJointPrefab, parent);
             inst.transform.localScale = Vector3.one;
-            inst.transform.position = pos;
-            if (IsUsingCutPoints)
-                inst.transform.rotation = CutPointRotation(sepDir);
-            else
-                CenterColliderOnPos(inst);
+            inst.transform.position   = pos;
+            CenterColliderOnPos(inst);
             Undo.RegisterCreatedObjectUndo(inst, "Auto-Place Joint");
             placed.Add(pos);
             Union(i, j);
@@ -515,9 +535,15 @@ public class JointAssistWindow : EditorWindow
             inst.transform.position -= inst.transform.TransformVector(mc.sharedMesh.bounds.center);
     }
 
+    static void DrawSeparator()
+    {
+        var rect = EditorGUILayout.GetControlRect(false, 1);
+        EditorGUI.DrawRect(rect, new Color(0.5f, 0.5f, 0.5f, 1f));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    Transform ResolveParent(GameObject go)
+    Transform ResolveParent(GameObject go, string subFolder)
     {
         Transform root = go.transform;
         while (root.parent != null && root.GetComponent<BBI.Unity.Game.ModuleDefinition>() == null)
@@ -532,25 +558,22 @@ public class JointAssistWindow : EditorWindow
             joints = container.transform;
         }
 
-        if (string.IsNullOrWhiteSpace(jointGroup))
+        if (string.IsNullOrWhiteSpace(subFolder))
             return joints;
 
-        Transform sub = joints.Find(jointGroup);
+        Transform sub = joints.Find(subFolder);
         if (sub != null) return sub;
-        var subGo = new GameObject(jointGroup);
+        var subGo = new GameObject(subFolder);
         Undo.RegisterCreatedObjectUndo(subGo, "Create Joint Group");
         subGo.transform.SetParent(joints, false);
         return subGo.transform;
     }
 
-    static Quaternion CutPointRotation(Vector3 sepDir)
+    static Quaternion CutPointRotation(Vector3 normal)
     {
-        // Align the cut point's local X (thin axis, 0.125m extent) with sepDir so it straddles the seam.
-        // FromToRotation is ambiguous at 180° but sepDir is always a cardinal, so this is safe for ±Y/±Z;
-        // for ±X we need an explicit axis to avoid the degenerate case.
-        if (Vector3.Dot(sepDir, Vector3.right) < -0.99f)
+        if (Vector3.Dot(normal, Vector3.right) < -0.99f)
             return Quaternion.AngleAxis(180f, Vector3.up);
-        return Quaternion.FromToRotation(Vector3.right, sepDir);
+        return Quaternion.FromToRotation(Vector3.right, normal);
     }
 
     static bool IsAsyncPart(GameObject go)
@@ -558,6 +581,116 @@ public class JointAssistWindow : EditorWindow
         for (var t = go.transform; t != null; t = t.parent)
             if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return true;
         return false;
+    }
+
+    // Collects top-level AddressableLoader transforms.
+    static void CollectTopLevelLoaders(Transform t, List<Transform> result)
+    {
+        if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _))
+        {
+            result.Add(t);
+            return;
+        }
+        foreach (Transform child in t)
+            CollectTopLevelLoaders(child, result);
+    }
+
+    static List<List<Bounds>> GetIslandFSPs(GameObject go)
+    {
+        var result  = new List<List<Bounds>>();
+        var loaders = new List<Transform>();
+        CollectTopLevelLoaders(go.transform, loaders);
+
+        if (loaders.Count == 0)
+        {
+            var fsps = go.GetComponentsInChildren<FakeStructurePart>(true)
+                         .Select(fsp => TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds))
+                         .ToList();
+            if (fsps.Count > 0) result.Add(fsps);
+            return result;
+        }
+
+        foreach (var loader in loaders)
+        {
+            Transform fake = null;
+            for (int c = 0; c < loader.childCount; c++)
+            {
+                var ch = loader.GetChild(c);
+                if (ch.TryGetComponent<FakePrefabDisplay>(out _) || ch.TryGetComponent<SelectAddressableParent>(out _))
+                    { fake = ch; break; }
+            }
+
+            if (fake == null) { result.Add(new List<Bounds>()); continue; }
+
+            var allFSPs = fake.GetComponentsInChildren<FakeStructurePart>(true)
+                              .Select(fsp => TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds))
+                              .ToList();
+            if (allFSPs.Count == 0) continue;
+
+            float spatialGap = 0.05f;
+            int[] ufS = Enumerable.Range(0, allFSPs.Count).ToArray();
+            int SFind(int x) { while (ufS[x] != x) { ufS[x] = ufS[ufS[x]]; x = ufS[x]; } return x; }
+
+            for (int a = 0; a < allFSPs.Count; a++)
+            {
+                var expanded = new Bounds(allFSPs[a].center, allFSPs[a].size + Vector3.one * spatialGap * 2f);
+                for (int b = a + 1; b < allFSPs.Count; b++)
+                    if (expanded.Intersects(allFSPs[b]))
+                        ufS[SFind(a)] = SFind(b);
+            }
+
+            var spatialGroups = new Dictionary<int, List<Bounds>>();
+            for (int a = 0; a < allFSPs.Count; a++)
+            {
+                int root = SFind(a);
+                if (!spatialGroups.ContainsKey(root)) spatialGroups[root] = new List<Bounds>();
+                spatialGroups[root].Add(allFSPs[a]);
+            }
+            foreach (var g in spatialGroups.Values)
+                result.Add(g);
+        }
+
+        return result;
+    }
+
+    static IEnumerable<(Vector3 pos, Vector3 normal)> CollectCutPointFSPs(GameObject go)
+    {
+        var loaders = new List<Transform>();
+        CollectTopLevelLoaders(go.transform, loaders);
+
+        IEnumerable<FakeStructurePart> Source()
+        {
+            if (loaders.Count == 0)
+            {
+                foreach (var fsp in go.GetComponentsInChildren<FakeStructurePart>(true))
+                    yield return fsp;
+                yield break;
+            }
+            foreach (var loader in loaders)
+            {
+                Transform fake = null;
+                for (int c = 0; c < loader.childCount; c++)
+                {
+                    var ch = loader.GetChild(c);
+                    if (ch.TryGetComponent<FakePrefabDisplay>(out _) || ch.TryGetComponent<SelectAddressableParent>(out _))
+                        { fake = ch; break; }
+                }
+                if (fake == null) continue;
+                foreach (var fsp in fake.GetComponentsInChildren<FakeStructurePart>(true))
+                    yield return fsp;
+            }
+        }
+
+        foreach (var fsp in Source())
+        {
+            if (fsp.type != FakeStructurePart.JointType.CutPoint) continue;
+            var wb = TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds);
+            var e  = wb.extents;
+            Vector3 normal = e.x <= e.y && e.x <= e.z ? Vector3.right
+                           : e.y <= e.z               ? Vector3.up
+                           :                            Vector3.forward;
+            yield return (wb.center, normal);
+        }
     }
 
     static Bounds TransformBoundsToWorld(Matrix4x4 m, Bounds local)
@@ -572,61 +705,24 @@ public class JointAssistWindow : EditorWindow
         return b;
     }
 
+    float ReachInDir(Bounds b, Vector3 dir)
+        => Mathf.Abs(b.extents.x * dir.x) + Mathf.Abs(b.extents.y * dir.y) + Mathf.Abs(b.extents.z * dir.z);
+
     Vector3 GetDirection(Bounds bA, Bounds bB)
     {
-        if (axis != OverlapAxis.AutoDetect)
-        {
-            return axis switch
-            {
-                OverlapAxis.PosX => Vector3.right,
-                OverlapAxis.NegX => Vector3.left,
-                OverlapAxis.PosY => Vector3.up,
-                OverlapAxis.NegY => Vector3.down,
-                OverlapAxis.PosZ => Vector3.forward,
-                OverlapAxis.NegZ => Vector3.back,
-                _ => Vector3.up
-            };
-        }
         Vector3[] axes = { Vector3.right, Vector3.left, Vector3.up, Vector3.down, Vector3.forward, Vector3.back };
         float bestGap = float.MaxValue;
         Vector3 bestDir = Vector3.up;
         foreach (var a in axes)
         {
-            float g = CalculateGap(bA, bB, a);
+            float faceA = Vector3.Dot(bA.center, a) + ReachInDir(bA, a);
+            float faceB = Vector3.Dot(bB.center, a) - ReachInDir(bB, a);
+            float g = faceB - faceA;
             if (g >= 0 && g < bestGap) { bestGap = g; bestDir = a; }
         }
         if (bestGap == float.MaxValue)
             bestDir = ClosestCardinalDirection(bB.center - bA.center);
         return bestDir;
-    }
-
-    float CalculateGap(Bounds bA, Bounds bB, Vector3 dir)
-    {
-        float faceA = Vector3.Dot(bA.center, dir) + ReachInDir(bA, dir);
-        float faceB = Vector3.Dot(bB.center, dir) - ReachInDir(bB, dir);
-        return faceB - faceA;
-    }
-
-    float ReachInDir(Bounds b, Vector3 dir)
-        => Mathf.Abs(b.extents.x * dir.x) + Mathf.Abs(b.extents.y * dir.y) + Mathf.Abs(b.extents.z * dir.z);
-
-    Vector3 ClosestCardinalDirection(Vector3 v)
-    {
-        float ax = Mathf.Abs(v.x), ay = Mathf.Abs(v.y), az = Mathf.Abs(v.z);
-        if (ax > ay && ax > az) return v.x > 0 ? Vector3.right : Vector3.left;
-        if (ay > az) return v.y > 0 ? Vector3.up : Vector3.down;
-        return v.z > 0 ? Vector3.forward : Vector3.back;
-    }
-
-    string FormatDir(Vector3 d)
-    {
-        if (d == Vector3.right)   return "+X";
-        if (d == Vector3.left)    return "-X";
-        if (d == Vector3.up)      return "+Y";
-        if (d == Vector3.down)    return "-Y";
-        if (d == Vector3.forward) return "+Z";
-        if (d == Vector3.back)    return "-Z";
-        return d.ToString("F2");
     }
 
     Bounds GetBounds(GameObject go)
@@ -647,5 +743,31 @@ public class JointAssistWindow : EditorWindow
             return b;
         }
         return new Bounds(go.transform.position, Vector3.zero);
+    }
+
+    Vector3 ClosestCardinalDirection(Vector3 v)
+    {
+        float ax = Mathf.Abs(v.x), ay = Mathf.Abs(v.y), az = Mathf.Abs(v.z);
+        if (ax > ay && ax > az) return v.x > 0 ? Vector3.right : Vector3.left;
+        if (ay > az) return v.y > 0 ? Vector3.up : Vector3.down;
+        return v.z > 0 ? Vector3.forward : Vector3.back;
+    }
+
+    static bool RayTriangle(Vector3 o, Vector3 d, Vector3 v0, Vector3 v1, Vector3 v2, out float t, out float u, out float v)
+    {
+        t = u = v = 0;
+        Vector3 e1 = v1 - v0, e2 = v2 - v0;
+        Vector3 h  = Vector3.Cross(d, e2);
+        float a    = Vector3.Dot(e1, h);
+        if (a > -1e-6f && a < 1e-6f) return false;
+        float f    = 1f / a;
+        Vector3 s  = o - v0;
+        u = f * Vector3.Dot(s, h);
+        if (u < 0 || u > 1) return false;
+        Vector3 q  = Vector3.Cross(s, e1);
+        v = f * Vector3.Dot(d, q);
+        if (v < 0 || u + v > 1) return false;
+        t = f * Vector3.Dot(e2, q);
+        return t > 1e-6f;
     }
 }
