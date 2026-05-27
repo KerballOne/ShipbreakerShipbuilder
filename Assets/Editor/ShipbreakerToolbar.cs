@@ -45,7 +45,7 @@ public static class ShipbreakerToolbar
 
         var btn = new IMGUIContainer(DrawButton);
         btn.style.position = Position.Absolute;
-        btn.style.left     = 500;
+        btn.style.left     = 450;
         btn.style.top      = 5;
         btn.style.width    = 34;
         btn.style.height   = 22;

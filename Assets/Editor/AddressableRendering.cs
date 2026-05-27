@@ -498,7 +498,7 @@ public class AddressableRendering : MonoBehaviour
         newPrefabChild.transform.localPosition = inTransform.localPosition;
         newPrefabChild.transform.localRotation = inTransform.localRotation;
         newPrefabChild.transform.localScale = inTransform.localScale;
-        newPrefabChild.AddComponent<SelectAddressableParent>();
+        newPrefabChild.AddComponent<SelectAddressableParent>().sourceGUID = address;
         foreach (Transform child in inTransform)
         {
             await CloneMeshTree(address, child, newPrefabChild.transform, cachePath);

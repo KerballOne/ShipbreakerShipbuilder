@@ -6,6 +6,7 @@ using UnityEngine;
 public class SelectAddressableParent : MonoBehaviour
 {
     public bool selectParent = false;
+    public string sourceGUID;
 
     GameObject parent;
 
