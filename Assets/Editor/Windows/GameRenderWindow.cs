@@ -50,7 +50,11 @@ public class GameRenderWindow : EditorWindow
     void OnGUI()
     {
         if (GUILayout.Button("Redraw"))
+        {
+            AddressableRendering.ForceResetUpdateFlag();
+            AddressableRendering.ClearView();
             AddressableRendering.UpdateViewList();
+        }
 
         if (GUILayout.Button("Clear View"))
             AddressableRendering.ClearView();
@@ -76,20 +80,16 @@ public class GameRenderWindow : EditorWindow
 
         GUILayout.Label("Joints", EditorStyles.boldLabel);
         drawJoints = GUILayout.Toggle(drawJoints, "Draw Joints");
-        EditorGUILayout.HelpBox(
-            "Cyan = root (cross-part joint surface)\nGreen = internal structural\nOrange = cut point",
-            MessageType.None);
-        GUILayout.Label("Root color", EditorStyles.label);
+        GUILayout.Label("Root — cross-part joint surface", EditorStyles.label);
         jointRootColor = EditorGUILayout.ColorField(jointRootColor);
-        GUILayout.Label("Standard color", EditorStyles.label);
+        GUILayout.Label("Standard — internal structural", EditorStyles.label);
         jointStandardColor = EditorGUILayout.ColorField(jointStandardColor);
-        GUILayout.Label("Cut point color", EditorStyles.label);
+        GUILayout.Label("Cut point", EditorStyles.label);
         jointCutColor = EditorGUILayout.ColorField(jointCutColor);
 
         GUILayout.Label("Baked joints (InvisibleJoint)", EditorStyles.boldLabel);
         drawBakedJoints = GUILayout.Toggle(drawBakedJoints, "Draw Baked Joints");
-        EditorGUILayout.HelpBox("Solid-filled cubes for StructureParts baked directly in the ship prefab (e.g. InvisibleJoint nodes).", MessageType.None);
-        GUILayout.Label("Color", EditorStyles.label);
+        GUILayout.Label("StructureParts baked directly in the ship prefab", EditorStyles.label);
         bakedJointColor = EditorGUILayout.ColorField(bakedJointColor);
 
         if (EditorGUI.EndChangeCheck())

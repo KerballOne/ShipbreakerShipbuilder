@@ -3,8 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.Experimental.SceneManagement;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.SceneManagement;
 
 public class AddressableRendering : MonoBehaviour
 {
@@ -32,17 +34,15 @@ public class AddressableRendering : MonoBehaviour
 
     public static void ClearView()
     {
+        isUpdating = false;
+
         foreach (var fakePrefab in fakes)
-        {
             if (fakePrefab != null)
                 DestroyImmediate(fakePrefab.gameObject);
-        }
         fakes.Clear();
 
-        // Catch orphaned fakes: scan direct children of every AddressableLoader in the
-        // scene. EditorCache fakes are always parented to their loader wrapper, and every
-        // EditorCache node has SelectAddressableParent baked in — reliable across edits.
-        foreach (var root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+        // Catch orphaned fakes parented to AddressableLoader wrappers
+        foreach (var root in GetActiveRootObjects())
         {
             foreach (var loader in root.GetComponentsInChildren<BBI.Unity.Game.AddressableLoader>())
             {
@@ -54,6 +54,10 @@ public class AddressableRendering : MonoBehaviour
                         DestroyImmediate(child.gameObject);
                 }
             }
+
+            // Destroy leaked _temp wrappers left at scene root by interrupted TryCacheAsset calls
+            if (root.name == "_temp")
+                DestroyImmediate(root);
         }
 
         rooms.Clear();
@@ -62,9 +66,14 @@ public class AddressableRendering : MonoBehaviour
         bakedJointData.Clear();
     }
 
-    public static void ForceResetUpdateFlag()
+    public static void ForceResetUpdateFlag() => isUpdating = false;
+
+    static GameObject[] GetActiveRootObjects()
     {
-        isUpdating = false;
+        var stage = PrefabStageUtility.GetCurrentPrefabStage();
+        return stage != null
+            ? stage.scene.GetRootGameObjects()
+            : SceneManager.GetActiveScene().GetRootGameObjects();
     }
 
     public async static void UpdateViewList()
@@ -80,7 +89,7 @@ public class AddressableRendering : MonoBehaviour
             List<AddressableLoader> addressablesToLoad = new List<AddressableLoader>();
             List<HardPoint> hardPoints = new List<HardPoint>();
 
-            var rootObjects = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+            var rootObjects = GetActiveRootObjects();
 
             foreach (var rootGameObject in rootObjects)
             {
@@ -394,7 +403,7 @@ public class AddressableRendering : MonoBehaviour
     {
         if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return;
 
-        if (t.TryGetComponent<StructurePart>(out _))
+        if (t.TryGetComponent<InvisibleJointMarker>(out _) && t.TryGetComponent<StructurePart>(out _))
         {
             Bounds bounds = new Bounds(Vector3.zero, Vector3.one * 0.05f);
             if (t.TryGetComponent<MeshCollider>(out var mc) && mc.sharedMesh != null)
@@ -567,10 +576,24 @@ public class AddressableRendering : MonoBehaviour
 
             var fsp = newPrefabChild.AddComponent<FakeStructurePart>();
             fsp.localColliderBounds = colliderBounds;
-            fsp.type = isRoot ? FakeStructurePart.JointType.Root
-                     : inTransform.name.IndexOf("cutpoint", System.StringComparison.OrdinalIgnoreCase) >= 0
+            fsp.type = inTransform.name.IndexOf("cutpoint", System.StringComparison.OrdinalIgnoreCase) >= 0
                        ? FakeStructurePart.JointType.CutPoint
                        : FakeStructurePart.JointType.Standard;
+        }
+
+        // Bake Root marker for independent jointing units (MandatoryJointContainer), regardless
+        // of whether this node also has a StructurePart. Island detection uses this to split parts.
+        if (!isRoot && inTransform.TryGetComponent<BBI.Unity.Game.MandatoryJointContainer>(out _))
+        {
+            var existing = newPrefabChild.GetComponent<FakeStructurePart>();
+            if (existing != null)
+                existing.type = FakeStructurePart.JointType.Root;
+            else
+            {
+                var fsp = newPrefabChild.AddComponent<FakeStructurePart>();
+                fsp.localColliderBounds = new Bounds(Vector3.zero, Vector3.one * 0.1f);
+                fsp.type = FakeStructurePart.JointType.Root;
+            }
         }
     }
 
