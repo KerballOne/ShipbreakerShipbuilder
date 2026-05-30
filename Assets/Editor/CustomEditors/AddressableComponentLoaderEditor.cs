@@ -101,9 +101,51 @@ public class AddressableComponentLoaderEditor : Editor
         EditorGUI.BeginChangeCheck();
         reorderableList.DoLayoutList();
         EditorGUI.EndChangeCheck();
-        
+
 
         // Apply changes to the serializedProperty - always do this in the end of OnInspectorGUI.
         serializedObject.ApplyModifiedProperties ();
+
+        DrawBakeScaleButton();
+    }
+
+    // Baked parts carry an AddressableComponentLoader, so this button only appears on baked parts
+    // (not AddressableLoader parts, where scale-baking would fail). Shown for any non-unit scale;
+    // bakes the scale into the part's meshes and resets the transform to unit scale.
+    void DrawBakeScaleButton()
+    {
+        var go = ((AddressableComponentLoader)target).gameObject;
+        var t  = go.transform;
+
+        if (!TransformScaleBaker.IsNonUnitScale(t))
+            return;
+
+        int affected = TransformScaleBaker.CountAffected(t);
+        var s = t.localScale;
+        string scaleStr = TransformScaleBaker.IsUniformScale(t) ? $"{s.x:F3}" : $"({s.x:F3}, {s.y:F3}, {s.z:F3})";
+
+        EditorGUILayout.Space();
+        EditorGUILayout.HelpBox(
+            $"Scale {scaleStr}. Bake it into the mesh geometry so joints, mass and collision are correct " +
+            $"in-game ({affected} mesh{(affected == 1 ? "" : "es")} affected). The transform resets to (1,1,1) " +
+            "and child positions are adjusted to keep the layout.",
+            MessageType.Info);
+
+        if (TransformScaleBaker.HasNonUniformScaleWithRotatedChildren(t))
+            EditorGUILayout.HelpBox(
+                "Non-uniform scale with rotated sub-meshes detected. This may SKEW rotated meshes " +
+                "(non-uniform scale only composes cleanly through rotation when scaling along the " +
+                "rotation axis). Verify the result; if skewed, scale uniformly instead.",
+                MessageType.Warning);
+
+        using (new EditorGUI.DisabledScope(affected == 0))
+        {
+            if (GUILayout.Button("Bake Transform Scale"))
+            {
+                int baked = TransformScaleBaker.BakeScale(go);
+                EditorUtility.DisplayDialog("Bake Complete",
+                    $"Baked scale into {baked} mesh(es) on '{go.name}'.\nTransform reset to (1,1,1).", "OK");
+            }
+        }
     }
 }

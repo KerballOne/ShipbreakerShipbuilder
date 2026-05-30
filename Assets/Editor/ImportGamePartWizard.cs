@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using UnityEditor;
@@ -465,6 +466,13 @@ public class ImportGamePartWizard : EditorWindow
             var importLabel = m_Selection.Count > 1 ? $"Import {m_Selection.Count} Parts" : "Import Selected";
             if (GUILayout.Button(importLabel, GUILayout.Height(32), GUILayout.Width(150)))
                 DoImport();
+
+            var bakeLabel = m_Selection.Count > 1 ? $"Bake {m_Selection.Count} Parts" : "Bake Selected";
+            if (GUILayout.Button(new GUIContent(bakeLabel,
+                "Bakes selected addressables into self-contained prefabs (real meshes/materials, " +
+                "per-mesh StructureParts copying each source SP material). No AddressableLoader/runtime dependency."),
+                GUILayout.Height(32), GUILayout.Width(150)))
+                DoBake();
             GUI.enabled = true;
         }
 
@@ -773,6 +781,100 @@ public class ImportGamePartWizard : EditorWindow
         m_Selection.Clear();
         Repaint();
         return true;
+    }
+
+    async void DoBake()
+    {
+        EditorPrefs.SetString(PrefOutputFolder, m_OutputFolder);
+        var outRoot     = m_OutputFolder.TrimEnd('/');
+        var prefabsRoot = $"{outRoot}/Prefabs";
+
+        // Snapshot the addressable selections (the dictionary may change while we await).
+        var jobs = new List<(string guid, string childPath, string partName, string subFolder)>();
+        foreach (var kv in m_Selection)
+        {
+            if (kv.Value.isLocal) continue;
+            int sep   = kv.Key.IndexOf("|", System.StringComparison.Ordinal);
+            var guid  = sep >= 0 ? kv.Key.Substring(0, sep) : kv.Key;
+            jobs.Add((guid, kv.Value.childPath, kv.Value.partName, LastFolderSegment(kv.Value.assetPath)));
+        }
+
+        if (jobs.Count == 0) { m_StatusLine = "No addressable parts selected to bake."; Repaint(); return; }
+
+        AddressableBaker.ClearCaches();
+        AddressableBaker.EnsureFolder(prefabsRoot);
+
+        var created = new List<GameObject>();
+        int failed = 0;
+
+        foreach (var job in jobs)
+        {
+            m_StatusLine = $"Baking {job.partName} …";
+            Repaint();
+
+            GameObject source;
+            try { source = await AddressableBaker.LoadAddressableAsync(job.guid, job.childPath); }
+            catch (System.Exception ex) { Debug.LogError($"[ImportGamePartWizard] Bake load failed for {job.partName}: {ex.Message}"); failed++; continue; }
+
+            if (source == null) { Debug.LogError($"[ImportGamePartWizard] Could not load addressable {job.guid} ({job.partName})"); failed++; continue; }
+
+            // Baked prefab uses a distinct "_Baked" name so it never clobbers the addressable-loader
+            // prefab of the same part (which may already be placed in the scene).
+            var bakedName    = $"{job.partName}_Baked";
+            var partFolder   = $"{prefabsRoot}/{job.subFolder}";
+            var assetFolder  = $"{partFolder}/{bakedName}_Assets";
+            var prefabPath   = $"{partFolder}/{bakedName}.prefab";
+            AddressableBaker.EnsureFolder(partFolder);
+            AddressableBaker.EnsureFolder(assetFolder);
+
+            if (File.Exists(Path.GetFullPath(prefabPath)))
+                AssetDatabase.DeleteAsset(prefabPath);
+
+            var root = new GameObject(bakedName);
+            try
+            {
+                // Bake the sub-hierarchy. SP_Mat references are collected as GUIDs (can't store the
+                // bundle StructurePartAsset directly), to be resolved at load by AddressableComponentLoader.
+                var spMatRefs = new List<(Component component, string field, string guid)>();
+                AddressableBaker.BakeTree(source, root.transform, assetFolder, spMatRefs);
+
+                if (spMatRefs.Count > 0)
+                {
+                    var acl = root.AddComponent<AddressableComponentLoader>();
+                    acl.componentValues = spMatRefs
+                        .Select(r => new AddressableComponentValue { component = r.component, field = r.field, address = r.guid })
+                        .ToList();
+                }
+
+                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[ImportGamePartWizard] Bake failed for {job.partName}: {ex}");
+                failed++;
+                Object.DestroyImmediate(root);
+                continue;
+            }
+            Object.DestroyImmediate(root);
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (prefab != null) created.Add(prefab);
+            else failed++;
+        }
+
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        if (created.Count > 0)
+        {
+            Selection.objects = created.ToArray();
+            EditorGUIUtility.PingObject(created[created.Count - 1]);
+        }
+
+        m_StatusLine = failed > 0
+            ? $"Baked {created.Count} prefab(s); {failed} failed. Saved to {prefabsRoot}/"
+            : $"Baked {created.Count} prefab(s) to {prefabsRoot}/";
+        Repaint();
     }
 
     class EnrichedPart
