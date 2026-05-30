@@ -90,6 +90,8 @@ public class RadialDuplicateWindow : EditorWindow
                 copy.name = src.name;
                 copy.transform.SetPositionAndRotation(worldPos, worldRot);
                 copy.transform.localScale = srcScale;
+                if (PrefabUtility.IsPartOfAnyPrefab(copy))
+                    PrefabUtility.UnpackPrefabInstance(copy, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
                 Undo.RegisterCreatedObjectUndo(copy, "Radial Duplicate");
                 created.Add(copy);
             }
