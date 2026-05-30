@@ -44,7 +44,7 @@ public class AddressableRendering : MonoBehaviour
         // Catch orphaned fakes parented to AddressableLoader wrappers
         foreach (var root in GetActiveRootObjects())
         {
-            foreach (var loader in root.GetComponentsInChildren<BBI.Unity.Game.AddressableLoader>())
+            foreach (var loader in root.GetComponentsInChildren<BBI.Unity.Game.AddressableLoader>(includeInactive: true))
             {
                 for (int i = loader.transform.childCount - 1; i >= 0; i--)
                 {
@@ -362,29 +362,10 @@ public class AddressableRendering : MonoBehaviour
             {
                 foreach (var disabledChild in disabledChildren)
                 {
-                    GameObject foundChild = null;
-                    for (int i = temp.transform.childCount - 1; i >= 0; i--)
-                    {
-                        if (temp.transform.GetChild(i).name == disabledChild) 
-                        {
-                            GameObject.DestroyImmediate(temp.transform.GetChild(i).gameObject);
-                        }
-                        
-                        IEnumerable<Transform> children = temp.transform.GetChild(i).Cast<Transform>();
-                        var cList = children.ToList();
-                        foreach (var childPathPart in disabledChild.Split('/'))
-                        {
-                            foundChild = children.Where(c => c.name.StartsWith(childPathPart)).FirstOrDefault()?.gameObject;
-                            if(foundChild == null)
-                            {
-                                break;
-                            }
-                            children = foundChild.transform.Cast<Transform>();
-                        }
-                        if (foundChild != null)
-                            GameObject.DestroyImmediate(foundChild);
-
-                    }
+                    var found = new List<GameObject>();
+                    CollectChildrenByPath(temp.transform, disabledChild, found);
+                    foreach (var go in found)
+                        if (go != null) GameObject.DestroyImmediate(go);
                 }
             }
 
@@ -408,6 +389,45 @@ public class AddressableRendering : MonoBehaviour
 
     // Collects baked StructureParts (e.g. InvisibleJoints) directly in the scene hierarchy,
     // skipping subtrees rooted at AddressableLoader since those are covered by EditorCache FakeStructureParts.
+    // Collects all matches for a disabled child entry into results.
+    // '/' in path = walk from root step by step (precise). No '/' = collect all matching anywhere in subtree.
+    static void CollectChildrenByPath(Transform root, string path, List<GameObject> results)
+    {
+        if (!path.Contains("/"))
+        {
+            CollectChildrenRecursive(root, path, results);
+            return;
+        }
+
+        var parts = path.Split('/');
+        Transform current = root;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            Transform next = null;
+            foreach (Transform child in current)
+            {
+                if (child.name.StartsWith(parts[i])) { next = child; break; }
+            }
+            if (next == null) return;
+            current = next;
+        }
+        string leaf = parts[parts.Length - 1];
+        foreach (Transform child in current)
+            if (child.name.StartsWith(leaf))
+                results.Add(child.gameObject);
+    }
+
+    static void CollectChildrenRecursive(Transform t, string namePrefix, List<GameObject> results)
+    {
+        foreach (Transform child in t)
+        {
+            if (child.name.StartsWith(namePrefix))
+                results.Add(child.gameObject);
+            else
+                CollectChildrenRecursive(child, namePrefix, results);
+        }
+    }
+
     static void CollectBakedStructureParts(Transform t)
     {
         if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return;

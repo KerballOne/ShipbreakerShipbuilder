@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 
 [CustomEditor(typeof(SelectAddressableParent))]
+[CanEditMultipleObjects]
 public class SelectAddressableParentEditor : Editor
 {
     static Dictionary<string, EnrichedEntry> s_ByName;
@@ -94,5 +95,69 @@ public class SelectAddressableParentEditor : Editor
             if (loader != null)
                 Selection.objects = new Object[] { loader.gameObject };
         }
+
+        EditorGUILayout.Space();
+
+        var parentLoader = go.GetComponentInParent<AddressableLoader>();
+        if (parentLoader != null)
+        {
+            // Collect full paths for all selected SelectAddressableParent objects under the same loader.
+            var paths = new List<string>();
+            foreach (var t in targets)
+            {
+                var tgo = ((SelectAddressableParent)t).gameObject;
+                var tLoader = tgo.GetComponentInParent<AddressableLoader>();
+                if (tLoader == parentLoader)
+                    paths.Add(GetPathRelativeToLoader(tgo, tLoader));
+            }
+
+            bool allPersisted = paths.Count > 0 && paths.TrueForAll(p =>
+                parentLoader.disabledChildren != null && parentLoader.disabledChildren.Contains(p));
+            bool anyPersisted = paths.Exists(p =>
+                parentLoader.disabledChildren != null && parentLoader.disabledChildren.Contains(p));
+
+            if (targets.Length == 1 && !go.activeSelf && !allPersisted)
+                EditorGUILayout.HelpBox("This object is inactive. Persist it so it survives view refresh.", MessageType.Warning);
+
+            using (new EditorGUI.DisabledScope(allPersisted))
+            {
+                if (GUILayout.Button(allPersisted ? "Already in Disabled Children" : $"Persist Disabled ({paths.Count}) to AddressableLoader"))
+                {
+                    Undo.RecordObject(parentLoader, "Persist Disabled Child");
+                    if (parentLoader.disabledChildren == null)
+                        parentLoader.disabledChildren = new List<string>();
+                    foreach (var p in paths)
+                        if (!parentLoader.disabledChildren.Contains(p))
+                            parentLoader.disabledChildren.Add(p);
+                    EditorUtility.SetDirty(parentLoader);
+                }
+            }
+
+            if (anyPersisted)
+            {
+                if (GUILayout.Button($"Remove from Disabled Children ({paths.Count})"))
+                {
+                    Undo.RecordObject(parentLoader, "Remove Disabled Child");
+                    foreach (var p in paths)
+                        parentLoader.disabledChildren.Remove(p);
+                    EditorUtility.SetDirty(parentLoader);
+                }
+            }
+        }
+    }
+
+    static string GetPathRelativeToLoader(GameObject go, AddressableLoader loader)
+    {
+        // Walk up to the loader, collecting name segments.
+        // The immediate child of the loader is the fake root (named after the GUID/assetPath)
+        // and is NOT included in the path because CollectChildrenByPath is called on that root.
+        var parts = new List<string>();
+        var t = go.transform;
+        while (t != null && t.parent != null && t.parent.gameObject != loader.gameObject)
+        {
+            parts.Insert(0, t.name);
+            t = t.parent;
+        }
+        return string.Join("/", parts);
     }
 }
