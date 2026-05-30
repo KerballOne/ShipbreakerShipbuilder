@@ -14,43 +14,46 @@ public class ImportGamePartWizard : EditorWindow
 {
     const string PrefOutputFolder  = "ImportGamePartWizard.OutputFolder";
     const string PrefImportedOnce  = "ImportGamePartWizard.ImportedOnce";
-    const int    MaxResults       = 100;
+    const int    MaxResults        = 200;
 
-    enum SearchMode { DisplayName, PartName, Path }
+    enum SearchMode { PartName, DisplayName, Path, GUID }
     enum SortColumn { DisplayName, PartName, DimX, DimY, DimZ, Volume, Mass }
 
-    // Fixed column widths; Display Name and Part Name share remaining flexible space equally
-    const float W_EXP        = 28f;   // header column width
-    const float W_SEL        = 26f;   // header column width
-    const float W_EXP_BTN    = 24f;   // content expand button (smaller; pad to W_EXP)
-    const float W_SEL_BTN    = 22f;   // content select button (smaller; pad to W_SEL)
+    const float W_EXP          = 28f;
+    const float W_SEL          = 26f;
+    const float W_EXP_BTN      = 24f;
+    const float W_SEL_BTN      = 22f;
     const float W_CHILD_INDENT = 12f;
-    const float W_DIM  = 54f;
-    const float W_VOL  = 60f;
-    const float W_MASS = 60f;
+    const float W_DIM          = 54f;
+    const float W_VOL          = 60f;
+    const float W_MASS         = 60f;
 
     string     m_Search      = "";
     string     m_LastSearch  = null;
     bool       m_PrefabsOnly = true;
-    SearchMode m_SearchMode  = SearchMode.DisplayName;
+    SearchMode m_SearchMode  = SearchMode.PartName;
     bool       m_UseRegex    = false;
     string     m_RegexError  = null;
     Vector2    m_Scroll;
     string     m_OutputFolder = "Assets/_CustomShips/";
+    string     m_StatusLine   = "";
 
-    SortColumn m_SortCol    = SortColumn.DisplayName;
+    SortColumn m_SortCol    = SortColumn.PartName;
     bool       m_SortAsc    = true;
     int        m_ChildDepth = 1;
 
-    // Key: guid for root items, "guid|childPath" for child items
-    // Value: (assetPath, partName, childPath)  — childPath is "" for root
-    readonly Dictionary<string, (string assetPath, string partName, string childPath)> m_Selection =
-        new Dictionary<string, (string, string, string)>();
+    // Key: guid for addressable root items, "guid|childPath" for children, "local:path" for local prefabs
+    readonly Dictionary<string, (string assetPath, string partName, string childPath, bool isLocal, string guid, RowType rowType)> m_Selection =
+        new Dictionary<string, (string, string, string, bool, string, RowType)>();
+
+    enum RowType { Addressable, LocalAddressable, LocalBaked }
 
     struct ResultRow
     {
-        public string guid, path, partName, displayName;
-        public float  dimX, dimY, dimZ, volume, mass;
+        public string  guid, path, partName, displayName;
+        public float   dimX, dimY, dimZ, volume, mass;
+        public bool    isLocal => rowType != RowType.Addressable;
+        public RowType rowType;
     }
     readonly List<ResultRow> m_Results = new List<ResultRow>();
 
@@ -61,8 +64,8 @@ public class ImportGamePartWizard : EditorWindow
         public bool   isPrefab;
     }
 
-    readonly HashSet<string>                   m_Expanded   = new HashSet<string>();
-    readonly HashSet<string>                   m_Loading    = new HashSet<string>();
+    readonly HashSet<string>                    m_Expanded   = new HashSet<string>();
+    readonly HashSet<string>                    m_Loading    = new HashSet<string>();
     readonly Dictionary<string, List<ChildRow>> m_ChildCache = new Dictionary<string, List<ChildRow>>();
 
     Dictionary<string, EnrichedPart> m_Enriched;
@@ -70,6 +73,8 @@ public class ImportGamePartWizard : EditorWindow
 
     static GUIStyle s_PathStyle;
     static GUIStyle s_ChildBgStyle;
+    static GUIStyle s_LocalBakedRowStyle;
+    static GUIStyle s_LocalAddressableRowStyle;
 
     static string LoadingLabel()
     {
@@ -79,17 +84,30 @@ public class ImportGamePartWizard : EditorWindow
 
     void EnsureStyles()
     {
-        if (s_PathStyle != null) return;
+        if (s_PathStyle != null && s_LocalBakedRowStyle?.normal.background != null) return;
+
         s_PathStyle = new GUIStyle(EditorStyles.miniLabel) { wordWrap = false };
 
-        var tex = new Texture2D(1, 1);
-        tex.SetPixel(0, 0, new Color(0.18f, 0.22f, 0.28f, 1f));
-        tex.Apply();
+        var childTex = new Texture2D(1, 1);
+        childTex.SetPixel(0, 0, new Color(0.18f, 0.22f, 0.28f, 1f));
+        childTex.Apply();
         s_ChildBgStyle = new GUIStyle(GUIStyle.none);
-        s_ChildBgStyle.normal.background = tex;
+        s_ChildBgStyle.normal.background = childTex;
+
+        var bakedTex = new Texture2D(1, 1);
+        bakedTex.SetPixel(0, 0, new Color(0.18f, 0.28f, 0.18f, 1f));
+        bakedTex.Apply();
+        s_LocalBakedRowStyle = new GUIStyle(GUIStyle.none);
+        s_LocalBakedRowStyle.normal.background = bakedTex;
+
+        var addrTex = new Texture2D(1, 1);
+        addrTex.SetPixel(0, 0, new Color(0.28f, 0.26f, 0.14f, 1f));
+        addrTex.Apply();
+        s_LocalAddressableRowStyle = new GUIStyle(GUIStyle.none);
+        s_LocalAddressableRowStyle.normal.background = addrTex;
     }
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Import Game Part Wizard", priority = -10)]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Import Game Part Wizard", priority = -20)]
     static void Open()
     {
         var w = GetWindow<ImportGamePartWizard>("Import Game Part");
@@ -184,13 +202,7 @@ public class ImportGamePartWizard : EditorWindow
 
         if (m_Enriched == null) LoadEnrichedData();
 
-        if (LoadGameAssets.knownAssetMap == null || LoadGameAssets.knownAssetMap.Count == 0)
-        {
-            EditorGUILayout.HelpBox(
-                "No game assets loaded. Run  Shipbreaker → Reload Assets  first.",
-                MessageType.Warning);
-            return;
-        }
+        bool hasGameAssets = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
 
         // ── Search ───────────────────────────────────────────────────────────
         GUILayout.Label("Search Game Library", EditorStyles.boldLabel);
@@ -208,11 +220,14 @@ public class ImportGamePartWizard : EditorWindow
         EditorGUILayout.LabelField(
             enrichedCount > 0 ? $"{enrichedCount} enriched" : "no enriched data",
             EditorStyles.miniLabel);
-        if (GUILayout.Button("↺", GUILayout.Width(22))) LoadEnrichedData();
+        if (GUILayout.Button("↺", GUILayout.Width(22))) { LoadEnrichedData(); m_LastSearch = null; }
         EditorGUILayout.EndHorizontal();
 
         if (m_RegexError != null)
             EditorGUILayout.HelpBox($"Regex: {m_RegexError}", MessageType.Error);
+
+        if (!hasGameAssets)
+            EditorGUILayout.HelpBox("No game assets loaded. Run  Shipbreaker → Reload Assets  to include game library parts.", MessageType.Warning);
 
         if (newSearch != m_Search || newPrefabs != m_PrefabsOnly ||
             newMode != m_SearchMode || newRegex != m_UseRegex || m_LastSearch == null)
@@ -242,13 +257,12 @@ public class ImportGamePartWizard : EditorWindow
         }
         EditorGUILayout.EndHorizontal();
 
-        // ── Column layout ─────────────────────────────────────────────────────
-        // -20 window padding, -16 vertical scrollbar, -4 safety margin
+        // ── Column layout ────────────────────────────────────────────────────
         float viewW    = EditorGUIUtility.currentViewWidth - 40f;
         float flexW    = Mathf.Max(120f, viewW - W_EXP - W_SEL - W_DIM * 3 - W_VOL - W_MASS);
         float nameColW = Mathf.Floor(flexW * 0.5f);
 
-        // ── Table header ──────────────────────────────────────────────────────
+        // ── Table header ─────────────────────────────────────────────────────
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUILayout.Label("▶", EditorStyles.toolbarButton, GUILayout.Width(W_EXP));
         GUILayout.Label("✓", EditorStyles.toolbarButton, GUILayout.Width(W_SEL));
@@ -262,50 +276,74 @@ public class ImportGamePartWizard : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         // ── Results scroll ────────────────────────────────────────────────────
-        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, GUILayout.Height(300));
+        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, GUILayout.ExpandHeight(true));
         foreach (var r in m_Results)
         {
-            bool sel        = m_Selection.ContainsKey(r.guid);
-            bool isExpanded = m_Expanded.Contains(r.guid);
-            bool isLoading  = m_Loading.Contains(r.guid);
+            bool sel        = m_Selection.ContainsKey(r.isLocal ? "local:" + r.path : r.guid);
+            bool isExpanded = !r.isLocal && m_Expanded.Contains(r.guid);
+            bool isLoading  = !r.isLocal && m_Loading.Contains(r.guid);
 
-            EditorGUILayout.BeginVertical(sel ? GUI.skin.box : GUIStyle.none);
+            var rowBg = sel
+                ? GUI.skin.box
+                : r.rowType == RowType.LocalBaked       ? s_LocalBakedRowStyle
+                : r.rowType == RowType.LocalAddressable ? s_LocalAddressableRowStyle
+                : GUIStyle.none;
+
+            EditorGUILayout.BeginVertical(rowBg);
 
             // Row 1 — expand toggle + select + data fields
             EditorGUILayout.BeginHorizontal();
-            string expLabel = isLoading ? LoadingLabel() : (isExpanded ? "▼" : "▶");
-            if (GUILayout.Button(expLabel, EditorStyles.miniButton, GUILayout.Width(W_EXP_BTN)))
+            if (!r.isLocal)
             {
-                if (!isLoading)
+                string expLabel = isLoading ? LoadingLabel() : (isExpanded ? "▼" : "▶");
+                if (GUILayout.Button(expLabel, EditorStyles.miniButton, GUILayout.Width(W_EXP_BTN)))
                 {
-                    if (isExpanded) m_Expanded.Remove(r.guid);
-                    else BeginExpandLoad(r.guid);
+                    if (!isLoading)
+                    {
+                        if (isExpanded) m_Expanded.Remove(r.guid);
+                        else BeginExpandLoad(r.guid);
+                    }
                 }
+                GUILayout.Space(W_EXP - W_EXP_BTN);
             }
-            GUILayout.Space(W_EXP - W_EXP_BTN);
+            else
+            {
+                GUILayout.Space(W_EXP);
+            }
+
+            string selKey = r.isLocal ? "local:" + r.path : r.guid;
             if (GUILayout.Button(sel ? "✓" : " ", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN)))
             {
-                if (sel) m_Selection.Remove(r.guid);
-                else     m_Selection[r.guid] = (r.path, r.partName, "");
+                if (sel) m_Selection.Remove(selKey);
+                else     m_Selection[selKey] = (r.path, r.partName, "", r.isLocal, r.guid, r.rowType);
             }
             GUILayout.Space(W_SEL - W_SEL_BTN);
-            var lbl = sel ? EditorStyles.boldLabel : EditorStyles.label;
-            GUILayout.Label(r.partName,       lbl, GUILayout.Width(nameColW));
-            GUILayout.Label(r.displayName,    lbl, GUILayout.Width(nameColW));
-            GUILayout.Label(FmtDim(r.dimX),   lbl, GUILayout.Width(W_DIM));
-            GUILayout.Label(FmtDim(r.dimY),   lbl, GUILayout.Width(W_DIM));
-            GUILayout.Label(FmtDim(r.dimZ),   lbl, GUILayout.Width(W_DIM));
-            GUILayout.Label(FmtVol(r.volume), lbl, GUILayout.Width(W_VOL));
-            GUILayout.Label(FmtMass(r.mass),  lbl, GUILayout.Width(W_MASS));
+
+            GUILayout.Label(r.partName,       EditorStyles.label, GUILayout.Width(nameColW));
+            GUILayout.Label(r.displayName,    EditorStyles.label, GUILayout.Width(nameColW));
+            GUILayout.Label(FmtDim(r.dimX),   EditorStyles.label, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtDim(r.dimY),   EditorStyles.label, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtDim(r.dimZ),   EditorStyles.label, GUILayout.Width(W_DIM));
+            GUILayout.Label(FmtVol(r.volume), EditorStyles.label, GUILayout.Width(W_VOL));
+            GUILayout.Label(FmtMass(r.mass),  EditorStyles.label, GUILayout.Width(W_MASS));
             EditorGUILayout.EndHorizontal();
 
-            // Row 2 — path
+            // Row 2 — guid + path
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(W_EXP + W_SEL + 4f);
-            GUILayout.Label(r.path, s_PathStyle);
+            if (!r.isLocal)
+            {
+                GUILayout.Label(r.guid, s_PathStyle);
+                GUILayout.Space(8f);
+                GUILayout.Label(r.path, s_PathStyle);
+            }
+            else
+            {
+                GUILayout.Label(r.path, s_PathStyle);
+            }
             EditorGUILayout.EndHorizontal();
 
-            // Child rows (lazy-loaded, shown when expanded)
+            // Child rows (addressable parts only)
             if (isExpanded && m_ChildCache.TryGetValue(r.guid, out var children))
             {
                 if (children.Count == 0)
@@ -319,8 +357,7 @@ public class ImportGamePartWizard : EditorWindow
                 {
                     foreach (var child in children)
                     {
-                        if (m_PrefabsOnly && !child.isPrefab)
-                            continue;
+                        if (m_PrefabsOnly && !child.isPrefab) continue;
 
                         var childKey = r.guid + "|" + child.childPath;
                         bool childSel = m_Selection.ContainsKey(childKey);
@@ -335,19 +372,18 @@ public class ImportGamePartWizard : EditorWindow
                         if (GUILayout.Button(childSel ? "✓" : " ", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN)))
                         {
                             if (childSel) m_Selection.Remove(childKey);
-                            else          m_Selection[childKey] = (r.path, child.childPath, child.childPath);
+                            else          m_Selection[childKey] = (r.path, child.childPath, child.childPath, false, r.guid, RowType.Addressable);
                         }
                         GUILayout.Space(W_SEL - W_SEL_BTN);
-                        var cLbl = childSel ? EditorStyles.boldLabel : EditorStyles.miniLabel;
                         GUILayout.Space(indent);
-                        GUILayout.Label(partSegment, cLbl, GUILayout.Width(nameColW - indent));
+                        GUILayout.Label(partSegment,       EditorStyles.miniLabel, GUILayout.Width(nameColW - indent));
                         GUILayout.Space(indent);
-                        GUILayout.Label(child.displayName, cLbl, GUILayout.Width(nameColW - indent));
-                        GUILayout.Label(FmtDim(child.dimX),   cLbl, GUILayout.Width(W_DIM));
-                        GUILayout.Label(FmtDim(child.dimY),   cLbl, GUILayout.Width(W_DIM));
-                        GUILayout.Label(FmtDim(child.dimZ),   cLbl, GUILayout.Width(W_DIM));
-                        GUILayout.Label(FmtVol(child.volume), cLbl, GUILayout.Width(W_VOL));
-                        GUILayout.Label(FmtMass(child.mass),  cLbl, GUILayout.Width(W_MASS));
+                        GUILayout.Label(child.displayName, EditorStyles.miniLabel, GUILayout.Width(nameColW - indent));
+                        GUILayout.Label(FmtDim(child.dimX),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
+                        GUILayout.Label(FmtDim(child.dimY),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
+                        GUILayout.Label(FmtDim(child.dimZ),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
+                        GUILayout.Label(FmtVol(child.volume), EditorStyles.miniLabel, GUILayout.Width(W_VOL));
+                        GUILayout.Label(FmtMass(child.mass),  EditorStyles.miniLabel, GUILayout.Width(W_MASS));
                         EditorGUILayout.EndHorizontal();
                     }
                 }
@@ -366,7 +402,7 @@ public class ImportGamePartWizard : EditorWindow
         if (m_Selection.Count == 0)
         {
             EditorGUILayout.HelpBox(
-                "Click ✓ to select a whole part, or ▶ to expand and select individual children.",
+                "Click ✓ to select a part. Green rows are local project prefabs — use 'Place in Scene'.\nGrey rows are game addressables — use 'Import Selected' to create a loader prefab.",
                 MessageType.None);
         }
         else
@@ -375,47 +411,68 @@ public class ImportGamePartWizard : EditorWindow
             {
                 bool isChild = kv.Key.Contains("|");
                 var label    = isChild ? $"  └ {kv.Value.partName}" : kv.Value.partName;
-                EditorGUILayout.LabelField(label, EditorStyles.miniLabel);
+                var suffix   = kv.Value.isLocal ? " [local]" : "";
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.SelectableLabel(label + suffix, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                if (!kv.Value.isLocal && !string.IsNullOrEmpty(kv.Value.guid))
+                    EditorGUILayout.SelectableLabel(kv.Value.guid, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight), GUILayout.Width(240));
+                bool canPreview = !isChild && (!kv.Value.isLocal
+                    ? !string.IsNullOrEmpty(kv.Value.guid)
+                    : !string.IsNullOrEmpty(kv.Value.assetPath));
+                if (canPreview && GUILayout.Button("⬡ Preview", EditorStyles.miniButton, GUILayout.Width(70)))
+                    OpenPreview(kv.Value.rowType, kv.Value.isLocal ? kv.Value.assetPath : kv.Value.guid);
+                EditorGUILayout.EndHorizontal();
             }
         }
 
         EditorGUILayout.Space();
 
-        // ── Output folder ─────────────────────────────────────────────────────
-        GUILayout.Label("Output", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            "Parts are grouped by source folder:  Output/Prefabs/SourceFolder/PartName.prefab",
-            MessageType.None);
+        // ── Output folder (addressable imports only) ──────────────────────────
+        bool hasAddressableSelected = false;
+        foreach (var kv in m_Selection)
+            if (!kv.Value.isLocal) { hasAddressableSelected = true; break; }
 
-        EditorGUILayout.BeginHorizontal();
-        m_OutputFolder = EditorGUILayout.TextField("Folder", m_OutputFolder);
-        if (GUILayout.Button("Browse", GUILayout.Width(60)))
+        if (hasAddressableSelected)
         {
-            var picked = EditorUtility.OpenFolderPanel("Select Output Folder", Application.dataPath, "");
-            if (!string.IsNullOrEmpty(picked) && picked.StartsWith(Application.dataPath))
-                m_OutputFolder = "Assets" + picked.Substring(Application.dataPath.Length).Replace('\\', '/');
+            GUILayout.Label("Output", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            m_OutputFolder = EditorGUILayout.TextField("Folder", m_OutputFolder);
+            if (GUILayout.Button("Browse", GUILayout.Width(60)))
+            {
+                var picked = EditorUtility.OpenFolderPanel("Select Output Folder", Application.dataPath, "");
+                if (!string.IsNullOrEmpty(picked) && picked.StartsWith(Application.dataPath))
+                    m_OutputFolder = "Assets" + picked.Substring(Application.dataPath.Length).Replace('\\', '/');
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space();
         }
-        EditorGUILayout.EndHorizontal();
 
-        EditorGUILayout.Space();
-
-        // ── Import buttons ────────────────────────────────────────────────────
-        string error = Validate();
+        // ── Action buttons ────────────────────────────────────────────────────
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Cancel", GUILayout.Height(32), GUILayout.Width(90)))
-            Close();
         GUILayout.FlexibleSpace();
-        GUI.enabled = error == null;
-        var importLabel = m_Selection.Count > 1 ? $"Import {m_Selection.Count} Parts" : "Import Selected";
-        if (GUILayout.Button(importLabel, GUILayout.Height(32), GUILayout.Width(150)))
-            DoImport();
-        if (GUILayout.Button("Import & Close", GUILayout.Height(32), GUILayout.Width(130)))
+
+        if (m_Selection.Count > 0)
         {
-            if (DoImport()) Close();
+            if (GUILayout.Button("Place in Scene", GUILayout.Height(32), GUILayout.Width(130)))
+                DoPlaceLocal();
         }
-        GUI.enabled = true;
+
+        if (hasAddressableSelected)
+        {
+            string importError = ValidateImport();
+            GUI.enabled = importError == null;
+            var importLabel = m_Selection.Count > 1 ? $"Import {m_Selection.Count} Parts" : "Import Selected";
+            if (GUILayout.Button(importLabel, GUILayout.Height(32), GUILayout.Width(150)))
+                DoImport();
+            GUI.enabled = true;
+        }
+
         EditorGUILayout.EndHorizontal();
-        if (error != null) EditorGUILayout.HelpBox(error, MessageType.Error);
+
+        // ── Status line ───────────────────────────────────────────────────────
+        if (!string.IsNullOrEmpty(m_StatusLine))
+            EditorGUILayout.LabelField(m_StatusLine, EditorStyles.miniLabel);
     }
 
     void SortHeader(string label, SortColumn col, float width)
@@ -446,43 +503,59 @@ public class ImportGamePartWizard : EditorWindow
             catch (System.Exception e) { m_RegexError = e.Message; return; }
         }
 
-        foreach (var kv in LoadGameAssets.knownAssetMap)
+        // ── Game addressables ─────────────────────────────────────────────────
+        if (LoadGameAssets.knownAssetMap != null)
         {
-            var path = kv.Value;
-            if (m_PrefabsOnly && !path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var partName = Path.GetFileNameWithoutExtension(path);
-            EnrichedPart enriched = null;
-            m_Enriched?.TryGetValue(kv.Key, out enriched);
-            var displayName = enriched?.DisplayName ?? "";
-
-            if (!string.IsNullOrEmpty(term))
+            foreach (var kv in LoadGameAssets.knownAssetMap)
             {
-                string target = m_SearchMode switch
-                {
-                    SearchMode.Path     => path,
-                    SearchMode.PartName => partName,
-                    _                   => displayName,
-                };
-                bool match = regex != null
-                    ? regex.IsMatch(target)
-                    : target.IndexOf(term, System.StringComparison.OrdinalIgnoreCase) >= 0;
-                if (!match) continue;
-            }
+                var path = kv.Value;
+                if (m_PrefabsOnly && !path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
+                    continue;
 
-            float[] d = enriched?.Dims;
+                var partName = Path.GetFileNameWithoutExtension(path);
+                EnrichedPart enriched = null;
+                m_Enriched?.TryGetValue(kv.Key, out enriched);
+                var displayName = enriched?.DisplayName ?? "";
+
+                if (!MatchesTerm(term, regex, partName, displayName, path, kv.Key)) continue;
+
+                float[] d = enriched?.Dims;
+                m_Results.Add(new ResultRow
+                {
+                    guid        = kv.Key,
+                    path        = path,
+                    partName    = partName,
+                    displayName = displayName,
+                    dimX        = d != null && d.Length > 0 ? d[0] : 0f,
+                    dimY        = d != null && d.Length > 1 ? d[1] : 0f,
+                    dimZ        = d != null && d.Length > 2 ? d[2] : 0f,
+                    volume      = enriched?.Volume ?? 0f,
+                    mass        = enriched?.Mass   ?? 0f,
+                    rowType     = RowType.Addressable,
+                });
+
+                if (m_Results.Count >= MaxResults) break;
+            }
+        }
+
+        // ── Local project prefabs ─────────────────────────────────────────────
+        var localGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets/_CustomShips" });
+        foreach (var g in localGuids)
+        {
+            var path     = AssetDatabase.GUIDToAssetPath(g);
+            var partName = Path.GetFileNameWithoutExtension(path);
+
+            if (!MatchesTerm(term, regex, partName, "", path)) continue;
+
+            var prefab  = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            var hasLoader = prefab != null && prefab.GetComponentInChildren<AddressableLoader>(true) != null;
             m_Results.Add(new ResultRow
             {
-                guid        = kv.Key,
+                guid        = g,
                 path        = path,
                 partName    = partName,
-                displayName = displayName,
-                dimX        = d != null && d.Length > 0 ? d[0] : 0f,
-                dimY        = d != null && d.Length > 1 ? d[1] : 0f,
-                dimZ        = d != null && d.Length > 2 ? d[2] : 0f,
-                volume      = enriched?.Volume ?? 0f,
-                mass        = enriched?.Mass   ?? 0f,
+                displayName = "",
+                rowType     = hasLoader ? RowType.LocalAddressable : RowType.LocalBaked,
             });
 
             if (m_Results.Count >= MaxResults) break;
@@ -491,10 +564,28 @@ public class ImportGamePartWizard : EditorWindow
         ApplySort();
     }
 
+    bool MatchesTerm(string term, Regex regex, string partName, string displayName, string path, string guid = "")
+    {
+        if (string.IsNullOrEmpty(term)) return true;
+        string target = m_SearchMode switch
+        {
+            SearchMode.Path        => path,
+            SearchMode.DisplayName => displayName,
+            SearchMode.GUID        => guid,
+            _                      => partName,
+        };
+        return regex != null
+            ? regex.IsMatch(target)
+            : target.IndexOf(term, System.StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     void ApplySort()
     {
         m_Results.Sort((a, b) =>
         {
+            // Local prefabs always sort after game addressables
+            if (a.isLocal != b.isLocal) return a.isLocal ? 1 : -1;
+
             int cmp = m_SortCol switch
             {
                 SortColumn.PartName => string.Compare(a.partName, b.partName,
@@ -511,10 +602,8 @@ public class ImportGamePartWizard : EditorWindow
         });
     }
 
-    string Validate()
+    string ValidateImport()
     {
-        if (m_Selection.Count == 0)
-            return "Select at least one game asset from the results list.";
         if (string.IsNullOrWhiteSpace(m_OutputFolder))
             return "Output folder is required.";
         if (!AssetDatabase.IsValidFolder(m_OutputFolder.TrimEnd('/')))
@@ -529,37 +618,113 @@ public class ImportGamePartWizard : EditorWindow
         return slash >= 0 ? dir.Substring(slash + 1) : dir;
     }
 
+    void OpenPreview(RowType rowType, string guidOrPath)
+    {
+        if (rowType == RowType.LocalAddressable)
+        {
+            // Local wrapper prefab — extract the inner AddressableLoader GUID and preview via EditorCache.
+            var wrapper = AssetDatabase.LoadAssetAtPath<GameObject>(guidOrPath);
+            var innerLoader = wrapper != null ? wrapper.GetComponentInChildren<AddressableLoader>(true) : null;
+            var innerGuid = innerLoader?.assetGUID ?? innerLoader?.refs?[0];
+            if (!string.IsNullOrEmpty(innerGuid))
+            {
+                OpenPreview(RowType.Addressable, innerGuid);
+                return;
+            }
+            m_StatusLine = "Could not find AddressableLoader GUID in local prefab.";
+            return;
+        }
+
+        if (rowType == RowType.LocalBaked)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(guidOrPath);
+            if (prefab == null) { m_StatusLine = $"Could not load prefab at '{guidOrPath}'."; return; }
+            CustomStage.go = prefab;
+            UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+            return;
+        }
+
+        // Addressable — prefer EditorCache prefab (fake shaders render correctly).
+        var cachePath = $"Assets/EditorCache/{guidOrPath}.prefab";
+        var cached = AssetDatabase.LoadAssetAtPath<GameObject>(cachePath);
+        if (cached != null)
+        {
+            CustomStage.go = cached;
+            UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+            return;
+        }
+
+        Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(guidOrPath)).Completed += res =>
+        {
+            if (res.Status != AsyncOperationStatus.Succeeded || res.Result == null)
+            {
+                m_StatusLine = $"Failed to load addressable '{guidOrPath}'.";
+                Repaint();
+                return;
+            }
+            CustomStage.go = res.Result;
+            UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+        };
+    }
+
+    void DoPlaceLocal()
+    {
+        int count = 0;
+        var placed = new List<GameObject>();
+        Transform placementParent = Selection.activeGameObject?.transform;
+
+        foreach (var kv in m_Selection)
+        {
+            if (kv.Value.isLocal)
+            {
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(kv.Value.assetPath);
+                if (prefab == null) continue;
+                var inst = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                if (inst == null) continue;
+                Undo.RegisterCreatedObjectUndo(inst, "Place Part");
+                if (placementParent != null)
+                    inst.transform.SetParent(placementParent, false);
+                placed.Add(inst);
+                count++;
+            }
+            else
+            {
+                // Pure addressable — create a loader node directly in the scene (unsaved).
+                int sep       = kv.Key.IndexOf("|", System.StringComparison.Ordinal);
+                var guid      = sep >= 0 ? kv.Key.Substring(0, sep) : kv.Key;
+                var childPath = kv.Value.childPath;
+                var partName  = kv.Value.partName;
+                var go = new GameObject(partName);
+                Undo.RegisterCreatedObjectUndo(go, "Place Part");
+                if (placementParent != null)
+                    go.transform.SetParent(placementParent, false);
+                var loader = go.AddComponent<AddressableLoader>();
+                loader.assetGUID = guid;
+                if (!string.IsNullOrEmpty(childPath)) loader.childPath = childPath;
+                placed.Add(go);
+                count++;
+            }
+        }
+        if (placed.Count > 0)
+            Selection.objects = placed.ToArray();
+        m_StatusLine = count > 0
+            ? $"Placed {count} part{(count == 1 ? "" : "s")} in scene."
+            : "Could not place any parts.";
+        Repaint();
+    }
+
     bool DoImport()
     {
         EditorPrefs.SetString(PrefOutputFolder, m_OutputFolder);
-        var outRoot = m_OutputFolder.TrimEnd('/');
-
+        var outRoot    = m_OutputFolder.TrimEnd('/');
         var prefabsRoot = $"{outRoot}/Prefabs";
 
-        var conflicts = new List<string>();
-        foreach (var kv in m_Selection)
-        {
-            var subFolder = LastFolderSegment(kv.Value.assetPath);
-            var name = kv.Value.partName;
-            if (File.Exists(Path.GetFullPath($"{prefabsRoot}/{subFolder}/{name}.prefab")))
-                conflicts.Add(name);
-        }
-
-        if (conflicts.Count > 0)
-        {
-            var msg = conflicts.Count == 1
-                ? $"{conflicts[0]} already exists. Overwrite?"
-                : $"{conflicts.Count} parts already exist:\n{string.Join(", ", conflicts)}\n\nOverwrite all?";
-            if (!EditorUtility.DisplayDialog("Overwrite?", msg, "Yes", "Cancel"))
-                return false;
-        }
-
-        if (!AssetDatabase.IsValidFolder(prefabsRoot))
-            AssetDatabase.CreateFolder(outRoot, "Prefabs");
-
         var created = new List<GameObject>();
+        int skipped = 0;
         foreach (var kv in m_Selection)
         {
+            if (kv.Value.isLocal) continue;
+
             int sep       = kv.Key.IndexOf("|", System.StringComparison.Ordinal);
             var guid      = sep >= 0 ? kv.Key.Substring(0, sep) : kv.Key;
             var childPath = kv.Value.childPath;
@@ -569,6 +734,8 @@ public class ImportGamePartWizard : EditorWindow
             var partFolder = $"{prefabsRoot}/{subFolder}";
             var prefabPath = $"{partFolder}/{partName}.prefab";
 
+            if (!AssetDatabase.IsValidFolder(prefabsRoot))
+                AssetDatabase.CreateFolder(outRoot, "Prefabs");
             if (!AssetDatabase.IsValidFolder(partFolder))
                 AssetDatabase.CreateFolder(prefabsRoot, subFolder);
 
@@ -586,6 +753,7 @@ public class ImportGamePartWizard : EditorWindow
 
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
             if (prefab != null) created.Add(prefab);
+            else skipped++;
         }
 
         AssetDatabase.SaveAssets();
@@ -595,22 +763,15 @@ public class ImportGamePartWizard : EditorWindow
         {
             Selection.objects = created.ToArray();
             EditorGUIUtility.PingObject(created[created.Count - 1]);
-        }
-
-        var count = created.Count;
-        bool firstTime = !EditorPrefs.GetBool(PrefImportedOnce, false);
-        var resultMsg = $"Created {count} prefab{(count == 1 ? "" : "s")} in  {outRoot}/";
-        if (firstTime)
-        {
-            resultMsg += "\n\nNext steps:\n" +
-                         "1. Drag a prefab into your ship hierarchy in the scene\n" +
-                         "2. Run  Shipbreaker → Force View Refresh  to see it render\n" +
-                         "3. Position and build as normal";
             EditorPrefs.SetBool(PrefImportedOnce, true);
         }
-        EditorUtility.DisplayDialog("Imported", resultMsg, "OK");
+
+        m_StatusLine = skipped > 0
+            ? $"Imported {created.Count} prefab{(created.Count == 1 ? "" : "s")}; {skipped} failed. Saved to {outRoot}/"
+            : $"Imported {created.Count} prefab{(created.Count == 1 ? "" : "s")} to {outRoot}/";
 
         m_Selection.Clear();
+        Repaint();
         return true;
     }
 
