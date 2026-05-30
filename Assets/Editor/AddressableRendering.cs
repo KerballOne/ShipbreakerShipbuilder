@@ -51,7 +51,7 @@ public class AddressableRendering : MonoBehaviour
                     var child = loader.transform.GetChild(i);
                     if (child.GetComponent<SelectAddressableParent>() != null ||
                         child.GetComponent<FakePrefabDisplay>() != null)
-                        DestroyImmediate(child.gameObject);
+                        try { DestroyImmediate(child.gameObject); } catch (System.Exception ex) { Debug.LogError($"[AddressableRendering] ClearView() could not find {child.name}: {ex.Message}"); }
                 }
             }
 
@@ -363,19 +363,28 @@ public class AddressableRendering : MonoBehaviour
                 foreach (var disabledChild in disabledChildren)
                 {
                     GameObject foundChild = null;
-                    IEnumerable<Transform> children = temp.transform.GetChild(0).Cast<Transform>();
-                    var cList = children.ToList();
-                    foreach (var childPathPart in disabledChild.Split('/'))
+                    for (int i = temp.transform.childCount - 1; i >= 0; i--)
                     {
-                        foundChild = children.Where(c => c.name.StartsWith(childPathPart)).FirstOrDefault()?.gameObject;
-                        if(foundChild == null)
+                        if (temp.transform.GetChild(i).name == disabledChild) 
                         {
-                            break;
+                            GameObject.DestroyImmediate(temp.transform.GetChild(i).gameObject);
                         }
-                        children = foundChild.transform.Cast<Transform>();
+                        
+                        IEnumerable<Transform> children = temp.transform.GetChild(i).Cast<Transform>();
+                        var cList = children.ToList();
+                        foreach (var childPathPart in disabledChild.Split('/'))
+                        {
+                            foundChild = children.Where(c => c.name.StartsWith(childPathPart)).FirstOrDefault()?.gameObject;
+                            if(foundChild == null)
+                            {
+                                break;
+                            }
+                            children = foundChild.transform.Cast<Transform>();
+                        }
+                        if (foundChild != null)
+                            GameObject.DestroyImmediate(foundChild);
+
                     }
-                    if (foundChild != null)
-                        GameObject.DestroyImmediate(foundChild);
                 }
             }
 

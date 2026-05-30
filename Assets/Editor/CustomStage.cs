@@ -11,7 +11,7 @@ public class CustomStage : PreviewSceneStage
 
     protected override GUIContent CreateHeaderContent()
     {
-        return new GUIContent(go.name);
+        return new GUIContent(go != null ? go.name : "Preview");
     }
 
     protected override bool OnOpenStage()
@@ -37,18 +37,23 @@ public class CustomStage : PreviewSceneStage
         var fakeShader = Shader.Find("Fake/_Lynx/Surface/HDRP/Lit");
         var replacementMaterialCache = new Dictionary<Material, Material>();
 
+        var defaultMat = new Material(fakeShader != null ? fakeShader : Shader.Find("Standard"));
         foreach(var renderer in customStageGoInstance.GetComponentsInChildren<MeshRenderer>())
         {
             var mats = (Material[])renderer.sharedMaterials.Clone();
             for(var i = 0; i < mats.Length; i++)
             {
-                if(mats[i] == null) continue;
+                if(mats[i] == null)
+                {
+                    mats[i] = defaultMat;
+                    continue;
+                }
 
                 if(replacementMaterialCache.ContainsKey(mats[i]))
                 {
                     mats[i] = replacementMaterialCache[mats[i]];
                 }
-                else if(mats[i]?.shader?.name == "_Lynx/Surface/HDRP/Lit")
+                else if(mats[i].shader?.name == "_Lynx/Surface/HDRP/Lit")
                 {
                     var mat = new Material(fakeShader);
                     mat.CopyPropertiesFromMaterial(mats[i]);
