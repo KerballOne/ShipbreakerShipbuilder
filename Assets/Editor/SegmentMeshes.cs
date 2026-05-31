@@ -9,10 +9,10 @@ public class SegmentMeshes : EditorWindow
 
     int WedgeCount => Mathf.Max(1, Mathf.RoundToInt(360f / m_SegmentAngle));
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Cylindrical Collider Segments", priority = 10)]
+    [MenuItem("Shipbreaker/Shipbuilder Tools/Segment Meshes", priority = 10)]
     static void Open()
     {
-        var w = GetWindow<SegmentMeshes>("Cylindrical Collider Segments");
+        var w = GetWindow<SegmentMeshes>("Segment Meshes");
         w.minSize = new Vector2(340, 170);
     }
 
@@ -103,6 +103,6 @@ public class SegmentMeshes : EditorWindow
             mc.convex     = true;
         }
 
-        Debug.Log($"Cylindrical Collider Segments: added {wedgeCount} segments to '{m_Prefab.name}', root MeshCollider set to trigger.");
+        Debug.Log($"Segment Meshes: added {wedgeCount} segments to '{m_Prefab.name}', root MeshCollider set to trigger.");
     }
 }
