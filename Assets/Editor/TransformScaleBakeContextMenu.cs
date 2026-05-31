@@ -2,19 +2,18 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Adds "Bake Transform Scale" to the Transform component's context (gear / right-click) menu.
+/// Adds "Lock In Rescale" to the Transform component's context (gear / right-click) menu.
 /// Unlike the AddressableComponentLoader inspector button (which only shows on individual baked
 /// parts), this works on ANY GameObject — including parent containers holding several baked prefabs.
 /// </summary>
 public static class TransformScaleBakeContextMenu
 {
-    const string Path = "CONTEXT/Transform/Bake Transform Scale";
+    const string Path = "CONTEXT/Transform/Lock In Rescale";
 
     [MenuItem(Path, true)]
     static bool Validate(MenuCommand command)
     {
         var t = command.context as Transform;
-        // Enable for any non-unit scale with at least one mesh to bake below it.
         return t != null
             && TransformScaleBaker.IsNonUnitScale(t)
             && TransformScaleBaker.CountAffected(t) > 0;
@@ -35,15 +34,15 @@ public static class TransformScaleBakeContextMenu
               "Verify the result; scale uniformly if it distorts."
             : "";
 
-        if (!EditorUtility.DisplayDialog("Bake Transform Scale",
-                $"Bake the scale {scaleStr} on '{t.name}' into mesh geometry?\n\n" +
-                $"{affected} mesh(es) below this object will be baked, and all transforms reset to (1,1,1) " +
+        if (!EditorUtility.DisplayDialog("Lock In Rescale",
+                $"Lock in the rescale {scaleStr} on '{t.name}' into mesh geometry?\n\n" +
+                $"{affected} mesh(es) below this object will be updated, and all transforms reset to (1,1,1) " +
                 "with child positions adjusted to preserve the layout." + warning,
-                "Bake", "Cancel"))
+                "Lock In", "Cancel"))
             return;
 
-        int baked = TransformScaleBaker.BakeScale(t.gameObject);
-        EditorUtility.DisplayDialog("Bake Complete",
-            $"Baked scale into {baked} mesh(es) on '{t.name}'.\nTransform reset to (1,1,1).", "OK");
+        int baked = TransformScaleBaker.LockRescale(t.gameObject);
+        EditorUtility.DisplayDialog("Rescale Locked",
+            $"Locked rescale into {baked} mesh(es) on '{t.name}'.\nTransform reset to (1,1,1).", "OK");
     }
 }

@@ -17,7 +17,7 @@ public class BuildContent
     public const int MANIFEST_VERSION = 1;
 
     [MenuItem("Shipbreaker/Build", priority = 2)]
-    static bool RunBuild()
+    public static bool RunBuild()
     {
         // Don't go through with lengthy build process if build settings are not in order
         if (!Settings.VerifyBuildSettings())

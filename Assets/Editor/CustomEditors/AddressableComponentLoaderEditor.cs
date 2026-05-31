@@ -110,8 +110,8 @@ public class AddressableComponentLoaderEditor : Editor
     }
 
     // Baked parts carry an AddressableComponentLoader, so this button only appears on baked parts
-    // (not AddressableLoader parts, where scale-baking would fail). Shown for any non-unit scale;
-    // bakes the scale into the part's meshes and resets the transform to unit scale.
+    // (not AddressableLoader parts, where locking rescale would fail). Shown for any non-unit scale;
+    // locks the rescale into the part's meshes and resets the transform to unit scale.
     void DrawBakeScaleButton()
     {
         var go = ((AddressableComponentLoader)target).gameObject;
@@ -126,9 +126,9 @@ public class AddressableComponentLoaderEditor : Editor
 
         EditorGUILayout.Space();
         EditorGUILayout.HelpBox(
-            $"Scale {scaleStr}. Bake it into the mesh geometry so joints, mass and collision are correct " +
-            $"in-game ({affected} mesh{(affected == 1 ? "" : "es")} affected). The transform resets to (1,1,1) " +
-            "and child positions are adjusted to keep the layout.",
+            $"Rescale {scaleStr} detected. Lock it into the mesh geometry so joints, mass and collision " +
+            $"are correct in-game ({affected} mesh{(affected == 1 ? "" : "es")} affected). The transform " +
+            "resets to (1,1,1) and child positions are adjusted to keep the layout.",
             MessageType.Info);
 
         if (TransformScaleBaker.HasNonUniformScaleWithRotatedChildren(t))
@@ -140,11 +140,11 @@ public class AddressableComponentLoaderEditor : Editor
 
         using (new EditorGUI.DisabledScope(affected == 0))
         {
-            if (GUILayout.Button("Bake Transform Scale"))
+            if (GUILayout.Button("Lock In Rescale"))
             {
-                int baked = TransformScaleBaker.BakeScale(go);
-                EditorUtility.DisplayDialog("Bake Complete",
-                    $"Baked scale into {baked} mesh(es) on '{go.name}'.\nTransform reset to (1,1,1).", "OK");
+                int baked = TransformScaleBaker.LockRescale(go);
+                EditorUtility.DisplayDialog("Rescale Locked",
+                    $"Locked rescale into {baked} mesh(es) on '{go.name}'.\nTransform reset to (1,1,1).", "OK");
             }
         }
     }

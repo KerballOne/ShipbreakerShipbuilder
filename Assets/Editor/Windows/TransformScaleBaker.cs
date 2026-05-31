@@ -4,18 +4,18 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Bakes non-unit transform scale into mesh geometry for a part and its descendants, then resets
-/// localScale to (1,1,1) and scales child localPositions so multi-mesh layouts stay correct. Required
-/// because the game reads raw mesh vertices/bounds for joints + mass and rejects non-unit scale.
-/// Uniform scale is always safe; non-uniform scale skews descendant meshes that are rotated relative
-/// to the scaled transform (caller should warn). Invoked from the AddressableComponentLoader inspector
-/// button and the Transform component context menu.
+/// Locks in a non-unit transform rescale by baking it into mesh geometry, then resets localScale to
+/// (1,1,1) and scales child localPositions so multi-mesh layouts stay correct. Required because the
+/// game reads raw mesh vertices/bounds for joints + mass and rejects non-unit scale. Uniform scale is
+/// always safe; non-uniform scale skews descendant meshes that are rotated relative to the scaled
+/// transform (caller should warn). Invoked from the AddressableComponentLoader inspector button and
+/// the Transform component context menu.
 /// </summary>
 public static class TransformScaleBaker
 {
     const string FallbackSaveFolder = "Assets/_CustomShips/Meshes/BakedScale";
 
-    /// <summary>When true, BakeScale logs detailed per-node transforms, matrices and position deltas.</summary>
+    /// <summary>When true, LockRescale logs detailed per-node transforms, matrices and position deltas.</summary>
     public static bool VerboseLogging = false;
 
     /// <summary>True if the transform's localScale differs from unit (1,1,1) on any axis.</summary>
@@ -72,13 +72,13 @@ public static class TransformScaleBaker
     /// transformed by R⁻¹·diag(S)·R where R is the mesh node's rotation relative to the scaled root.
     /// Child positions are likewise scaled in the root's frame. After baking, all localScales are 1.
     /// </summary>
-    public static int BakeScale(GameObject root)
+    public static int LockRescale(GameObject root)
     {
-        Undo.SetCurrentGroupName("Bake Transform Scale");
+        Undo.SetCurrentGroupName("Lock In Rescale");
         int group = Undo.GetCurrentGroup();
 
         var restoreLog = new System.Text.StringBuilder();
-        restoreLog.AppendLine("[BakeTransformScale] Restore map (GameObject path → original mesh asset path):");
+        restoreLog.AppendLine("[LockInRescale] Restore map (GameObject path → original mesh asset path):");
 
         string saveFolder = ResolveSaveFolder(root);
         EnsureFolderExists(saveFolder);
@@ -87,7 +87,7 @@ public static class TransformScaleBaker
         Quaternion rootRot = root.transform.rotation;
 
         if (VerboseLogging)
-            Debug.Log($"[BakeScale] ===== '{root.name}'  S={S}  rootWorldRot={rootRot.eulerAngles}  rootWorldPos={root.transform.position} =====");
+            Debug.Log($"[LockRescale] ===== '{root.name}'  S={S}  rootWorldRot={rootRot.eulerAngles}  rootWorldPos={root.transform.position} =====");
 
         // Snapshot the content's world-bounds center NOW (original meshes, original scale), before any
         // baking, so we can re-anchor at the end and keep the assembly visually in place.
@@ -113,12 +113,12 @@ public static class TransformScaleBaker
             if (kv.Key == root.transform) continue;
             Vector3 relInRoot = Quaternion.Inverse(rootRotPos) * (kv.Value - rootPos);
             Vector3 scaledWorld = rootPos + rootRotPos * Vector3.Scale(relInRoot, S);
-            Undo.RecordObject(kv.Key, "Bake Transform Scale");
+            Undo.RecordObject(kv.Key, "Lock In Rescale");
             kv.Key.position = scaledWorld;
 
             if (VerboseLogging)
                 Debug.Log(
-                    $"[BakeScale][POS] '{kv.Key.name}'\n" +
+                    $"[LockRescale][POS] '{kv.Key.name}'\n" +
                     $"  worldOld={kv.Value}  relInRoot={relInRoot}  scaledRelInRoot={Vector3.Scale(relInRoot, S)}\n" +
                     $"  worldNew={scaledWorld}  localNew={kv.Key.localPosition}");
         }
@@ -130,10 +130,10 @@ public static class TransformScaleBaker
             Vector3 delta = preBounds.Value.center - postBounds.center;
             if (delta.sqrMagnitude > 1e-8f)
             {
-                Undo.RecordObject(root.transform, "Bake Transform Scale");
+                Undo.RecordObject(root.transform, "Lock In Rescale");
                 root.transform.position += delta;
                 if (VerboseLogging)
-                    Debug.Log($"[BakeScale][ANCHOR] preCenter={preBounds.Value.center} postCenter={postBounds.center} delta={delta} → root moved to {root.transform.position}");
+                    Debug.Log($"[LockRescale][ANCHOR] preCenter={preBounds.Value.center} postCenter={postBounds.center} delta={delta} → root moved to {root.transform.position}");
             }
         }
 
@@ -143,7 +143,7 @@ public static class TransformScaleBaker
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
-        Debug.Log($"[BakeTransformScale] Baked {bakedCount} mesh(es) on '{root.name}'.");
+        Debug.Log($"[LockInRescale] Baked {bakedCount} mesh(es) on '{root.name}'.");
         return bakedCount;
     }
 
@@ -198,7 +198,7 @@ public static class TransformScaleBaker
             var srcMesh = mf != null ? mf.sharedMesh : (mc != null ? mc.sharedMesh : null);
             string boundsStr = srcMesh != null ? $"size={srcMesh.bounds.size}" : "no-mesh";
             Debug.Log(
-                $"[BakeScale][MESH] '{t.name}'\n" +
+                $"[LockRescale][MESH] '{t.name}'\n" +
                 $"  worldRot={t.rotation.eulerAngles}  R(rel-root)={R.eulerAngles}\n" +
                 $"  S={S}  srcBounds {boundsStr}\n" +
                 $"  M row0={M.GetRow(0)} row1={M.GetRow(1)} row2={M.GetRow(2)}");
@@ -209,7 +209,7 @@ public static class TransformScaleBaker
             string originalPath = AssetDatabase.GetAssetPath(mf.sharedMesh);
             restoreLog.AppendLine($"  MeshFilter  {goPath}  ←  {originalPath}");
             var bakedMesh = BakeMesh(mf.sharedMesh, M, mf.sharedMesh.name, scaleTag, saveFolder);
-            Undo.RecordObject(mf, "Bake Transform Scale");
+            Undo.RecordObject(mf, "Lock In Rescale");
             mf.sharedMesh = bakedMesh;
             count++;
         }
@@ -229,7 +229,7 @@ public static class TransformScaleBaker
                 bakedCollider = BakeMesh(colliderSource, M, colliderSource.name + "_col", scaleTag, saveFolder);
                 count++;
             }
-            Undo.RecordObject(mc, "Bake Transform Scale");
+            Undo.RecordObject(mc, "Lock In Rescale");
             mc.sharedMesh = bakedCollider;
         }
 
@@ -268,7 +268,7 @@ public static class TransformScaleBaker
     {
         if (Vector3.Distance(t.localScale, Vector3.one) > 1e-5f)
         {
-            Undo.RecordObject(t, "Bake Transform Scale");
+            Undo.RecordObject(t, "Lock In Rescale");
             t.localScale = Vector3.one;
         }
         foreach (Transform child in t)
@@ -306,7 +306,7 @@ public static class TransformScaleBaker
         baked.RecalculateTangents();
 
         if (VerboseLogging)
-            Debug.Log($"[BakeScale][BAKED] '{baseName}'  srcBounds={source.bounds.size}  →  bakedBounds={baked.bounds.size}  ({verts.Length} verts)");
+            Debug.Log($"[LockRescale][BAKED] '{baseName}'  srcBounds={source.bounds.size}  →  bakedBounds={baked.bounds.size}  ({verts.Length} verts)");
 
         // The joint system reads mesh.vertices/bounds at runtime, which requires the mesh to be
         // CPU-readable. Asset meshes default to non-readable; force it on so jointing works.
