@@ -96,31 +96,23 @@ public static class TransformScaleBaker
         // Pass 1: bake meshes. R is each node's rotation relative to the scaled root.
         int bakedCount = BakeMeshesInHierarchy(root.transform, rootRot, S, saveFolder, restoreLog);
 
-        // Pass 2: reposition every descendant so its position relative to the root is scaled by S in
-        // the root's axes. Capture ORIGINAL world positions first; then reset ALL scales to 1 (so
-        // setting world positions yields clean localPositions with no later scale-induced drift); then
-        // apply the scaled world positions.
+        // Pass 2: preserve world positions through the scale reset. When root.localScale=(1.5,1.5,1.5),
+        // child world positions already reflect the scaled layout. After ResetScalesToOne, the parent
+        // scale multiplier is gone — so we restore each child's world position to keep the visual layout.
+        // This makes localPosition = worldPosition (relative to root), which is the correctly scaled value.
         var originalWorldPos = new Dictionary<Transform, Vector3>();
         CollectWorldPositions(root.transform, originalWorldPos);
-
-        Vector3 rootPos = root.transform.position;
-        Quaternion rootRotPos = root.transform.rotation;
 
         ResetScalesToOne(root.transform);
 
         foreach (var kv in originalWorldPos)
         {
             if (kv.Key == root.transform) continue;
-            Vector3 relInRoot = Quaternion.Inverse(rootRotPos) * (kv.Value - rootPos);
-            Vector3 scaledWorld = rootPos + rootRotPos * Vector3.Scale(relInRoot, S);
             Undo.RecordObject(kv.Key, "Lock In Rescale");
-            kv.Key.position = scaledWorld;
+            kv.Key.position = kv.Value;
 
             if (VerboseLogging)
-                Debug.Log(
-                    $"[LockRescale][POS] '{kv.Key.name}'\n" +
-                    $"  worldOld={kv.Value}  relInRoot={relInRoot}  scaledRelInRoot={Vector3.Scale(relInRoot, S)}\n" +
-                    $"  worldNew={scaledWorld}  localNew={kv.Key.localPosition}");
+                Debug.Log($"[LockRescale][POS] '{kv.Key.name}' worldPos={kv.Value} localNew={kv.Key.localPosition}");
         }
 
         // Re-anchor: shift the root so the post-scale bounds center matches the pre-scale center.
