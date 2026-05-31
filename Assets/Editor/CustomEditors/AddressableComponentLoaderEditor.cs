@@ -117,12 +117,12 @@ public class AddressableComponentLoaderEditor : Editor
         var go = ((AddressableComponentLoader)target).gameObject;
         var t  = go.transform;
 
-        if (!TransformScaleBaker.IsNonUnitScale(t))
+        if (!RescaleLocker.IsNonUnitScale(t))
             return;
 
-        int affected = TransformScaleBaker.CountAffected(t);
+        int affected = RescaleLocker.CountAffected(t);
         var s = t.localScale;
-        string scaleStr = TransformScaleBaker.IsUniformScale(t) ? $"{s.x:F3}" : $"({s.x:F3}, {s.y:F3}, {s.z:F3})";
+        string scaleStr = RescaleLocker.IsUniformScale(t) ? $"{s.x:F3}" : $"({s.x:F3}, {s.y:F3}, {s.z:F3})";
 
         EditorGUILayout.Space();
         EditorGUILayout.HelpBox(
@@ -131,7 +131,7 @@ public class AddressableComponentLoaderEditor : Editor
             "resets to (1,1,1) and child positions are adjusted to keep the layout.",
             MessageType.Info);
 
-        if (TransformScaleBaker.HasNonUniformScaleWithRotatedChildren(t))
+        if (RescaleLocker.HasNonUniformScaleWithRotatedChildren(t))
             EditorGUILayout.HelpBox(
                 "Non-uniform scale with rotated sub-meshes detected. This may SKEW rotated meshes " +
                 "(non-uniform scale only composes cleanly through rotation when scaling along the " +
@@ -142,7 +142,7 @@ public class AddressableComponentLoaderEditor : Editor
         {
             if (GUILayout.Button("Lock In Rescale"))
             {
-                int baked = TransformScaleBaker.LockRescale(go);
+                int baked = RescaleLocker.LockRescale(go);
                 EditorUtility.DisplayDialog("Rescale Locked",
                     $"Locked rescale into {baked} mesh(es) on '{go.name}'.\nTransform reset to (1,1,1).", "OK");
             }
