@@ -26,7 +26,6 @@ public class JointAssistWindow : EditorWindow
 
     // Joint placement state
     GameObject invisibleJointPrefab;
-    string jointGroup          = "";
     float autoOverlapThreshold = 0.02f;
     float autoDedupRadius      = 0.05f;
 
@@ -176,12 +175,10 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.LabelField("Auto-Placement", EditorStyles.miniBoldLabel);
         EditorGUILayout.HelpBox(
             "Select 2+ parts in the hierarchy, then click Auto-Place. " +
+            "Invisible Joints are created as siblings of the first selected part. " +
             "Existing joints at the same positions are not duplicated.",
             MessageType.None);
 
-        jointGroup           = EditorGUILayout.TextField(
-            new GUIContent("Joints Subfolder", "If set, joints are placed under Joints/<name>. Leave empty to place directly under Joints."),
-            jointGroup);
         autoOverlapThreshold = EditorGUILayout.FloatField("Adjacency Threshold (m)", autoOverlapThreshold);
         autoDedupRadius      = EditorGUILayout.FloatField("Dedup Radius (m)",        autoDedupRadius);
 
@@ -249,7 +246,6 @@ public class JointAssistWindow : EditorWindow
         {
             GUI.backgroundColor = pickedColor;
             string faceName = face.Value.source.name;
-            if (faceName.Length > 20) faceName = faceName.Substring(0, faceName.Length / 2);
 
             // Only show ancestor row if the other face is also selected (we can calculate the ancestor)
             GameObject otherSource = slot == 1 ? (snapFaceB?.source) : (snapFaceA?.source);
@@ -257,11 +253,14 @@ public class JointAssistWindow : EditorWindow
             {
                 Transform ancestor = FindMoveRoot(face.Value.source, otherSource);
                 string ancestorName = ancestor != null ? ancestor.name : "?";
-                if (ancestorName.Length > 20) ancestorName = ancestorName.Substring(0, ancestorName.Length / 2);
 
-                btnText = $"{faceName}\n{ancestorName}";
+                // Build button text and measure it to truncate dynamically
+                btnText = $"{ancestorName}\n└ {faceName}";
                 showTwoRows = true;
                 buttonHeight = 35;
+
+                // Measure text and truncate if needed
+                btnText = TruncateButtonText(ancestorName, faceName, 0.8f);
             }
             else
             {
@@ -460,6 +459,47 @@ public class JointAssistWindow : EditorWindow
         return a;
     }
 
+    string TruncateButtonText(string ancestorName, string faceName, float fontSizeScale)
+    {
+        // Measure available width from the last BeginHorizontal (approximate)
+        // Account for label (68px) + padding (8px) = 76px used, so remaining width is window - 76
+        float availableWidth = EditorGUIUtility.currentViewWidth - 90f; // Conservative margin
+        availableWidth = Mathf.Max(availableWidth, 100f); // Minimum readable width
+
+        // Create a temporary style to measure text
+        var tempStyle = new GUIStyle(GUI.skin.button);
+        tempStyle.fontSize = Mathf.RoundToInt(GUI.skin.button.fontSize * fontSizeScale);
+        tempStyle.padding = new RectOffset(4, 4, 0, 0);
+
+        // Measure the two lines and truncate if needed
+        string line1 = ancestorName;
+        string line2 = $"└ {faceName}";
+
+        // Truncate line 1
+        var content1 = new GUIContent(line1);
+        Vector2 size1 = tempStyle.CalcSize(content1);
+        if (size1.x > availableWidth)
+        {
+            while (line1.Length > 1 && tempStyle.CalcSize(new GUIContent(line1 + "…")).x > availableWidth)
+                line1 = line1.Substring(0, line1.Length - 1);
+            line1 += "…";
+        }
+
+        // Truncate line 2
+        var content2 = new GUIContent(line2);
+        Vector2 size2 = tempStyle.CalcSize(content2);
+        if (size2.x > availableWidth)
+        {
+            // Start from the face name part (after "└ ")
+            string facePart = faceName;
+            while (facePart.Length > 1 && tempStyle.CalcSize(new GUIContent($"└ {facePart}…")).x > availableWidth)
+                facePart = facePart.Substring(0, facePart.Length - 1);
+            line2 = $"└ {facePart}…";
+        }
+
+        return $"{line1}\n{line2}";
+    }
+
     Vector3 FindFaceCenter(GameObject source, Vector3 normal)
     {
         // Find all triangles with the same normal and average their centers
@@ -637,7 +677,8 @@ public class JointAssistWindow : EditorWindow
     void AutoPlaceInvisibleJoints()
     {
         var selected = Selection.gameObjects;
-        Transform parent = ResolveParent(selected[0], jointGroup);
+        // Create joints as siblings of the first selected part
+        Transform parent = selected[0].transform.parent;
 
         var perObject = new List<List<Bounds>>();
         foreach (var go in selected)
