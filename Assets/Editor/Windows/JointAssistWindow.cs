@@ -9,12 +9,20 @@ public class JointAssistWindow : EditorWindow
     GameObject cutPointPrefab;
     bool pickingCutPoint;
 
-    // Face snap state — each face stores the picked point, normal, and source object
-    struct PickedFace { public Vector3 point; public Vector3 normal; public GameObject source; }
+    // Face snap state — each face stores the picked point, normal (in local space of source), and source object
+    struct PickedFace { public Vector3 point; public Vector3 normal; public GameObject source; public Vector3 localNormal; }
     PickedFace? snapFaceA;
     PickedFace? snapFaceB;
     int pickingSnapFace; // 0 = none, 1 = A, 2 = B
     float overlapAmount = 0.025f;
+
+    // Per-face snap point mode: false = click point, true = center of face
+    bool snapPointModeA; // false = Click Point, true = Center of Face
+    bool snapPointModeB;
+
+    // Axis constraints for Part A (pos X Y Z, rot X Y Z) — all default true
+    bool snapPosX = true, snapPosY = true, snapPosZ = true;
+    bool snapRotX = true, snapRotY = true, snapRotZ = true;
 
     // Joint placement state
     GameObject invisibleJointPrefab;
@@ -119,8 +127,8 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(4);
-        DrawFacePickButton(1, "Face A", "Moving",     ref snapFaceA, activeColor, pickedColor);
-        DrawFacePickButton(2, "Face B", "Flush with", ref snapFaceB, activeColor, pickedColor);
+        DrawFacePickButton(1, "Face A", "Moving",     ref snapFaceA, activeColor, pickedColor, ref snapPointModeA);
+        DrawFacePickButton(2, "Face B", "Flush with", ref snapFaceB, activeColor, pickedColor, ref snapPointModeB);
 
         bool bothPicked = snapFaceA.HasValue && snapFaceB.HasValue;
 
@@ -220,7 +228,7 @@ public class JointAssistWindow : EditorWindow
         GUILayout.EndScrollView();
     }
 
-    void DrawFacePickButton(int slot, string label, string staticPrefix, ref PickedFace? face, Color activeColor, Color pickedColor)
+    void DrawFacePickButton(int slot, string label, string staticPrefix, ref PickedFace? face, Color activeColor, Color pickedColor, ref bool centerMode)
     {
         bool isPickingThis = pickingSnapFace == slot;
         var prevBG = GUI.backgroundColor;
@@ -229,24 +237,54 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.LabelField(staticPrefix, GUILayout.Width(68));
 
         string btnText;
+        bool showTwoRows = false;
+        int buttonHeight = 26;
+
         if (isPickingThis)
         {
             GUI.backgroundColor = activeColor;
-            btnText = $"Cancel";
+            btnText = "Cancel";
         }
-        else if (face.HasValue)
+        else if (face.HasValue && face.Value.source != null)
         {
             GUI.backgroundColor = pickedColor;
-            string name = face.Value.source != null ? face.Value.source.name : "?";
-            if (name.Length > 20) name = name.Substring(0, 18) + "…";
-            btnText = name;
+            string faceName = face.Value.source.name;
+            if (faceName.Length > 20) faceName = faceName.Substring(0, faceName.Length / 2);
+
+            // Only show ancestor row if the other face is also selected (we can calculate the ancestor)
+            GameObject otherSource = slot == 1 ? (snapFaceB?.source) : (snapFaceA?.source);
+            if (otherSource != null)
+            {
+                Transform ancestor = FindMoveRoot(face.Value.source, otherSource);
+                string ancestorName = ancestor != null ? ancestor.name : "?";
+                if (ancestorName.Length > 20) ancestorName = ancestorName.Substring(0, ancestorName.Length / 2);
+
+                btnText = $"{faceName}\n{ancestorName}";
+                showTwoRows = true;
+                buttonHeight = 35;
+            }
+            else
+            {
+                btnText = faceName;
+            }
         }
         else
         {
             btnText = $"Pick {label}";
         }
 
-        if (GUILayout.Button(btnText, GUILayout.Height(26)))
+        // Create left-aligned button style with normal size when 1 row, smaller when 2 rows
+        var buttonStyle = new GUIStyle(GUI.skin.button);
+        buttonStyle.wordWrap = true;
+        buttonStyle.alignment = TextAnchor.MiddleLeft;
+        if (showTwoRows)
+        {
+            buttonStyle.fontSize = Mathf.RoundToInt(GUI.skin.button.fontSize * 0.8f);
+            buttonStyle.padding = new RectOffset(4, 4, 0, 0);
+            buttonStyle.margin = new RectOffset(0, 0, 0, 0);
+        }
+
+        if (GUILayout.Button(btnText, buttonStyle, GUILayout.Height(buttonHeight)))
         {
             if (isPickingThis)
             {
@@ -263,6 +301,37 @@ public class JointAssistWindow : EditorWindow
 
         GUI.backgroundColor = prevBG;
         EditorGUILayout.EndHorizontal();
+
+        // Snap point mode row
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Space(72); // align under button
+        string[] modeLabels = { "Click Point", "Center of Face" };
+        int modeIdx = centerMode ? 1 : 0;
+        int newIdx = EditorGUILayout.Popup(modeIdx, modeLabels);
+        centerMode = newIdx == 1;
+        EditorGUILayout.EndHorizontal();
+
+        // Axis checkboxes for Part A only
+        if (slot == 1)
+        {
+            // Position row
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(72);
+            GUILayout.Label("Pos:", GUILayout.Width(28));
+            snapPosX = GUILayout.Toggle(snapPosX, "X", GUILayout.Width(26));
+            snapPosY = GUILayout.Toggle(snapPosY, "Y", GUILayout.Width(26));
+            snapPosZ = GUILayout.Toggle(snapPosZ, "Z", GUILayout.Width(26));
+            EditorGUILayout.EndHorizontal();
+
+            // Rotation row
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(72);
+            GUILayout.Label("Rot:", GUILayout.Width(28));
+            snapRotX = GUILayout.Toggle(snapRotX, "X", GUILayout.Width(26));
+            snapRotY = GUILayout.Toggle(snapRotY, "Y", GUILayout.Width(26));
+            snapRotZ = GUILayout.Toggle(snapRotZ, "Z", GUILayout.Width(26));
+            EditorGUILayout.EndHorizontal();
+        }
     }
 
     // ── Scene picking ─────────────────────────────────────────────────────────
@@ -342,7 +411,9 @@ public class JointAssistWindow : EditorWindow
                 int slot = pickingSnapFace;
                 if (hit)
                 {
-                    var pf = new PickedFace { point = hitPoint, normal = hitNormal, source = picked };
+                    // Store the normal in local space so it updates when the object rotates
+                    Vector3 localNormal = picked.transform.worldToLocalMatrix.MultiplyVector(hitNormal);
+                    var pf = new PickedFace { point = hitPoint, normal = hitNormal, source = picked, localNormal = localNormal };
                     if (slot == 1) snapFaceA = pf;
                     else           snapFaceB = pf;
                     statusMessage = $"Face {(slot == 1 ? "A" : "B")} picked on '{picked.name}'.";
@@ -373,6 +444,105 @@ public class JointAssistWindow : EditorWindow
 
     // ── Face snap ─────────────────────────────────────────────────────────────
 
+    static Transform FindMoveRoot(GameObject partA, GameObject partBSource)
+    {
+        if (partBSource == null) return partA.transform;
+
+        // Collect all ancestors of B (including B itself)
+        var bAncestors = new HashSet<Transform>();
+        for (var t = partBSource.transform; t != null; t = t.parent)
+            bAncestors.Add(t);
+
+        // Walk up A until A's parent is in B's ancestor chain (i.e., A and B share a parent)
+        Transform a = partA.transform;
+        while (a.parent != null && !bAncestors.Contains(a.parent))
+            a = a.parent;
+        return a;
+    }
+
+    Vector3 FindFaceCenter(GameObject source, Vector3 normal)
+    {
+        // Find all triangles with the same normal and average their centers
+        Vector3 faceSum = Vector3.zero;
+        int triCount = 0;
+        const float normalTolerance = 0.1f;
+
+        foreach (var mf in source.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf.sharedMesh == null) continue;
+            var mesh = mf.sharedMesh;
+            var tris = mesh.triangles;
+            var verts = mesh.vertices;
+            var normals = mesh.normals;
+            var m = mf.transform.localToWorldMatrix;
+
+            for (int ti = 0; ti < tris.Length; ti += 3)
+            {
+                Vector3 v0 = verts[tris[ti]], v1 = verts[tris[ti+1]], v2 = verts[tris[ti+2]];
+                Vector3 ln = normals.Length > 0
+                    ? ((normals[tris[ti]] + normals[tris[ti+1]] + normals[tris[ti+2]]) / 3f).normalized
+                    : Vector3.Cross(v1 - v0, v2 - v0).normalized;
+                Vector3 wn = m.MultiplyVector(ln).normalized;
+
+                // Check if this triangle has the same normal as the target
+                float normalDot = Vector3.Dot(wn, normal);
+                if (normalDot < 1f - normalTolerance) continue;
+
+                // For center mode, pick any triangle on the face as a representative
+                // (we'll use the first one found with matching normal)
+                Vector3 triCenter = m.MultiplyPoint3x4((v0 + v1 + v2) / 3f);
+                faceSum += triCenter;
+                triCount++;
+            }
+        }
+
+        return triCount > 0 ? faceSum / triCount : Vector3.zero;
+    }
+
+    Vector3 GetFacePoint(PickedFace face, bool centerMode)
+    {
+        if (!centerMode) return face.point;
+        // Center of face: find all coplanar triangles with the same normal and average their centers
+        Vector3 faceSum = Vector3.zero;
+        int triCount = 0;
+        const float normalTolerance = 0.1f;
+        const float distanceTolerance = 0.01f;
+
+        foreach (var mf in face.source.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf.sharedMesh == null) continue;
+            var mesh = mf.sharedMesh;
+            var tris = mesh.triangles;
+            var verts = mesh.vertices;
+            var normals = mesh.normals;
+            var m = mf.transform.localToWorldMatrix;
+
+            for (int ti = 0; ti < tris.Length; ti += 3)
+            {
+                Vector3 v0 = verts[tris[ti]], v1 = verts[tris[ti+1]], v2 = verts[tris[ti+2]];
+                Vector3 ln = normals.Length > 0
+                    ? ((normals[tris[ti]] + normals[tris[ti+1]] + normals[tris[ti+2]]) / 3f).normalized
+                    : Vector3.Cross(v1 - v0, v2 - v0).normalized;
+                Vector3 wn = m.MultiplyVector(ln).normalized;
+
+                // Check if this triangle has the same normal as the clicked face
+                float normalDot = Vector3.Dot(wn, face.normal);
+                if (normalDot < 1f - normalTolerance) continue;
+
+                // Check if this triangle is coplanar with the clicked point
+                Vector3 triCenter = m.MultiplyPoint3x4((v0 + v1 + v2) / 3f);
+                float dist = Mathf.Abs(Vector3.Dot(triCenter - face.point, face.normal));
+                if (dist > distanceTolerance) continue;
+
+                // This triangle is part of the same face
+                faceSum += triCenter;
+                triCount++;
+            }
+        }
+
+        return triCount > 0 ? faceSum / triCount : face.point;
+    }
+
     void AutoDetectFaces()
     {
         var sel = Selection.gameObjects;
@@ -386,8 +556,8 @@ public class JointAssistWindow : EditorWindow
         // Face center on B: the face pointing toward A
         Vector3 faceBPoint = bB.center - dir * ReachInDir(bB, dir);
 
-        snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = sel[0] };
-        snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = sel[1] };
+        snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = sel[0], localNormal = sel[0].transform.worldToLocalMatrix.MultiplyVector(dir) };
+        snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = sel[1], localNormal = sel[1].transform.worldToLocalMatrix.MultiplyVector(-dir) };
 
         statusMessage = $"Auto-detected faces: '{sel[0].name}' → '{sel[1].name}'.";
         statusType    = MessageType.Info;
@@ -401,20 +571,61 @@ public class JointAssistWindow : EditorWindow
         var fB = snapFaceB.Value;
         if (fA.source == null) { statusMessage = "Face A source object is missing."; statusType = MessageType.Warning; Repaint(); return; }
 
-        Transform moveRoot = fA.source.transform;
-
+        Transform moveRoot = FindMoveRoot(fA.source, fB.source);
         Undo.RecordObject(moveRoot, "Face Snap");
 
-        // Rotate so fA.normal aligns flush with -fB.normal, pivoting around the picked face point.
-        Quaternion alignRot = Quaternion.FromToRotation(fA.normal, -fB.normal);
-        Vector3 pivotWorld  = fA.point;
-        Vector3 toRoot      = moveRoot.position - pivotWorld;
-        moveRoot.rotation   = alignRot * moveRoot.rotation;
-        moveRoot.position   = pivotWorld + alignRot * toRoot;
+        // Compute current face normals from local normals (accounts for rotation)
+        Vector3 currentNormalA = fA.source.transform.localToWorldMatrix.MultiplyVector(fA.localNormal).normalized;
+        Vector3 currentNormalB = fB.source.transform.localToWorldMatrix.MultiplyVector(fB.localNormal).normalized;
 
-        // Translate so the face point lands on B's face point (+ overlap along B's inward normal).
-        Vector3 targetPos   = fB.point + fB.normal * overlap;
-        moveRoot.position  += targetPos - pivotWorld;
+        // For Part A: if in Center of Face mode, recompute center in current state.
+        // If in Click Point mode, preserve the original offset but apply it relative to the current position.
+        Vector3 ptA;
+        if (snapPointModeA)
+        {
+            ptA = FindFaceCenter(fA.source, currentNormalA);
+        }
+        else
+        {
+            // Click Point mode: compute offset from original source position to the clicked point,
+            // then apply that offset to the current source position
+            Vector3 offset = fA.point - fA.source.transform.position;
+            ptA = fA.source.transform.position + offset;
+        }
+        Vector3 ptB = GetFacePoint(fB, snapPointModeB);
+
+        // Rotation alignment (axis-constrained) - align the current face normal to the opposite of fB's normal
+        Quaternion alignRot = Quaternion.FromToRotation(currentNormalA, -currentNormalB);
+
+        // Apply axis constraints by filtering the rotation
+        if (!snapRotX || !snapRotY || !snapRotZ)
+        {
+            // Convert to euler, zero disabled axes, convert back
+            Vector3 currentEuler = moveRoot.rotation.eulerAngles;
+            Vector3 targetEuler = (alignRot * moveRoot.rotation).eulerAngles;
+
+            if (!snapRotX) targetEuler.x = currentEuler.x;
+            if (!snapRotY) targetEuler.y = currentEuler.y;
+            if (!snapRotZ) targetEuler.z = currentEuler.z;
+
+            alignRot = Quaternion.Euler(targetEuler) * Quaternion.Inverse(moveRoot.rotation);
+        }
+
+        // Pivot rotation around ptA
+        Vector3 toRoot   = moveRoot.position - ptA;
+        Quaternion newRot = alignRot * moveRoot.rotation;
+        Vector3 newPos    = ptA + alignRot * toRoot;
+
+        // Translation to match face points
+        Vector3 targetPos = ptB + fB.normal * overlap;
+        Vector3 delta     = targetPos - ptA;
+        if (!snapPosX) delta.x = 0;
+        if (!snapPosY) delta.y = 0;
+        if (!snapPosZ) delta.z = 0;
+        newPos += delta;
+
+        moveRoot.rotation = newRot;
+        moveRoot.position = newPos;
 
         statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm overlap).";
         statusType    = MessageType.Info;
