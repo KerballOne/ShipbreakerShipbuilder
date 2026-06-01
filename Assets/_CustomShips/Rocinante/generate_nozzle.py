@@ -8,19 +8,21 @@ import os
 SCALE = 2.0   # uniform scale baked into geometry (Unity transform stays at 1,1,1)
 
 # Bell shape  (wide shallow dish, like the reference)
-THROAT_RADIUS  = 2.22  * SCALE
+THROAT_RADIUS  = 2.72  * SCALE
 EXIT_RADIUS    = 5.20  * SCALE
 NOZZLE_LENGTH  = 5.40  * SCALE
-BELL_POWER     = 0.42            # < 0.5 = deep concave dish profile
+BELL_POWER     = 0.62            # < 0.5 = deep concave dish profile
 
 # Collar (attaches to ship body)
-COLLAR_RADIUS  = 2.22  * SCALE
-COLLAR_LENGTH  = 0.45  * SCALE
+COLLAR_RADIUS  = 2.72  * SCALE
+COLLAR_LENGTH  = 0.35  * SCALE
 
 # Raised circumferential bands on bell exterior
 BAND_POSITIONS = [0.11, 0.22, 0.33, 0.55, 0.66, 0.88]
 BAND_HEIGHT    = 0.10  * SCALE
-BAND_PROTRUDE  = 0.05  * SCALE
+BAND_PROTRUDE  = 0.05  * SCALE  # base protrusion for all bands
+BAND_OFFSETS   = [0.00, 0.00, 0.00, 0.00, 0.00, 0.00]  # per-band extra outward protrusion (unscaled)
+BAND_INSETS    = [1.00, 0.90, 0.80, 0.70, 0.60, 0.50]  # per-band extra inward protrusion on inner wall (unscaled)
 
 # Bell wall thickness
 WALL_THICKNESS = 0.60  * SCALE
@@ -51,12 +53,19 @@ SEGMENTS       = 32
 RINGS          = 24
 
 # Inner turbine structure — hub
-HUB_OUTER_R       = 0.58  * SCALE
-HUB_INNER_R       = 0.42  * SCALE
+HUB_OUTER_R       = 0.78  * SCALE
+HUB_INNER_R       = 0.68  * SCALE
 HUB_LENGTH        = 5.10  * SCALE
 HUB_RING_COUNT    = 10
 HUB_RING_HEIGHT   = 0.050 * SCALE
 HUB_RING_PROTRUDE = 0.042 * SCALE
+
+# Hourglass shape rising from the top of the inner collar
+HG_WAIST_R    = 1.10  * SCALE  # radius at the narrowest point
+HG_TOP_R      = 1.70  * SCALE  # radius at the flared-out top rim
+HG_WALL       = 0.08  * SCALE  # wall thickness throughout
+HG_HEIGHT     = 1.50  * SCALE  # total axial height of the hourglass
+HG_STEPS      = 12             # rings per half (more = smoother curve)
 
 # Inner turbine structure — vanes
 VANE_COUNT   = 16
@@ -68,7 +77,7 @@ VANE_SPIRAL  = 0.38           # angular offset in radians between vane top and b
 # Inner turbine structure — outer collar
 COLLAR_INNER_R = 1.70 * SCALE
 COLLAR_WALL    = 0.10 * SCALE
-COLLAR_TAPER   = 0.65 * SCALE  # how much the collar narrows at the opening (exit) end
+COLLAR_TAPER   = 0.45 * SCALE  # how much the collar narrows at the opening (exit) end
 
 EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell.fbx"
 EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell_col.fbx"
@@ -182,10 +191,12 @@ for i in range(1, RINGS + 1):
     for bp in BAND_POSITIONS:
         if prev_t < bp < t and bp not in inserted:
             bz, br = bell_at(bp)
-            h = BAND_HEIGHT / 2
+            _bpi = BAND_POSITIONS.index(bp)
+            h  = BAND_HEIGHT / 2
+            bp_protrude = BAND_PROTRUDE + BAND_OFFSETS[_bpi] * SCALE
             profile.append((bz + h, br))
-            profile.append((bz + h, br + BAND_PROTRUDE))
-            profile.append((bz - h, br + BAND_PROTRUDE))
+            profile.append((bz + h, br + bp_protrude))
+            profile.append((bz - h, br + bp_protrude))
             profile.append((bz - h, br))
             inserted.add(bp)
     profile.append(bell_at(t))
@@ -235,10 +246,13 @@ for i in range(1, RINGS + 1):
     for bp in BAND_POSITIONS:
         if prev_t_inner < bp < t and bp not in inserted_inner:
             ibz, ibr = bell_at(bp)
-            h = BAND_HEIGHT / 2
+            _bpi = BAND_POSITIONS.index(bp)
+            h  = BAND_HEIGHT / 2
+            bp_protrude = BAND_PROTRUDE + BAND_OFFSETS[_bpi] * SCALE
+            bp_inset    = BAND_PROTRUDE + BAND_INSETS[_bpi] * SCALE
             inner_bell_profile.append((ibz + h, ibr - WALL_THICKNESS))
-            inner_bell_profile.append((ibz + h, ibr - WALL_THICKNESS - BAND_PROTRUDE))
-            inner_bell_profile.append((ibz - h, ibr - WALL_THICKNESS - BAND_PROTRUDE))
+            inner_bell_profile.append((ibz + h, ibr - WALL_THICKNESS - bp_inset))
+            inner_bell_profile.append((ibz - h, ibr - WALL_THICKNESS - bp_inset))
             inner_bell_profile.append((ibz - h, ibr - WALL_THICKNESS))
             inserted_inner.add(bp)
 
@@ -423,10 +437,12 @@ for i in range(1, COL_RINGS + 1):
     for bp in BAND_POSITIONS:
         if _col_prev_t < bp < t and bp not in _col_inserted:
             bz, br = bell_at(bp)
-            h = BAND_HEIGHT / 2
+            _bpi = BAND_POSITIONS.index(bp)
+            h  = BAND_HEIGHT / 2
+            bp_protrude = BAND_PROTRUDE + BAND_OFFSETS[_bpi] * SCALE
             col_pts.append((bz + h, br))
-            col_pts.append((bz + h, br + BAND_PROTRUDE))
-            col_pts.append((bz - h, br + BAND_PROTRUDE))
+            col_pts.append((bz + h, br + bp_protrude))
+            col_pts.append((bz - h, br + bp_protrude))
             col_pts.append((bz - h, br))
             _col_inserted.add(bp)
     col_pts.append(bell_at(t))
@@ -526,8 +542,8 @@ hub_inner_bot = add_ring(bm, 0.0,        HUB_INNER_R)
 hub_inner_top = add_ring(bm, HUB_LENGTH, HUB_INNER_R)
 bridge(bm, hub_inner_top, hub_inner_bot)  # top→bot = inward normals
 
-annular_cap(bm, hub_outer_rings[-1], hub_inner_top, flip=False)  # top (+Z)
 annular_cap(bm, hub_outer_rings[0],  hub_inner_bot, flip=True)   # bottom (-Z)
+annular_cap(bm, hub_outer_rings[-1], hub_inner_top, flip=False)  # top (+Z)
 
 # ── Radial vanes ──────────────────────────────────────────────────────────────
 
@@ -587,6 +603,41 @@ bmesh.ops.reverse_faces(bm, faces=_inner_collar_faces)
 annular_cap(bm, collar_outer_top, collar_inner_top, flip=False)
 annular_cap(bm, collar_outer_bot, collar_inner_bot, flip=True)
 
+# ── Hourglass shape ───────────────────────────────────────────────────────────
+# Hollow tube rising from collar_inner_top (COLLAR_INNER_R at VANE_TOP_Z),
+# pinching inward to HG_WAIST_R at mid-height, then flaring out to HG_TOP_R.
+# Outer and inner surfaces are offset by HG_WALL; top and bottom annular caps close it.
+
+_hg_base_z = VANE_TOP_Z
+_hg_total  = HG_HEIGHT
+_hg_steps  = HG_STEPS * 2  # full sweep: bottom → waist → top
+
+def _hg_r_outer(t):
+    # t in [0,1]: cosine profile from COLLAR_OUTER_R → HG_WAIST_R → HG_TOP_R
+    if t <= 0.5:
+        return COLLAR_OUTER_R + (HG_WAIST_R - COLLAR_OUTER_R) * (1.0 - math.cos(t * 2 * math.pi * 0.5)) * 0.5 * 2
+    else:
+        return HG_WAIST_R + (HG_TOP_R - HG_WAIST_R) * (1.0 - math.cos((t - 0.5) * 2 * math.pi * 0.5)) * 0.5 * 2
+
+_hg_outer_rings = []
+_hg_inner_rings = []
+for s in range(_hg_steps + 1):
+    t  = s / _hg_steps
+    z  = _hg_base_z + _hg_total * t
+    ro = _hg_r_outer(t)
+    ri = ro - HG_WALL
+    _hg_outer_rings.append(add_ring(bm, z, ro))
+    _hg_inner_rings.append(add_ring(bm, z, ri))
+
+for i in range(_hg_steps):
+    bridge(bm, _hg_outer_rings[i], _hg_outer_rings[i + 1])
+    _before_hg_inner = set(bm.faces)
+    bridge(bm, _hg_inner_rings[i], _hg_inner_rings[i + 1])
+    bmesh.ops.reverse_faces(bm, faces=[f for f in bm.faces if f not in _before_hg_inner])
+
+annular_cap(bm, _hg_outer_rings[0],  _hg_inner_rings[0],  flip=True)   # bottom cap
+annular_cap(bm, _hg_outer_rings[-1], _hg_inner_rings[-1], flip=False)  # top cap
+
 # ── Flare panels hanging from the collar bottom ───────────────────────────────
 # Each panel roots at COLLAR_INNER_R (inside face of collar), at z=VANE_BOT_Z,
 # and its tip angles inward (smaller radius) and downward (lower z).
@@ -627,6 +678,18 @@ for k in range(FLARE_COUNT):
 # ── Finalise inner structure ──────────────────────────────────────────────────
 
 bm.normal_update()
+
+# Cylindrical UV — U = angle / 2π, V = normalized Z
+uv_layer_inner = bm.loops.layers.uv.new("UVMap")
+_nz_min = _flare_tip_z
+_nz_rng = (VANE_TOP_Z + HG_HEIGHT) - _nz_min
+for face in bm.faces:
+    us = [(math.atan2(lp.vert.co.y, lp.vert.co.x) / (2 * math.pi)) % 1.0
+          for lp in face.loops]
+    if max(us) - min(us) > 0.5:
+        us = [u + 1.0 if u < 0.5 else u for u in us]
+    for lp, u in zip(face.loops, us):
+        lp[uv_layer_inner].uv = (u, (lp.vert.co.z - _nz_min) / _nz_rng)
 
 mesh_inner = bpy.data.meshes.new("EngineNozzleMesh")
 obj_inner  = bpy.data.objects.new("EngineNozzle", mesh_inner)
