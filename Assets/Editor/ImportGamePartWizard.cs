@@ -43,6 +43,7 @@ public class ImportGamePartWizard : EditorWindow
     bool       m_SortAsc    = true;
     int        m_ChildDepth = 1;
 
+
     // Key: guid for addressable root items, "guid|childPath" for children, "local:path" for local prefabs
     readonly Dictionary<string, (string assetPath, string partName, string childPath, bool isLocal, string guid, RowType rowType)> m_Selection =
         new Dictionary<string, (string, string, string, bool, string, RowType)>();
@@ -244,8 +245,7 @@ public class ImportGamePartWizard : EditorWindow
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField(
             $"{m_Results.Count} result{(m_Results.Count == 1 ? "" : "s")}" +
-            (m_Results.Count >= MaxResults ? $" (capped at {MaxResults})" : "") +
-            (m_Selection.Count > 0 ? $"  —  {m_Selection.Count} selected" : ""),
+            (m_Results.Count >= MaxResults ? $" (capped at {MaxResults})" : ""),
             EditorStyles.miniLabel);
         GUILayout.Label("Child depth:", EditorStyles.miniLabel, GUILayout.Width(70));
         int newDepth = EditorGUILayout.IntField(m_ChildDepth, GUILayout.Width(28));
@@ -266,7 +266,25 @@ public class ImportGamePartWizard : EditorWindow
         // ── Table header ─────────────────────────────────────────────────────
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUILayout.Label("▶", EditorStyles.toolbarButton, GUILayout.Width(W_EXP));
-        GUILayout.Label("✓", EditorStyles.toolbarButton, GUILayout.Width(W_SEL));
+        bool anySelected  = m_Selection.Count > 0;
+        bool canSelectAll = m_Results.Count <= 5;
+        string headerSelLabel = anySelected ? $"{m_Selection.Count}" : "✓";
+        string headerSelTip   = anySelected ? "Uncheck all" : (canSelectAll ? "Select all results" : "");
+        if (GUILayout.Button(new GUIContent(headerSelLabel, headerSelTip), EditorStyles.toolbarButton, GUILayout.Width(W_SEL)))
+        {
+            if (anySelected)
+            {
+                m_Selection.Clear();
+            }
+            else if (canSelectAll)
+            {
+                foreach (var r in m_Results)
+                {
+                    var key = r.isLocal ? "local:" + r.path : r.guid;
+                    m_Selection[key] = (r.path, r.partName, "", r.isLocal, r.guid, r.rowType);
+                }
+            }
+        }
         SortHeader("Part Name",    SortColumn.PartName,    nameColW);
         SortHeader("Display Name", SortColumn.DisplayName, nameColW);
         SortHeader("X",            SortColumn.DimX,        W_DIM);

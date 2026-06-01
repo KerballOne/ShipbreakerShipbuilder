@@ -32,36 +32,37 @@ public static class AddressableBaker
         public string overrideGuid;    // optional user override GUID (null/empty = keep source)
     }
 
-    /// <summary>Headlessly loads an addressable GameObject (optionally a childPath within it).</summary>
+    /// <summary>Headlessly loads an addressable GameObject (optionally a childPath within it).
+    /// Uses WaitForCompletion() so it works outside Play Mode where the PlayerLoop doesn't tick.</summary>
     public static Task<GameObject> LoadAddressableAsync(string guid, string childPath = "")
     {
-        var tcs = new TaskCompletionSource<GameObject>();
+        Debug.Log($"[AddressableBaker] LoadAddressableAsync: requesting locations for {guid}");
         var locOp = Addressables.LoadResourceLocationsAsync(guid, typeof(GameObject));
-        locOp.Completed += locRes =>
+        var locRes = locOp.WaitForCompletion();
+        Debug.Log($"[AddressableBaker] locations completed: status={locOp.Status} count={(locRes?.Count ?? -1)} for {guid}");
+
+        if (locOp.Status != AsyncOperationStatus.Succeeded || locRes == null || locRes.Count == 0)
+            return Task.FromResult<GameObject>(null);
+
+        var loc = locRes[0];
+        Debug.Log($"[AddressableBaker] loading asset from location '{loc.PrimaryKey}' (provider={loc.ProviderId}) for {guid}");
+        var loadOp = Addressables.LoadAssetAsync<GameObject>(loc);
+        var result = loadOp.WaitForCompletion();
+        Debug.Log($"[AddressableBaker] asset load completed: status={loadOp.Status} null={(result == null)} for {guid}");
+
+        if (loadOp.Status != AsyncOperationStatus.Succeeded || result == null)
         {
-            if (locRes.Status != AsyncOperationStatus.Succeeded || locRes.Result == null || locRes.Result.Count == 0)
-            {
-                tcs.SetResult(null);
-                return;
-            }
-            var loadOp = Addressables.LoadAssetAsync<GameObject>(locRes.Result[0]);
-            loadOp.Completed += res =>
-            {
-                if (res.Status != AsyncOperationStatus.Succeeded || res.Result == null)
-                {
-                    tcs.SetResult(null);
-                    return;
-                }
-                GameObject result = res.Result;
-                if (!string.IsNullOrEmpty(childPath))
-                {
-                    var found = result.transform.Find(childPath);
-                    result = found != null ? found.gameObject : null;
-                }
-                tcs.SetResult(result);
-            };
-        };
-        return tcs.Task;
+            if (loadOp.OperationException != null)
+                Debug.LogError($"[AddressableBaker] load exception for {guid}: {loadOp.OperationException}");
+            return Task.FromResult<GameObject>(null);
+        }
+
+        if (!string.IsNullOrEmpty(childPath))
+        {
+            var found = result.transform.Find(childPath);
+            result = found != null ? found.gameObject : null;
+        }
+        return Task.FromResult(result);
     }
 
     /// <summary>Collects every node that carries a StructurePart, for the override UI.</summary>

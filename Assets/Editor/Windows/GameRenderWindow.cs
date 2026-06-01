@@ -29,6 +29,13 @@ public class GameRenderWindow : EditorWindow
         EditorWindow.CreateInstance<GameRenderWindow>().Show();
     }
 
+    [MenuItem("Shipbreaker/Cancel Refresh %&c")]
+    public static void CancelRefresh()
+    {
+        AddressableRendering.ForceResetUpdateFlag();
+        AddressableRendering.ClearView();
+    }
+
     void OnEnable()
     {
         maxLoopDepth          = EditorPrefs.GetInt(K + "maxLoopDepth", maxLoopDepth);
