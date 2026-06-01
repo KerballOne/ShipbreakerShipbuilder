@@ -16,7 +16,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1038630617224738741
 Transform:
   m_ObjectHideFlags: 0
@@ -184,7 +184,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2596018609318787697, guid: 9ad9c7d23e5031444a0e6a5ee1a3a0ba, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 3042007068691016368, guid: 9ad9c7d23e5031444a0e6a5ee1a3a0ba, type: 3}
       propertyPath: refs.Array.data[0]
@@ -252,7 +252,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 600006929587969112}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: -1941041159, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
   m_Name: 
@@ -357,6 +357,46 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 6080001465392663842, guid: 10bf19e60cd502f46b9d1bc8eada74f5, type: 3}
   m_PrefabInstance: {fileID: 7007475678183019058}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &498979880571545694
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4252249623394612357}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: -1941041159, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_DesignLabel: 
+  m_DebugMode: 0
+  m_TriggerOn: 25
+  m_OnlyTriggersOnce: 1
+  m_TriggerDelay: 0
+  m_DelayTicksWhilePaused: 1
+  m_OnlyPlayerTriggerCollision: 0
+  m_RequiredLevel: -1
+  m_TriggeredAudio:
+    WwiseGuid: 
+  m_HasBeenTriggered: 0
+  m_GameStateWhenTriggered: 0
+  m_OnTriggered:
+    m_PersistentCalls:
+      m_Calls:
+      - m_Target: {fileID: 6622255871710637251}
+        m_TargetAssemblyTypeName: ForceReactorMeltdown, BBI.Unity.Game
+        m_MethodName: Trigger
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
+  _EntityBlueprintComponent: {fileID: 0}
 --- !u!114 &1245592933585908245
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -407,46 +447,6 @@ MonoBehaviour:
     m_ConnectedElements: 0
     m_DisconnectedElements: 0
     m_Triggered: 0
---- !u!114 &498979880571545694
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4252249623394612357}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: -1941041159, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_DesignLabel: 
-  m_DebugMode: 0
-  m_TriggerOn: 25
-  m_OnlyTriggersOnce: 1
-  m_TriggerDelay: 0
-  m_DelayTicksWhilePaused: 1
-  m_OnlyPlayerTriggerCollision: 0
-  m_RequiredLevel: -1
-  m_TriggeredAudio:
-    WwiseGuid: 
-  m_HasBeenTriggered: 0
-  m_GameStateWhenTriggered: 0
-  m_OnTriggered:
-    m_PersistentCalls:
-      m_Calls:
-      - m_Target: {fileID: 6622255871710637251}
-        m_TargetAssemblyTypeName: ForceReactorMeltdown, BBI.Unity.Game
-        m_MethodName: Trigger
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
-  _EntityBlueprintComponent: {fileID: 0}
 --- !u!114 &6622255871710637251
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -454,7 +454,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4252249623394612357}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: -279329591, guid: ce18f73e52ea6c74eaa70e7784553b2c, type: 3}
   m_Name: 
