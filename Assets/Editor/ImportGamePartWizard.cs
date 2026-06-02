@@ -659,23 +659,22 @@ public class ImportGamePartWizard : EditorWindow
         EditorGUILayout.Space();
 
         // ── Output folder + action buttons ───────────────────────────────────
-        bool hasPureAddressable = false;  // game addressables only — shows Import + folder
-        bool hasBakeable        = false;  // addressable or LocalAddressable — shows Bake
+        bool hasPureAddressable = false;
+        bool hasBakeable        = false;
+        int  importCount        = 0;
+        int  bakeCount          = 0;
         foreach (var kv in m_Selection)
         {
-            if (!kv.Value.isLocal)                                   hasPureAddressable = hasBakeable = true;
-            else if (kv.Value.rowType == RowType.LocalAddressable)   hasBakeable = true;
+            if (!kv.Value.isLocal)                                 { hasPureAddressable = hasBakeable = true; importCount++; bakeCount++; }
+            else if (kv.Value.rowType == RowType.LocalAddressable) { hasBakeable = true; bakeCount++; }
         }
+        bool needsFolder = hasPureAddressable || hasBakeable;
 
         EditorGUILayout.BeginHorizontal();
 
-        if (hasPureAddressable)
+        if (needsFolder)
         {
-            string importError = ValidateImport();
-            GUI.enabled = importError == null;
-            if (GUILayout.Button("Import to Local folder", GUILayout.Height(22), GUILayout.Width(160)))
-                DoImport();
-            GUI.enabled = true;
+            GUILayout.Label("Output:", EditorStyles.miniLabel, GUILayout.Width(46));
             m_OutputFolder = EditorGUILayout.TextField(m_OutputFolder);
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
@@ -692,11 +691,18 @@ public class ImportGamePartWizard : EditorWindow
             GUILayout.FlexibleSpace();
         }
 
+        if (hasPureAddressable)
+        {
+            string importError = ValidateImport();
+            GUI.enabled = importError == null;
+            var importLabel = importCount > 1 ? $"Import {importCount} Parts" : "Import Selected";
+            if (GUILayout.Button(importLabel, GUILayout.Height(22), GUILayout.Width(150)))
+                DoImport();
+            GUI.enabled = true;
+        }
+
         if (hasBakeable)
         {
-            int bakeCount = 0;
-            foreach (var kv in m_Selection)
-                if (!kv.Value.isLocal || kv.Value.rowType == RowType.LocalAddressable) bakeCount++;
             var bakeLabel = bakeCount > 1 ? $"Bake {bakeCount} Parts" : "Bake Selected";
             if (GUILayout.Button(new GUIContent(bakeLabel,
                 "Bakes selected addressables into self-contained prefabs (real meshes/materials, " +
