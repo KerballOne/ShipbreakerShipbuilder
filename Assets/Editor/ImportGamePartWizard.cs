@@ -15,19 +15,18 @@ public class ImportGamePartWizard : EditorWindow
 {
     const string PrefOutputFolder  = "ImportGamePartWizard.OutputFolder";
     const string PrefImportedOnce  = "ImportGamePartWizard.ImportedOnce";
-    const int    MaxResults        = 200;
+    int          m_MaxResults      = 250;
 
     enum SearchMode { PartName, DisplayName, Path, GUID }
     enum SortColumn { DisplayName, PartName, DimX, DimY, DimZ, Volume, Mass }
 
-    const float W_EXP          = 28f;
     const float W_SEL          = 26f;
-    const float W_EXP_BTN      = 24f;
     const float W_SEL_BTN      = 22f;
     const float W_CHILD_INDENT = 12f;
     const float W_DIM          = 54f;
     const float W_VOL          = 60f;
     const float W_MASS         = 60f;
+    const float W_PREVIEW      = 26f;
 
     string     m_Search      = "";
     string     m_LastSearch  = null;
@@ -41,7 +40,14 @@ public class ImportGamePartWizard : EditorWindow
 
     SortColumn m_SortCol    = SortColumn.PartName;
     bool       m_SortAsc    = true;
-    int        m_ChildDepth = 1;
+    int        m_ChildDepth = 2;
+
+    struct SearchEntry { public string term; public SearchMode mode; }
+    readonly List<SearchEntry> m_SearchHistory = new List<SearchEntry>();
+    int                        m_SearchHistoryIndex = -1;
+    const int                  MaxSearchHistory = 20;
+    bool                       m_NavigatedThisFrame = false;
+    bool                       m_SearchPending      = false;
 
 
     // Key: guid for addressable root items, "guid|childPath" for children, "local:path" for local prefabs
@@ -75,8 +81,13 @@ public class ImportGamePartWizard : EditorWindow
 
     static GUIStyle s_PathStyle;
     static GUIStyle s_ChildBgStyle;
+    static GUIStyle s_SelectedRowStyle;
     static GUIStyle s_LocalBakedRowStyle;
     static GUIStyle s_LocalAddressableRowStyle;
+    static GUIStyle s_IconButtonStyle;
+    static GUIStyle s_Row2LabelStyle;
+    static GUIStyle s_LegendAddressableStyle;
+    static GUIStyle s_LegendBakedStyle;
 
     static string LoadingLabel()
     {
@@ -86,12 +97,47 @@ public class ImportGamePartWizard : EditorWindow
 
     void EnsureStyles()
     {
-        if (s_PathStyle != null && s_LocalBakedRowStyle?.normal.background != null) return;
+        if (s_PathStyle != null && s_SelectedRowStyle?.normal.background != null && s_IconButtonStyle != null && s_Row2LabelStyle != null) return;
 
         s_PathStyle = new GUIStyle(EditorStyles.miniLabel) { wordWrap = false };
 
+        int row2Size = Mathf.RoundToInt(EditorStyles.miniLabel.fontSize * 1.5f * 0.8f);
+        s_Row2LabelStyle = new GUIStyle(EditorStyles.miniLabel) { fontSize = row2Size };
+
+        var legendAddrTex = new Texture2D(1, 1);
+        legendAddrTex.SetPixel(0, 0, new Color(0.28f, 0.26f, 0.14f, 1f));
+        legendAddrTex.Apply();
+        s_LegendAddressableStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            fontSize = row2Size,
+            padding  = new RectOffset(4, 4, 1, 1),
+        };
+        s_LegendAddressableStyle.normal.background = legendAddrTex;
+
+        var legendBakedTex = new Texture2D(1, 1);
+        legendBakedTex.SetPixel(0, 0, new Color(0.18f, 0.28f, 0.18f, 1f));
+        legendBakedTex.Apply();
+        s_LegendBakedStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            fontSize = row2Size,
+            padding  = new RectOffset(4, 4, 1, 1),
+        };
+        s_LegendBakedStyle.normal.background = legendBakedTex;
+
+        s_IconButtonStyle = new GUIStyle(EditorStyles.miniButton)
+        {
+            padding = new RectOffset(1, 1, 1, 1),
+            margin  = EditorStyles.miniButton.margin,
+        };
+
+        var selTex = new Texture2D(1, 1);
+        selTex.SetPixel(0, 0, new Color(0.17f, 0.36f, 0.53f, 1f));
+        selTex.Apply();
+        s_SelectedRowStyle = new GUIStyle(GUIStyle.none);
+        s_SelectedRowStyle.normal.background = selTex;
+
         var childTex = new Texture2D(1, 1);
-        childTex.SetPixel(0, 0, new Color(0.18f, 0.22f, 0.28f, 1f));
+        childTex.SetPixel(0, 0, new Color(0.22f, 0.22f, 0.22f, 1f));
         childTex.Apply();
         s_ChildBgStyle = new GUIStyle(GUIStyle.none);
         s_ChildBgStyle.normal.background = childTex;
@@ -133,6 +179,7 @@ public class ImportGamePartWizard : EditorWindow
             if (!string.IsNullOrEmpty(ep.PartName))
                 m_EnrichedByName[ep.PartName] = ep;
 
+        Debug.Log($"[ImportGamePartWizard] Loaded {m_Enriched.Count} enriched entries.");
         m_LastSearch = null;
     }
 
@@ -185,7 +232,7 @@ public class ImportGamePartWizard : EditorWindow
             rows.Add(new ChildRow
             {
                 childPath   = path,
-                displayName = ep?.DisplayName ?? child.name,
+                displayName = ep?.DisplayName ?? "",
                 dimX        = d != null && d.Length > 0 ? d[0] : 0f,
                 dimY        = d != null && d.Length > 1 ? d[1] : 0f,
                 dimZ        = d != null && d.Length > 2 ? d[2] : 0f,
@@ -202,6 +249,8 @@ public class ImportGamePartWizard : EditorWindow
     {
         EnsureStyles();
 
+
+
         if (m_Enriched == null) LoadEnrichedData();
 
         bool hasGameAssets = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
@@ -209,20 +258,60 @@ public class ImportGamePartWizard : EditorWindow
         // ── Search ───────────────────────────────────────────────────────────
         GUILayout.Label("Search Game Library", EditorStyles.boldLabel);
 
+        // Row 1: mode + search field + search button + regex + prefabs only + history nav
+        m_NavigatedThisFrame = false;
+        m_SearchPending      = false;
         EditorGUILayout.BeginHorizontal();
-        var newSearch  = EditorGUILayout.TextField("Name", m_Search);
-        var newPrefabs = EditorGUILayout.ToggleLeft("Prefabs only", m_PrefabsOnly, GUILayout.Width(100));
+        var newMode    = (SearchMode)EditorGUILayout.EnumPopup(m_SearchMode, GUILayout.Width(110));
+        // Reserve layout space, then draw TextField manually so we control Return handling
+        var searchRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.textField, GUILayout.ExpandWidth(true), GUILayout.Height(EditorGUIUtility.singleLineHeight));
+        bool enterPressed = Event.current.type == EventType.KeyDown &&
+            (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter) &&
+            GUI.GetNameOfFocusedControl() == "SearchField";
+        if (enterPressed)
+        {
+            m_SearchPending = true;
+            // Neutralise the Return so TextField doesn't defocus
+            Event.current.keyCode = KeyCode.None;
+            Event.current.character = '\0';
+        }
+        GUI.SetNextControlName("SearchField");
+        var newSearch = GUI.TextField(searchRect, m_Search, EditorStyles.textField);
+        if (GUILayout.Button(EditorGUIUtility.IconContent("Search Icon"), EditorStyles.miniButton, GUILayout.Width(24), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
+            m_SearchPending = true;
+        GUI.enabled = m_SearchHistoryIndex > 0;
+        if (GUILayout.Button("◀", EditorStyles.miniButtonLeft,  GUILayout.Width(20))) { NavigateHistory(-1); m_NavigatedThisFrame = true; GUIUtility.keyboardControl = 0; }
+        GUI.enabled = m_SearchHistoryIndex < m_SearchHistory.Count - 1;
+        if (GUILayout.Button("▶", EditorStyles.miniButtonRight, GUILayout.Width(20))) { NavigateHistory( 1); m_NavigatedThisFrame = true; GUIUtility.keyboardControl = 0; }
+        GUI.enabled = true;
+        var newPrefabs = EditorGUILayout.ToggleLeft("Prefabs only", m_PrefabsOnly, GUILayout.Width(95));
+        var newRegex   = EditorGUILayout.ToggleLeft("Regex",        m_UseRegex,    GUILayout.Width(55));
         EditorGUILayout.EndHorizontal();
 
+        // Row 2: results · limit · depth · preview hint
         EditorGUILayout.BeginHorizontal();
-        GUILayout.Label("Search by", GUILayout.Width(60));
-        var newMode  = (SearchMode)EditorGUILayout.EnumPopup(m_SearchMode, GUILayout.Width(120));
-        var newRegex = EditorGUILayout.ToggleLeft("Regex", m_UseRegex, GUILayout.Width(55));
-        int enrichedCount = m_Enriched?.Count ?? 0;
-        EditorGUILayout.LabelField(
-            enrichedCount > 0 ? $"{enrichedCount} enriched" : "no enriched data",
-            EditorStyles.miniLabel);
-        if (GUILayout.Button("↺", GUILayout.Width(22))) { LoadEnrichedData(); m_LastSearch = null; }
+        GUILayout.Label($"{m_Results.Count} result{(m_Results.Count == 1 ? "" : "s")}", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        GUILayout.Space(16f);
+        GUILayout.Label("limited to", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        int newLimit = EditorGUILayout.IntField(m_MaxResults, GUILayout.Width(44));
+        newLimit = Mathf.Clamp(newLimit, 10, 2000);
+        if (newLimit != m_MaxResults) { m_MaxResults = newLimit; RebuildResults(); }
+        GUILayout.Label("results", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        GUILayout.Space(16f);
+        GUILayout.Label("Right-click to expand depth:", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        int newDepth = EditorGUILayout.IntField(m_ChildDepth, GUILayout.Width(28));
+        newDepth = Mathf.Clamp(newDepth, 1, 8);
+        if (newDepth != m_ChildDepth) { m_ChildDepth = newDepth; m_ChildCache.Clear(); m_Expanded.Clear(); }
+        GUILayout.Space(16f);
+        GUILayout.Label("Click", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        GUILayout.Label(EditorGUIUtility.IconContent("visibilityOn"), s_IconButtonStyle, GUILayout.Width(EditorGUIUtility.singleLineHeight), GUILayout.Height(EditorGUIUtility.singleLineHeight));
+        GUILayout.Label("to preview", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        GUILayout.FlexibleSpace();
+        GUILayout.Label("Local results:", s_Row2LabelStyle, GUILayout.ExpandWidth(false));
+        GUILayout.Space(4f);
+        GUILayout.Label("Addressable", s_LegendAddressableStyle, GUILayout.ExpandWidth(false));
+        GUILayout.Space(4f);
+        GUILayout.Label("Baked", s_LegendBakedStyle, GUILayout.ExpandWidth(false));
         EditorGUILayout.EndHorizontal();
 
         if (m_RegexError != null)
@@ -231,71 +320,62 @@ public class ImportGamePartWizard : EditorWindow
         if (!hasGameAssets)
             EditorGUILayout.HelpBox("No game assets loaded. Run  Shipbreaker → Reload Assets  to include game library parts.", MessageType.Warning);
 
-        if (newSearch != m_Search || newPrefabs != m_PrefabsOnly ||
-            newMode != m_SearchMode || newRegex != m_UseRegex || m_LastSearch == null)
+        bool filtersChanged = newPrefabs != m_PrefabsOnly || newMode != m_SearchMode
+                           || newRegex != m_UseRegex;
+        m_PrefabsOnly = newPrefabs;
+        m_UseRegex    = newRegex;
+
+        if (m_NavigatedThisFrame)
         {
-            m_Search      = newSearch;
-            m_PrefabsOnly = newPrefabs;
-            m_SearchMode  = newMode;
-            m_UseRegex    = newRegex;
-            m_LastSearch  = m_Search;
+            // Navigation set m_Search/m_SearchMode already — don't let stale newSearch stomp them
+            m_SearchMode = newMode;
+            m_LastSearch = m_Search;
+            RebuildResults();
+            Repaint();
+        }
+        else if (m_SearchPending)
+        {
+            m_Search     = newSearch;
+            m_SearchMode = newMode;
+            m_LastSearch = m_Search;
             RebuildResults();
         }
-
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField(
-            $"{m_Results.Count} result{(m_Results.Count == 1 ? "" : "s")}" +
-            (m_Results.Count >= MaxResults ? $" (capped at {MaxResults})" : ""),
-            EditorStyles.miniLabel);
-        GUILayout.Label("Child depth:", EditorStyles.miniLabel, GUILayout.Width(70));
-        int newDepth = EditorGUILayout.IntField(m_ChildDepth, GUILayout.Width(28));
-        newDepth = Mathf.Clamp(newDepth, 1, 8);
-        if (newDepth != m_ChildDepth)
+        else if (filtersChanged || m_LastSearch == null)
         {
-            m_ChildDepth = newDepth;
-            m_ChildCache.Clear();
-            m_Expanded.Clear();
+            m_SearchMode = newMode;
+            m_LastSearch = m_Search;
+            RebuildResults();
         }
-        EditorGUILayout.EndHorizontal();
+        else
+        {
+            m_Search = newSearch;
+        }
+
 
         // ── Column layout ────────────────────────────────────────────────────
-        float viewW    = EditorGUIUtility.currentViewWidth - 40f;
-        float flexW    = Mathf.Max(120f, viewW - W_EXP - W_SEL - W_DIM * 3 - W_VOL - W_MASS);
-        float nameColW = Mathf.Floor(flexW * 0.5f);
+        // position.width is the window width; subtract scrollbar (15) and a 2px border
+        float viewW       = position.width - 17f;
+        float fixedW      = W_SEL + W_PREVIEW + W_DIM * 3 + W_VOL + W_MASS;
+        float flexW       = Mathf.Max(120f, viewW - fixedW);
+        float displayColW = Mathf.Floor(flexW * 0.25f);
+        float nameColW    = flexW - displayColW;
 
         // ── Table header ─────────────────────────────────────────────────────
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-        GUILayout.Label("▶", EditorStyles.toolbarButton, GUILayout.Width(W_EXP));
-        bool anySelected  = m_Selection.Count > 0;
-        bool canSelectAll = m_Results.Count <= 5;
-        string headerSelLabel = anySelected ? $"{m_Selection.Count}" : "✓";
-        string headerSelTip   = anySelected ? "Uncheck all" : (canSelectAll ? "Select all results" : "");
-        if (GUILayout.Button(new GUIContent(headerSelLabel, headerSelTip), EditorStyles.toolbarButton, GUILayout.Width(W_SEL)))
-        {
-            if (anySelected)
-            {
-                m_Selection.Clear();
-            }
-            else if (canSelectAll)
-            {
-                foreach (var r in m_Results)
-                {
-                    var key = r.isLocal ? "local:" + r.path : r.guid;
-                    m_Selection[key] = (r.path, r.partName, "", r.isLocal, r.guid, r.rowType);
-                }
-            }
-        }
-        SortHeader("Part Name",    SortColumn.PartName,    nameColW);
-        SortHeader("Display Name", SortColumn.DisplayName, nameColW);
-        SortHeader("X",            SortColumn.DimX,        W_DIM);
-        SortHeader("Y",            SortColumn.DimY,        W_DIM);
-        SortHeader("Z",            SortColumn.DimZ,        W_DIM);
-        SortHeader("Vol",          SortColumn.Volume,      W_VOL);
-        SortHeader("Mass",         SortColumn.Mass,        W_MASS);
+        GUILayout.Label(EditorGUIUtility.IconContent("visibilityOn"), EditorStyles.toolbarButton, GUILayout.Width(W_PREVIEW));
+        GUILayout.Label("✓", EditorStyles.toolbarButton, GUILayout.Width(W_SEL));
+        SortHeader("Part Name", SortColumn.PartName,    nameColW);
+        SortHeader("Display",   SortColumn.DisplayName, displayColW);
+        SortHeader("X",         SortColumn.DimX,        W_DIM);
+        SortHeader("Y",         SortColumn.DimY,        W_DIM);
+        SortHeader("Z",         SortColumn.DimZ,        W_DIM);
+        SortHeader("Vol",       SortColumn.Volume,      W_VOL);
+        SortHeader("Mass",      SortColumn.Mass,        W_MASS);
         EditorGUILayout.EndHorizontal();
 
         // ── Results scroll ────────────────────────────────────────────────────
-        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, GUILayout.ExpandHeight(true));
+        m_Scroll = EditorGUILayout.BeginScrollView(m_Scroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar, GUI.skin.scrollView, GUILayout.ExpandHeight(true));
+        float prevRowBottomY = 0f;
         foreach (var r in m_Results)
         {
             bool sel        = m_Selection.ContainsKey(r.isLocal ? "local:" + r.path : r.guid);
@@ -303,43 +383,41 @@ public class ImportGamePartWizard : EditorWindow
             bool isLoading  = !r.isLocal && m_Loading.Contains(r.guid);
 
             var rowBg = sel
-                ? GUI.skin.box
+                ? s_SelectedRowStyle
                 : r.rowType == RowType.LocalBaked       ? s_LocalBakedRowStyle
                 : r.rowType == RowType.LocalAddressable ? s_LocalAddressableRowStyle
                 : GUIStyle.none;
 
+            float rowTopY = prevRowBottomY;
             EditorGUILayout.BeginVertical(rowBg);
 
-            // Row 1 — expand toggle + select + data fields
+            // Row 1 — select + preview + data fields
             EditorGUILayout.BeginHorizontal();
-            if (!r.isLocal)
-            {
-                string expLabel = isLoading ? LoadingLabel() : (isExpanded ? "▼" : "▶");
-                if (GUILayout.Button(expLabel, EditorStyles.miniButton, GUILayout.Width(W_EXP_BTN)))
-                {
-                    if (!isLoading)
-                    {
-                        if (isExpanded) m_Expanded.Remove(r.guid);
-                        else BeginExpandLoad(r.guid);
-                    }
-                }
-                GUILayout.Space(W_EXP - W_EXP_BTN);
-            }
-            else
-            {
-                GUILayout.Space(W_EXP);
-            }
 
-            string selKey = r.isLocal ? "local:" + r.path : r.guid;
-            if (GUILayout.Button(sel ? "✓" : " ", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN)))
+            bool canPreviewRow = IsPreviewablePath(r.path)
+                && (!r.isLocal ? !string.IsNullOrEmpty(r.guid) : !string.IsNullOrEmpty(r.path));
+            var previewIcon = canPreviewRow
+                ? EditorGUIUtility.IconContent("visibilityOn")
+                : EditorGUIUtility.IconContent("scenevis_hidden");
+            GUI.enabled = canPreviewRow;
+            if (GUILayout.Button(previewIcon, s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
+                OpenPreview(r.rowType, r.isLocal ? r.path : r.guid);
+            GUILayout.Space(W_PREVIEW - W_SEL_BTN);
+            GUI.enabled = true;
+
+            string selKey      = r.isLocal ? "local:" + r.path : r.guid;
+            bool   isSelectable = r.path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase);
+            GUI.enabled = isSelectable;
+            if (GUILayout.Button(sel ? "✓" : (isSelectable ? " " : "✕"), EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
             {
                 if (sel) m_Selection.Remove(selKey);
                 else     m_Selection[selKey] = (r.path, r.partName, "", r.isLocal, r.guid, r.rowType);
             }
+            GUI.enabled = true;
             GUILayout.Space(W_SEL - W_SEL_BTN);
 
-            GUILayout.Label(r.partName,       EditorStyles.label, GUILayout.Width(nameColW));
-            GUILayout.Label(r.displayName,    EditorStyles.label, GUILayout.Width(nameColW));
+            EditorGUILayout.SelectableLabel(r.partName,    EditorStyles.label, GUILayout.Width(nameColW),    GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.SelectableLabel(r.displayName, EditorStyles.label, GUILayout.Width(displayColW), GUILayout.Height(EditorGUIUtility.singleLineHeight));
             GUILayout.Label(FmtDim(r.dimX),   EditorStyles.label, GUILayout.Width(W_DIM));
             GUILayout.Label(FmtDim(r.dimY),   EditorStyles.label, GUILayout.Width(W_DIM));
             GUILayout.Label(FmtDim(r.dimZ),   EditorStyles.label, GUILayout.Width(W_DIM));
@@ -347,28 +425,37 @@ public class ImportGamePartWizard : EditorWindow
             GUILayout.Label(FmtMass(r.mass),  EditorStyles.label, GUILayout.Width(W_MASS));
             EditorGUILayout.EndHorizontal();
 
-            // Row 2 — guid + path
+            // Row 2 — guid  path (inline, selectable)
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(W_EXP + W_SEL + 4f);
+            GUILayout.Space(W_SEL + W_PREVIEW + 4f);
             if (!r.isLocal)
             {
-                GUILayout.Label(r.guid, s_PathStyle);
-                GUILayout.Space(8f);
-                GUILayout.Label(r.path, s_PathStyle);
+                EditorGUILayout.SelectableLabel(r.guid + "  " + r.path, s_PathStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            }
+            else if (r.rowType == RowType.LocalAddressable)
+            {
+                // Extract inner addressable GUID from the wrapper prefab for display
+                var wrapper    = AssetDatabase.LoadAssetAtPath<GameObject>(r.path);
+                var loader     = wrapper?.GetComponentInChildren<AddressableLoader>(true);
+                var innerGuid  = loader?.assetGUID ?? "";
+                var row2Text   = string.IsNullOrEmpty(innerGuid) ? r.path : innerGuid + "  " + r.path;
+                EditorGUILayout.SelectableLabel(row2Text, s_PathStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
             }
             else
             {
-                GUILayout.Label(r.path, s_PathStyle);
+                EditorGUILayout.SelectableLabel(r.path, s_PathStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
             }
             EditorGUILayout.EndHorizontal();
 
-            // Child rows (addressable parts only)
+            EditorGUILayout.EndVertical();
+
+            // Child rows — outside parent's BeginVertical so parent selection BG doesn't bleed through
             if (isExpanded && m_ChildCache.TryGetValue(r.guid, out var children))
             {
                 if (children.Count == 0)
                 {
                     EditorGUILayout.BeginHorizontal(s_ChildBgStyle);
-                    GUILayout.Space(W_EXP + W_SEL + 8f);
+                    GUILayout.Space(W_PREVIEW + W_SEL + 8f);
                     GUILayout.Label("(no direct children)", EditorStyles.miniLabel);
                     EditorGUILayout.EndHorizontal();
                 }
@@ -382,43 +469,118 @@ public class ImportGamePartWizard : EditorWindow
                         bool childSel = m_Selection.ContainsKey(childKey);
                         int slashes = 0;
                         foreach (char c in child.childPath) if (c == '/') slashes++;
-                        float indent = slashes * W_CHILD_INDENT;
+                        float indent = (slashes + 1) * W_CHILD_INDENT;
                         int lastSlash = child.childPath.LastIndexOf('/');
                         var partSegment = lastSlash >= 0 ? child.childPath.Substring(lastSlash + 1) : child.childPath;
 
-                        EditorGUILayout.BeginHorizontal(s_ChildBgStyle);
-                        GUILayout.Space(W_EXP + 4f);
-                        if (GUILayout.Button(childSel ? "✓" : " ", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN)))
+                        EditorGUILayout.BeginHorizontal(childSel ? s_SelectedRowStyle : s_ChildBgStyle);
+                        // Eye column: disabled "no preview" icon
+                        GUI.enabled = false;
+                        GUILayout.Button(EditorGUIUtility.IconContent("scenevis_hidden"), s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                        GUI.enabled = true;
+                        GUILayout.Space(W_PREVIEW - W_SEL_BTN);
+                        // Check button
+                        if (GUILayout.Button(childSel ? "✓" : " ", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
                         {
                             if (childSel) m_Selection.Remove(childKey);
                             else          m_Selection[childKey] = (r.path, child.childPath, child.childPath, false, r.guid, RowType.Addressable);
                         }
-                        GUILayout.Space(W_SEL - W_SEL_BTN);
-                        GUILayout.Space(indent);
-                        GUILayout.Label(partSegment,       EditorStyles.miniLabel, GUILayout.Width(nameColW - indent));
-                        GUILayout.Space(indent);
-                        GUILayout.Label(child.displayName, EditorStyles.miniLabel, GUILayout.Width(nameColW - indent));
+                        GUILayout.Space(W_SEL - W_SEL_BTN + indent);
+                        EditorGUILayout.SelectableLabel(partSegment,       EditorStyles.miniLabel, GUILayout.Width(nameColW - indent), GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                        EditorGUILayout.SelectableLabel(child.displayName, EditorStyles.miniLabel, GUILayout.Width(displayColW),        GUILayout.Height(EditorGUIUtility.singleLineHeight));
                         GUILayout.Label(FmtDim(child.dimX),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
                         GUILayout.Label(FmtDim(child.dimY),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
                         GUILayout.Label(FmtDim(child.dimZ),   EditorStyles.miniLabel, GUILayout.Width(W_DIM));
                         GUILayout.Label(FmtVol(child.volume), EditorStyles.miniLabel, GUILayout.Width(W_VOL));
                         GUILayout.Label(FmtMass(child.mass),  EditorStyles.miniLabel, GUILayout.Width(W_MASS));
                         EditorGUILayout.EndHorizontal();
+
+                        if (Event.current.type == EventType.MouseDown && Event.current.button == 1)
+                        {
+                            var childRowRect = GUILayoutUtility.GetLastRect();
+                            childRowRect.x = 0; childRowRect.width = EditorGUIUtility.currentViewWidth;
+                            if (childRowRect.Contains(Event.current.mousePosition))
+                            {
+                                var capturedName = partSegment;
+                                var menu = new GenericMenu();
+                                menu.AddItem(new GUIContent("Copy"), false, () => GUIUtility.systemCopyBuffer = capturedName);
+                                menu.AddItem(new GUIContent("Search"), false, () => { m_Search = capturedName; m_SearchMode = SearchMode.PartName; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                                menu.ShowAsContext();
+                                Event.current.Use();
+                            }
+                        }
                     }
                 }
             }
 
-            EditorGUILayout.EndVertical();
+            // Right-click context menu — checked after full row is laid out
+            prevRowBottomY = GUILayoutUtility.GetLastRect().yMax;
+            if (Event.current.type == EventType.MouseDown && Event.current.button == 1)
+            {
+                float mouseY = Event.current.mousePosition.y;
+                if (mouseY >= rowTopY && mouseY <= prevRowBottomY)
+                {
+                    var capturedPartName = r.partName;
+                    var capturedDisplay  = r.displayName;
+                    var capturedPath     = r.path;
+                    var capturedLocal    = r.isLocal;
+                    // For LocalAddressable, extract inner GUID; for addressable rows use r.guid directly
+                    string capturedGuid  = r.guid;
+                    if (r.rowType == RowType.LocalAddressable)
+                    {
+                        var wrapperObj = AssetDatabase.LoadAssetAtPath<GameObject>(r.path);
+                        capturedGuid   = wrapperObj?.GetComponentInChildren<AddressableLoader>(true)?.assetGUID ?? "";
+                    }
+                    var menu = new GenericMenu();
+                    if (!r.isLocal)
+                    {
+                        if (isLoading)
+                            menu.AddDisabledItem(new GUIContent("Loading…"));
+                        else if (isExpanded)
+                            menu.AddItem(new GUIContent("Collapse"), false, () => { m_Expanded.Remove(r.guid); Repaint(); });
+                        else
+                            menu.AddItem(new GUIContent("Expand Children"), false, () => BeginExpandLoad(r.guid));
+                        menu.AddSeparator("");
+                    }
+                    if (capturedLocal)
+                    {
+                        menu.AddItem(new GUIContent("Show in Project"), false, () =>
+                        {
+                            var asset = AssetDatabase.LoadAssetAtPath<Object>(capturedPath);
+                            if (asset != null) { EditorUtility.FocusProjectWindow(); EditorGUIUtility.PingObject(asset); Selection.activeObject = asset; }
+                        });
+                        menu.AddSeparator("");
+                    }
+                    menu.AddItem(new GUIContent("Copy/Part Name"), false, () => GUIUtility.systemCopyBuffer = capturedPartName);
+                    if (!string.IsNullOrEmpty(capturedGuid))
+                        menu.AddItem(new GUIContent("Copy/GUID"), false, () => GUIUtility.systemCopyBuffer = capturedGuid);
+                    menu.AddItem(new GUIContent("Copy/Path"), false, () => GUIUtility.systemCopyBuffer = capturedPath);
+                    menu.AddSeparator("");
+                    menu.AddItem(new GUIContent("Search/Part Name"), false, () => { m_Search = capturedPartName; m_SearchMode = SearchMode.PartName; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                    if (!string.IsNullOrEmpty(capturedGuid))
+                        menu.AddItem(new GUIContent("Search/GUID"), false, () => { m_Search = capturedGuid; m_SearchMode = SearchMode.GUID; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                    menu.AddItem(new GUIContent("Search/Path"), false, () => { m_Search = capturedPath; m_SearchMode = SearchMode.Path; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                    if (!string.IsNullOrEmpty(capturedDisplay))
+                        menu.AddItem(new GUIContent("Search/Display Name"), false, () => { m_Search = capturedDisplay; m_SearchMode = SearchMode.DisplayName; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                    menu.ShowAsContext();
+                    Event.current.Use();
+                }
+            }
         }
         EditorGUILayout.EndScrollView();
 
         if (m_Loading.Count > 0) Repaint();
 
-        EditorGUILayout.Space();
+        // ── Separator ────────────────────────────────────────────────────────
+        EditorGUILayout.Space(4f);
+        var separatorRect = EditorGUILayout.GetControlRect(false, 1f);
+        EditorGUI.DrawRect(separatorRect, new Color(0.5f, 0.5f, 0.5f, 0.5f));
+        EditorGUILayout.Space(2f);
 
         // ── Selection summary ─────────────────────────────────────────────────
-        GUILayout.Label("Selected", EditorStyles.boldLabel);
-        if (m_Selection.Count == 0)
+        int selCount = m_Selection.Count;
+        GUILayout.Label(selCount > 0 ? $"{selCount} Selected" : "0 Selected", EditorStyles.boldLabel);
+        if (selCount == 0)
         {
             EditorGUILayout.HelpBox(
                 "Click ✓ to select a part. Green rows are local project prefabs — use 'Place in Scene'.\nGrey rows are game addressables — use 'Import Selected' to create a loader prefab.",
@@ -426,72 +588,127 @@ public class ImportGamePartWizard : EditorWindow
         }
         else
         {
+            string keyToRemove   = null;
+            float  prevSelBottomY = GUILayoutUtility.GetLastRect().yMax;
             foreach (var kv in m_Selection)
             {
-                bool isChild = kv.Key.Contains("|");
-                var label    = isChild ? $"  └ {kv.Value.partName}" : kv.Value.partName;
-                var suffix   = kv.Value.isLocal ? " [local]" : "";
-
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.SelectableLabel(label + suffix, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight));
-                if (!kv.Value.isLocal && !string.IsNullOrEmpty(kv.Value.guid))
-                    EditorGUILayout.SelectableLabel(kv.Value.guid, EditorStyles.miniLabel, GUILayout.Height(EditorGUIUtility.singleLineHeight), GUILayout.Width(240));
+                bool isChild    = kv.Key.Contains("|");
+                var  suffix     = kv.Value.isLocal ? " [local]" : "";
                 bool canPreview = !isChild && (!kv.Value.isLocal
                     ? !string.IsNullOrEmpty(kv.Value.guid)
                     : !string.IsNullOrEmpty(kv.Value.assetPath));
-                if (canPreview && GUILayout.Button("⬡ Preview", EditorStyles.miniButton, GUILayout.Width(70)))
+                var  eyeIcon    = canPreview
+                    ? EditorGUIUtility.IconContent("visibilityOn")
+                    : EditorGUIUtility.IconContent("scenevis_hidden");
+
+                float selRowTopY = prevSelBottomY;
+
+                // Row 1 — eye + X + name
+                EditorGUILayout.BeginHorizontal();
+                GUI.enabled = canPreview;
+                if (GUILayout.Button(eyeIcon, s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
                     OpenPreview(kv.Value.rowType, kv.Value.isLocal ? kv.Value.assetPath : kv.Value.guid);
+                GUILayout.Space(W_PREVIEW - W_SEL_BTN);
+                GUI.enabled = true;
+                if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
+                    keyToRemove = kv.Key;
+                GUILayout.Space(W_SEL - W_SEL_BTN);
+                var partLabel = isChild ? $"  └ {kv.Value.partName}" : kv.Value.partName;
+                EditorGUILayout.SelectableLabel(partLabel + suffix, EditorStyles.label, GUILayout.Height(EditorGUIUtility.singleLineHeight));
                 EditorGUILayout.EndHorizontal();
+
+                // Row 2 — guid + path
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(W_PREVIEW + W_SEL + 4f);
+                if (!kv.Value.isLocal && !string.IsNullOrEmpty(kv.Value.guid))
+                    EditorGUILayout.SelectableLabel(kv.Value.guid + "  " + kv.Value.assetPath, s_PathStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                else if (!string.IsNullOrEmpty(kv.Value.assetPath))
+                    EditorGUILayout.SelectableLabel(kv.Value.assetPath, s_PathStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                EditorGUILayout.EndHorizontal();
+
+                // Right-click context menu
+                prevSelBottomY = GUILayoutUtility.GetLastRect().yMax;
+                if (Event.current.type == EventType.MouseDown && Event.current.button == 1)
+                {
+                    float mouseY = Event.current.mousePosition.y;
+                    if (mouseY >= selRowTopY && mouseY <= prevSelBottomY)
+                    {
+                        var capturedPartName  = kv.Value.partName;
+                        var capturedGuid      = kv.Value.guid;
+                        var capturedPath      = kv.Value.assetPath;
+                        var menu = new GenericMenu();
+                        menu.AddItem(new GUIContent("Copy/Part Name"), false, () => GUIUtility.systemCopyBuffer = capturedPartName);
+                        if (!string.IsNullOrEmpty(capturedGuid))
+                            menu.AddItem(new GUIContent("Copy/GUID"),  false, () => GUIUtility.systemCopyBuffer = capturedGuid);
+                        if (!string.IsNullOrEmpty(capturedPath))
+                            menu.AddItem(new GUIContent("Copy/Path"),  false, () => GUIUtility.systemCopyBuffer = capturedPath);
+                        menu.AddSeparator("");
+                        menu.AddItem(new GUIContent("Search/Part Name"), false, () => { m_Search = capturedPartName; m_SearchMode = SearchMode.PartName; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                        if (!string.IsNullOrEmpty(capturedGuid))
+                            menu.AddItem(new GUIContent("Search/GUID"),  false, () => { m_Search = capturedGuid; m_SearchMode = SearchMode.GUID; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                        if (!string.IsNullOrEmpty(capturedPath))
+                            menu.AddItem(new GUIContent("Search/Path"),  false, () => { m_Search = capturedPath; m_SearchMode = SearchMode.Path; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
+                        menu.ShowAsContext();
+                        Event.current.Use();
+                    }
+                }
             }
+            if (keyToRemove != null) m_Selection.Remove(keyToRemove);
         }
 
         EditorGUILayout.Space();
 
-        // ── Output folder (addressable imports only) ──────────────────────────
-        bool hasAddressableSelected = false;
+        // ── Output folder + action buttons ───────────────────────────────────
+        bool hasPureAddressable = false;  // game addressables only — shows Import + folder
+        bool hasBakeable        = false;  // addressable or LocalAddressable — shows Bake
         foreach (var kv in m_Selection)
-            if (!kv.Value.isLocal) { hasAddressableSelected = true; break; }
-
-        if (hasAddressableSelected)
         {
-            GUILayout.Label("Output", EditorStyles.boldLabel);
-            EditorGUILayout.BeginHorizontal();
-            m_OutputFolder = EditorGUILayout.TextField("Folder", m_OutputFolder);
+            if (!kv.Value.isLocal)                                   hasPureAddressable = hasBakeable = true;
+            else if (kv.Value.rowType == RowType.LocalAddressable)   hasBakeable = true;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+
+        if (hasPureAddressable)
+        {
+            string importError = ValidateImport();
+            GUI.enabled = importError == null;
+            if (GUILayout.Button("Import to Local folder", GUILayout.Height(22), GUILayout.Width(160)))
+                DoImport();
+            GUI.enabled = true;
+            m_OutputFolder = EditorGUILayout.TextField(m_OutputFolder);
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
                 var picked = EditorUtility.OpenFolderPanel("Select Output Folder", Application.dataPath, "");
                 if (!string.IsNullOrEmpty(picked) && picked.StartsWith(Application.dataPath))
                     m_OutputFolder = "Assets" + picked.Substring(Application.dataPath.Length).Replace('\\', '/');
             }
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.Space();
+            GUILayout.Space(1f);
+            EditorGUI.DrawRect(EditorGUILayout.GetControlRect(false, 22f, GUILayout.Width(1)), new Color(0.4f, 0.4f, 0.4f, 1f));
+            GUILayout.Space(1f);
+        }
+        else
+        {
+            GUILayout.FlexibleSpace();
         }
 
-        // ── Action buttons ────────────────────────────────────────────────────
-        EditorGUILayout.BeginHorizontal();
-        GUILayout.FlexibleSpace();
-
-        if (m_Selection.Count > 0)
+        if (hasBakeable)
         {
-            if (GUILayout.Button("Place in Scene", GUILayout.Height(32), GUILayout.Width(130)))
-                DoPlaceLocal();
-        }
-
-        if (hasAddressableSelected)
-        {
-            string importError = ValidateImport();
-            GUI.enabled = importError == null;
-            var importLabel = m_Selection.Count > 1 ? $"Import {m_Selection.Count} Parts" : "Import Selected";
-            if (GUILayout.Button(importLabel, GUILayout.Height(32), GUILayout.Width(150)))
-                DoImport();
-
-            var bakeLabel = m_Selection.Count > 1 ? $"Bake {m_Selection.Count} Parts" : "Bake Selected";
+            int bakeCount = 0;
+            foreach (var kv in m_Selection)
+                if (!kv.Value.isLocal || kv.Value.rowType == RowType.LocalAddressable) bakeCount++;
+            var bakeLabel = bakeCount > 1 ? $"Bake {bakeCount} Parts" : "Bake Selected";
             if (GUILayout.Button(new GUIContent(bakeLabel,
                 "Bakes selected addressables into self-contained prefabs (real meshes/materials, " +
                 "per-mesh StructureParts copying each source SP material). No AddressableLoader/runtime dependency."),
-                GUILayout.Height(32), GUILayout.Width(150)))
+                GUILayout.Height(22), GUILayout.Width(150)))
                 DoBake();
-            GUI.enabled = true;
+        }
+
+        if (m_Selection.Count > 0)
+        {
+            if (GUILayout.Button("Place in Scene", GUILayout.Height(22), GUILayout.Width(130)))
+                DoPlaceLocal();
         }
 
         EditorGUILayout.EndHorizontal();
@@ -512,15 +729,52 @@ public class ImportGamePartWizard : EditorWindow
         }
     }
 
+    static bool IsPreviewablePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        var ext = Path.GetExtension(path);
+        return ext.Equals(".prefab", System.StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".fbx",    System.StringComparison.OrdinalIgnoreCase);
+    }
+
     static string FmtDim(float v)  => v > 0f ? $"{v:F2}m" : "—";
     static string FmtVol(float v)  => v > 0f ? $"{v:F2}" : "—";
     static string FmtMass(float v) => v > 0f ? $"{v:F1}" : "—";
+
+    void PushSearchHistory(string term)
+    {
+        if (string.IsNullOrEmpty(term)) return;
+        var entry = new SearchEntry { term = term, mode = m_SearchMode };
+        if (m_SearchHistory.Count > 0 && m_SearchHistoryIndex >= 0)
+        {
+            var cur = m_SearchHistory[m_SearchHistoryIndex];
+            if (cur.term == entry.term && cur.mode == entry.mode) return;
+        }
+        if (m_SearchHistoryIndex < m_SearchHistory.Count - 1)
+            m_SearchHistory.RemoveRange(m_SearchHistoryIndex + 1, m_SearchHistory.Count - m_SearchHistoryIndex - 1);
+        m_SearchHistory.Add(entry);
+        if (m_SearchHistory.Count > MaxSearchHistory)
+            m_SearchHistory.RemoveAt(0);
+        m_SearchHistoryIndex = m_SearchHistory.Count - 1;
+    }
+
+    void NavigateHistory(int delta)
+    {
+        int next = Mathf.Clamp(m_SearchHistoryIndex + delta, 0, m_SearchHistory.Count - 1);
+        if (next == m_SearchHistoryIndex) return;
+        m_SearchHistoryIndex = next;
+        var e        = m_SearchHistory[m_SearchHistoryIndex];
+        m_Search     = e.term;
+        m_SearchMode = e.mode;
+        m_LastSearch = null;
+    }
 
     void RebuildResults()
     {
         m_Results.Clear();
         m_RegexError = null;
         var term = m_Search.Trim();
+        PushSearchHistory(term);
 
         Regex regex = null;
         if (m_UseRegex && !string.IsNullOrEmpty(term))
@@ -546,6 +800,7 @@ public class ImportGamePartWizard : EditorWindow
                 if (!MatchesTerm(term, regex, partName, displayName, path, kv.Key)) continue;
 
                 float[] d = enriched?.Dims;
+                if (m_Results.Count >= m_MaxResults) break;
                 m_Results.Add(new ResultRow
                 {
                     guid        = kv.Key,
@@ -559,8 +814,6 @@ public class ImportGamePartWizard : EditorWindow
                     mass        = enriched?.Mass   ?? 0f,
                     rowType     = RowType.Addressable,
                 });
-
-                if (m_Results.Count >= MaxResults) break;
             }
         }
 
@@ -573,7 +826,8 @@ public class ImportGamePartWizard : EditorWindow
 
             if (!MatchesTerm(term, regex, partName, "", path)) continue;
 
-            var prefab  = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (m_Results.Count >= m_MaxResults) break;
+            var prefab    = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             var hasLoader = prefab != null && prefab.GetComponentInChildren<AddressableLoader>(true) != null;
             m_Results.Add(new ResultRow
             {
@@ -583,8 +837,6 @@ public class ImportGamePartWizard : EditorWindow
                 displayName = "",
                 rowType     = hasLoader ? RowType.LocalAddressable : RowType.LocalBaked,
             });
-
-            if (m_Results.Count >= MaxResults) break;
         }
 
         ApplySort();
@@ -811,10 +1063,25 @@ public class ImportGamePartWizard : EditorWindow
         var jobs = new List<(string guid, string childPath, string partName, string subFolder)>();
         foreach (var kv in m_Selection)
         {
-            if (kv.Value.isLocal) continue;
-            int sep   = kv.Key.IndexOf("|", System.StringComparison.Ordinal);
-            var guid  = sep >= 0 ? kv.Key.Substring(0, sep) : kv.Key;
-            jobs.Add((guid, kv.Value.childPath, kv.Value.partName, LastFolderSegment(kv.Value.assetPath)));
+            if (!kv.Value.isLocal)
+            {
+                int sep  = kv.Key.IndexOf("|", System.StringComparison.Ordinal);
+                var guid = sep >= 0 ? kv.Key.Substring(0, sep) : kv.Key;
+                jobs.Add((guid, kv.Value.childPath, kv.Value.partName, LastFolderSegment(kv.Value.assetPath)));
+            }
+            else if (kv.Value.rowType == RowType.LocalAddressable)
+            {
+                // Extract the inner addressable GUID from the wrapper prefab
+                var wrapper    = AssetDatabase.LoadAssetAtPath<GameObject>(kv.Value.assetPath);
+                var loader     = wrapper?.GetComponentInChildren<AddressableLoader>(true);
+                var innerGuid  = loader?.assetGUID ?? "";
+                if (string.IsNullOrEmpty(innerGuid))
+                {
+                    Debug.LogWarning($"[ImportGamePartWizard] Could not extract GUID from LocalAddressable '{kv.Value.partName}' — skipping.");
+                    continue;
+                }
+                jobs.Add((innerGuid, kv.Value.childPath, kv.Value.partName, LastFolderSegment(kv.Value.assetPath)));
+            }
         }
 
         if (jobs.Count == 0) { m_StatusLine = "No addressable parts selected to bake."; Repaint(); return; }
