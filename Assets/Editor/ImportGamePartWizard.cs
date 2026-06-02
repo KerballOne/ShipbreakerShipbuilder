@@ -38,9 +38,11 @@ public class ImportGamePartWizard : EditorWindow
     string     m_OutputFolder = "Assets/_CustomShips/";
     string     m_StatusLine   = "";
 
-    SortColumn m_SortCol    = SortColumn.PartName;
-    bool       m_SortAsc    = true;
-    int        m_ChildDepth = 2;
+    SortColumn m_SortCol     = SortColumn.PartName;
+    bool       m_SortAsc     = true;
+    int        m_ChildDepth  = 2;
+    float      m_NameColW    = 200f;
+    float      m_DisplayColW = 100f;
 
     struct SearchEntry { public string term; public SearchMode mode; }
     readonly List<SearchEntry> m_SearchHistory = new List<SearchEntry>();
@@ -168,6 +170,35 @@ public class ImportGamePartWizard : EditorWindow
         s_LocalAddressableRowStyle.normal.background = addrTex;
     }
 
+    void OnEnable()
+    {
+        wantsMouseEnterLeaveWindow = true;
+        EditorApplication.update += OnEditorUpdate;
+        if (m_Enriched == null) LoadEnrichedData();
+    }
+
+    void OnDisable()
+    {
+        wantsMouseEnterLeaveWindow = false;
+        EditorApplication.update -= OnEditorUpdate;
+    }
+
+    bool m_NeedsRepaint = false;
+    void OnEditorUpdate()
+    {
+        if (m_NeedsRepaint)
+            EditorApplication.delayCall += RequestRepaint;
+    }
+
+    void RequestRepaint()
+    {
+        if (m_NeedsRepaint)
+        {
+            m_NeedsRepaint = false;
+            Repaint();
+        }
+    }
+
     [MenuItem("Shipbreaker/Shipbuilder Tools/Import Game Part Wizard", priority = -20)]
     static void Open()
     {
@@ -226,7 +257,6 @@ public class ImportGamePartWizard : EditorWindow
         m_Loading.Add(guid);
         int capturedDepth = m_ChildDepth;
         m_StatusLine = $"Loading children with depth of {capturedDepth} for {label}…";
-        Repaint();
 
         var locOp = Addressables.LoadResourceLocationsAsync(guid, typeof(GameObject));
         locOp.Completed += locRes =>
@@ -234,8 +264,8 @@ public class ImportGamePartWizard : EditorWindow
             if (locRes.Status != AsyncOperationStatus.Succeeded || locRes.Result?.Count == 0)
             {
                 m_Loading.Remove(guid);
-                m_StatusLine = $"Failed to load children for {label}.";
-                Repaint();
+                m_StatusLine   = $"Failed to load children for {label}.";
+                m_NeedsRepaint = true;
                 return;
             }
 
@@ -247,6 +277,7 @@ public class ImportGamePartWizard : EditorWindow
                 {
                     var children = new List<ChildRow>();
                     CollectChildren(res.Result.transform, "", 1, capturedDepth, children);
+                    Addressables.Release(res);
                     m_ChildCache[guid] = children;
                     ExpandAllByPath(guid);
                     int visible = children.Count(c => !m_PrefabsOnly || c.isPrefab);
@@ -256,12 +287,11 @@ public class ImportGamePartWizard : EditorWindow
                 }
                 else
                 {
-                    // Load failed but still mark expanded so row doesn't stay stuck loading
                     m_Expanded.Add(guid);
                     m_ChildCache[guid] = new List<ChildRow>();
                     m_StatusLine = $"Could not load prefab for {label}.";
                 }
-                Repaint();
+                m_NeedsRepaint = true;
             };
         };
     }
@@ -292,10 +322,6 @@ public class ImportGamePartWizard : EditorWindow
     void OnGUI()
     {
         EnsureStyles();
-
-
-
-        if (m_Enriched == null) LoadEnrichedData();
 
         bool hasGameAssets = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
 
@@ -369,40 +395,47 @@ public class ImportGamePartWizard : EditorWindow
         m_PrefabsOnly = newPrefabs;
         m_UseRegex    = newRegex;
 
-        if (m_NavigatedThisFrame)
+        if (Event.current.type == EventType.Layout)
         {
-            // Navigation set m_Search/m_SearchMode already — don't let stale newSearch stomp them
-            m_SearchMode = newMode;
-            m_LastSearch = m_Search;
-            RebuildResults();
-            Repaint();
-        }
-        else if (m_SearchPending)
-        {
-            m_Search     = newSearch;
-            m_SearchMode = newMode;
-            m_LastSearch = m_Search;
-            RebuildResults();
-        }
-        else if (filtersChanged || m_LastSearch == null)
-        {
-            m_SearchMode = newMode;
-            m_LastSearch = m_Search;
-            RebuildResults();
-        }
-        else
-        {
-            m_Search = newSearch;
+            if (m_NavigatedThisFrame)
+            {
+                m_SearchMode = newMode;
+                m_LastSearch = m_Search;
+                RebuildResults();
+                Repaint();
+            }
+            else if (m_SearchPending)
+            {
+                m_Search     = newSearch;
+                m_SearchMode = newMode;
+                m_LastSearch = m_Search;
+                RebuildResults();
+            }
+            else if (filtersChanged || m_LastSearch == null)
+            {
+                m_SearchMode = newMode;
+                m_LastSearch = m_Search;
+                RebuildResults();
+            }
+            else
+            {
+                m_Search = newSearch;
+            }
         }
 
 
         // ── Column layout ────────────────────────────────────────────────────
-        // position.width is the window width; subtract scrollbar (15) and a 2px border
-        float viewW       = position.width - 17f;
-        float fixedW      = W_SEL + W_PREVIEW + W_DIM * 3 + W_VOL + W_MASS;
-        float flexW       = Mathf.Max(120f, viewW - fixedW);
-        float displayColW = Mathf.Floor(flexW * 0.25f);
-        float nameColW    = flexW - displayColW;
+        // Only recalculate during Layout to prevent Layout/Repaint control count mismatch
+        if (Event.current.type == EventType.Layout)
+        {
+            float viewW  = position.width - 17f;
+            float fixedW = W_SEL + W_PREVIEW + W_DIM * 3 + W_VOL + W_MASS;
+            float flexW  = Mathf.Max(120f, viewW - fixedW);
+            m_DisplayColW = Mathf.Floor(flexW * 0.25f);
+            m_NameColW    = flexW - m_DisplayColW;
+        }
+        float displayColW = m_DisplayColW;
+        float nameColW    = m_NameColW;
 
         // ── Table header ─────────────────────────────────────────────────────
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -631,7 +664,7 @@ public class ImportGamePartWizard : EditorWindow
         }
         EditorGUILayout.EndScrollView();
 
-        if (m_Loading.Count > 0) Repaint();
+        if (m_Loading.Count > 0) m_NeedsRepaint = true;
 
         // ── Separator ────────────────────────────────────────────────────────
         EditorGUILayout.Space(4f);
