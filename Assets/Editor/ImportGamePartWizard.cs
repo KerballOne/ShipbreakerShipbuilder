@@ -48,6 +48,7 @@ public class ImportGamePartWizard : EditorWindow
     const int                  MaxSearchHistory = 20;
     bool                       m_NavigatedThisFrame = false;
     bool                       m_SearchPending      = false;
+    string                     m_ActivePreviewKey   = null;
 
 
     // Key: guid for addressable root items, "guid|childPath" for children, "local:path" for local prefabs
@@ -85,6 +86,7 @@ public class ImportGamePartWizard : EditorWindow
     static GUIStyle s_LocalBakedRowStyle;
     static GUIStyle s_LocalAddressableRowStyle;
     static GUIStyle s_IconButtonStyle;
+    static GUIStyle s_IconButtonActiveStyle;
     static GUIStyle s_Row2LabelStyle;
     static GUIStyle s_LegendAddressableStyle;
     static GUIStyle s_LegendBakedStyle;
@@ -97,7 +99,7 @@ public class ImportGamePartWizard : EditorWindow
 
     void EnsureStyles()
     {
-        if (s_PathStyle != null && s_SelectedRowStyle?.normal.background != null && s_IconButtonStyle != null && s_Row2LabelStyle != null) return;
+        if (s_PathStyle != null && s_SelectedRowStyle?.normal.background != null && s_IconButtonStyle != null && s_IconButtonActiveStyle != null && s_Row2LabelStyle != null) return;
 
         s_PathStyle = new GUIStyle(EditorStyles.miniLabel) { wordWrap = false };
 
@@ -129,6 +131,17 @@ public class ImportGamePartWizard : EditorWindow
             padding = new RectOffset(1, 1, 1, 1),
             margin  = EditorStyles.miniButton.margin,
         };
+
+        var activeIconTex = new Texture2D(1, 1);
+        activeIconTex.SetPixel(0, 0, new Color(0.15f, 0.55f, 1.0f, 1f));
+        activeIconTex.Apply();
+        s_IconButtonActiveStyle = new GUIStyle(s_IconButtonStyle);
+        s_IconButtonActiveStyle.normal.background   = activeIconTex;
+        s_IconButtonActiveStyle.onNormal.background = activeIconTex;
+        s_IconButtonActiveStyle.hover.background    = activeIconTex;
+        s_IconButtonActiveStyle.onHover.background  = activeIconTex;
+        s_IconButtonActiveStyle.active.background   = activeIconTex;
+        s_IconButtonActiveStyle.focused.background  = activeIconTex;
 
         var selTex = new Texture2D(1, 1);
         selTex.SetPixel(0, 0, new Color(0.17f, 0.36f, 0.53f, 1f));
@@ -190,11 +203,30 @@ public class ImportGamePartWizard : EditorWindow
         return ep;
     }
 
-    void BeginExpandLoad(string guid)
+    // Expand all result rows that share the same path as the given guid (handles duplicate guid entries)
+    void ExpandAllByPath(string guid)
     {
-        if (m_ChildCache.ContainsKey(guid)) { m_Expanded.Add(guid); return; }
+        m_Expanded.Add(guid);
+        var path = m_Results.Find(r => r.guid == guid).path;
+        if (!string.IsNullOrEmpty(path))
+            foreach (var r in m_Results)
+                if (!r.isLocal && r.path == path) { m_Expanded.Add(r.guid); m_ChildCache[r.guid] = m_ChildCache[guid]; }
+    }
+
+    void BeginExpandLoad(string guid, string partName = null)
+    {
+        string label = string.IsNullOrEmpty(partName) ? guid : partName;
+        if (m_ChildCache.ContainsKey(guid))
+        {
+            ExpandAllByPath(guid);
+            m_StatusLine = $"{m_ChildCache[guid].Count} children expanded with depth of {m_ChildDepth} for {label}";
+            Repaint();
+            return;
+        }
         m_Loading.Add(guid);
         int capturedDepth = m_ChildDepth;
+        m_StatusLine = $"Loading children with depth of {capturedDepth} for {label}…";
+        Repaint();
 
         var locOp = Addressables.LoadResourceLocationsAsync(guid, typeof(GameObject));
         locOp.Completed += locRes =>
@@ -202,6 +234,7 @@ public class ImportGamePartWizard : EditorWindow
             if (locRes.Status != AsyncOperationStatus.Succeeded || locRes.Result?.Count == 0)
             {
                 m_Loading.Remove(guid);
+                m_StatusLine = $"Failed to load children for {label}.";
                 Repaint();
                 return;
             }
@@ -215,7 +248,18 @@ public class ImportGamePartWizard : EditorWindow
                     var children = new List<ChildRow>();
                     CollectChildren(res.Result.transform, "", 1, capturedDepth, children);
                     m_ChildCache[guid] = children;
+                    ExpandAllByPath(guid);
+                    int visible = children.Count(c => !m_PrefabsOnly || c.isPrefab);
+                    m_StatusLine = visible == 0
+                        ? $"No prefab children found (depth {capturedDepth}) for {label}"
+                        : $"{visible} children expanded with depth of {capturedDepth} for {label}";
+                }
+                else
+                {
+                    // Load failed but still mark expanded so row doesn't stay stuck loading
                     m_Expanded.Add(guid);
+                    m_ChildCache[guid] = new List<ChildRow>();
+                    m_StatusLine = $"Could not load prefab for {label}.";
                 }
                 Repaint();
             };
@@ -396,12 +440,19 @@ public class ImportGamePartWizard : EditorWindow
 
             bool canPreviewRow = IsPreviewablePath(r.path)
                 && (!r.isLocal ? !string.IsNullOrEmpty(r.guid) : !string.IsNullOrEmpty(r.path));
-            var previewIcon = canPreviewRow
-                ? EditorGUIUtility.IconContent("visibilityOn")
-                : EditorGUIUtility.IconContent("scenevis_hidden");
+            string rowPreviewKey = r.isLocal ? r.path : r.guid;
+            bool   isActivePrev  = m_ActivePreviewKey == rowPreviewKey;
+            var previewIcon = !canPreviewRow
+                ? EditorGUIUtility.IconContent("scenevis_hidden")
+                : isActivePrev
+                    ? EditorGUIUtility.IconContent("visibilityOn")
+                    : EditorGUIUtility.IconContent("animationvisibilitytoggleon");
             GUI.enabled = canPreviewRow;
-            if (GUILayout.Button(previewIcon, s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
-                OpenPreview(r.rowType, r.isLocal ? r.path : r.guid);
+            if (GUILayout.Button(previewIcon, isActivePrev ? s_IconButtonActiveStyle : s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
+            {
+                if (isActivePrev) { m_ActivePreviewKey = null; UnityEditor.SceneManagement.StageUtility.GoToMainStage(); }
+                else              { m_ActivePreviewKey = rowPreviewKey; OpenPreview(r.rowType, r.isLocal ? r.path : r.guid); }
+            }
             GUILayout.Space(W_PREVIEW - W_SEL_BTN);
             GUI.enabled = true;
 
@@ -461,6 +512,14 @@ public class ImportGamePartWizard : EditorWindow
                 }
                 else
                 {
+                    bool anyVisible = children.Any(c => !m_PrefabsOnly || c.isPrefab);
+                    if (!anyVisible)
+                    {
+                        EditorGUILayout.BeginHorizontal(s_ChildBgStyle);
+                        GUILayout.Space(W_PREVIEW + W_SEL + 8f);
+                        GUILayout.Label("(no prefab children)", EditorStyles.miniLabel);
+                        EditorGUILayout.EndHorizontal();
+                    }
                     foreach (var child in children)
                     {
                         if (m_PrefabsOnly && !child.isPrefab) continue;
@@ -501,8 +560,11 @@ public class ImportGamePartWizard : EditorWindow
                             childRowRect.x = 0; childRowRect.width = EditorGUIUtility.currentViewWidth;
                             if (childRowRect.Contains(Event.current.mousePosition))
                             {
-                                var capturedName = partSegment;
+                                var capturedName    = partSegment;
+                                var capturedParentGuid = r.guid;
                                 var menu = new GenericMenu();
+                                menu.AddItem(new GUIContent("Collapse Parent"), false, () => { m_Expanded.Remove(capturedParentGuid); Repaint(); });
+                                menu.AddSeparator("");
                                 menu.AddItem(new GUIContent("Copy"), false, () => GUIUtility.systemCopyBuffer = capturedName);
                                 menu.AddItem(new GUIContent("Search"), false, () => { m_Search = capturedName; m_SearchMode = SearchMode.PartName; m_LastSearch = null; GUIUtility.keyboardControl = 0; Repaint(); });
                                 menu.ShowAsContext();
@@ -539,7 +601,7 @@ public class ImportGamePartWizard : EditorWindow
                         else if (isExpanded)
                             menu.AddItem(new GUIContent("Collapse"), false, () => { m_Expanded.Remove(r.guid); Repaint(); });
                         else
-                            menu.AddItem(new GUIContent("Expand Children"), false, () => BeginExpandLoad(r.guid));
+                            menu.AddItem(new GUIContent("Expand Children"), false, () => BeginExpandLoad(r.guid, capturedPartName));
                         menu.AddSeparator("");
                     }
                     if (capturedLocal)
@@ -597,17 +659,24 @@ public class ImportGamePartWizard : EditorWindow
                 bool canPreview = !isChild && (!kv.Value.isLocal
                     ? !string.IsNullOrEmpty(kv.Value.guid)
                     : !string.IsNullOrEmpty(kv.Value.assetPath));
-                var  eyeIcon    = canPreview
-                    ? EditorGUIUtility.IconContent("visibilityOn")
-                    : EditorGUIUtility.IconContent("scenevis_hidden");
+                string selPreviewKey   = kv.Value.isLocal ? kv.Value.assetPath : kv.Value.guid;
+                bool   isActiveSelPrev = m_ActivePreviewKey == selPreviewKey;
+                var    eyeIcon = !canPreview
+                    ? EditorGUIUtility.IconContent("scenevis_hidden")
+                    : isActiveSelPrev
+                        ? EditorGUIUtility.IconContent("visibilityOn")
+                        : EditorGUIUtility.IconContent("animationvisibilitytoggleon");
 
                 float selRowTopY = prevSelBottomY;
 
                 // Row 1 — eye + X + name
                 EditorGUILayout.BeginHorizontal();
                 GUI.enabled = canPreview;
-                if (GUILayout.Button(eyeIcon, s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
-                    OpenPreview(kv.Value.rowType, kv.Value.isLocal ? kv.Value.assetPath : kv.Value.guid);
+                if (GUILayout.Button(eyeIcon, isActiveSelPrev ? s_IconButtonActiveStyle : s_IconButtonStyle, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
+                {
+                    if (isActiveSelPrev) { m_ActivePreviewKey = null; UnityEditor.SceneManagement.StageUtility.GoToMainStage(); }
+                    else                 { m_ActivePreviewKey = selPreviewKey; OpenPreview(kv.Value.rowType, kv.Value.isLocal ? kv.Value.assetPath : kv.Value.guid); }
+                }
                 GUILayout.Space(W_PREVIEW - W_SEL_BTN);
                 GUI.enabled = true;
                 if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(W_SEL_BTN), GUILayout.Height(EditorGUIUtility.singleLineHeight)))
