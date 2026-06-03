@@ -16,11 +16,20 @@ public class JointAssistWindow : EditorWindow
     PickedFace? snapFaceA;
     PickedFace? snapFaceB;
     int pickingSnapFace; // 0 = none, 1 = A, 2 = B
-    float overlapAmount = 0.025f;
+    float overlapAmount = 0f;
+
+    // Persistent crosshair hit points in world space (set on click, cleared with faces)
+    bool snapHitAValid, snapHitBValid;
+    Vector3 snapHitA, snapHitB;
+
+    static readonly Color kFaceColorA       = new Color(1.0f, 0.55f, 0.0f, 1.00f); // orange
+    static readonly Color kFaceColorAFill   = new Color(1.0f, 0.55f, 0.0f, 0.20f);
+    static readonly Color kFaceColorB       = new Color(0.2f, 0.55f, 1.0f, 1.00f); // blue
+    static readonly Color kFaceColorBFill   = new Color(0.2f, 0.55f, 1.0f, 0.20f);
 
     // Per-face snap point mode: false = click point, true = center of face
-    bool snapPointModeA; // false = Click Point, true = Center of Face
-    bool snapPointModeB;
+    bool snapPointModeA = true; // false = Click Point, true = Center of Face
+    bool snapPointModeB = true;
 
     // Axis constraints for Part A (pos X Y Z, rot X Y Z) — all default true
     bool snapPosX = true, snapPosY = true, snapPosZ = true;
@@ -32,7 +41,8 @@ public class JointAssistWindow : EditorWindow
     float autoDedupRadius      = 0.05f;
 
     // Joint compatibility check state
-    float compatMeshThreshold = 0.02f;
+    float compatCoplanarThreshold   = 0.025f; // mirrors game's coplanarDistanceThreshold
+    float compatCollisionThreshold  = 0.01f;  // positive = allow this much penetration before flagging red
 
     struct CompatResult
     {
@@ -40,15 +50,14 @@ public class JointAssistWindow : EditorWindow
         public State state;
         public string message;
     }
-    CompatResult compatSPMat   = new CompatResult { state = CompatResult.State.None };
-    CompatResult compatMJC     = new CompatResult { state = CompatResult.State.None };
-    CompatResult compatMesh    = new CompatResult { state = CompatResult.State.None };
-    float        compatMeshDist = float.MaxValue;
-    bool         compatMeshOverlap = false;
-    GameObject   compatMeshGoA, compatMeshGoB;
-    Vector3      compatMeshCenterA, compatMeshCenterB;
-    Vector3      compatMeshNormalA, compatMeshNormalB;
-    Vector3[]    compatOverlapPoly; // world-space vertices of the winning overlap polygon
+    CompatResult compatSPMat  = new CompatResult { state = CompatResult.State.None };
+    CompatResult compatMJC    = new CompatResult { state = CompatResult.State.None };
+    CompatResult compatMesh   = new CompatResult { state = CompatResult.State.None };
+
+    // Joint polygons (green) and collision triangles (red)
+    bool                     showJointPolygons = false;
+    List<Vector3[]> jointPolygons;
+    List<Vector3[]>          collisionTris; // world-space triangles from interpenetrating SPs
 
     // jsa_compat.json: key = "JsaName1|JsaName2" (sorted), value = true/false
     Dictionary<string, bool> jsaCompatTable;
@@ -142,16 +151,24 @@ public class JointAssistWindow : EditorWindow
         {
             if (GUILayout.Button("⇆", GUILayout.Height(26), GUILayout.Width(28)))
             {
-                var tmp = snapFaceA;
-                snapFaceA = snapFaceB;
-                snapFaceB = tmp;
+                var tmp = snapFaceA; snapFaceA = snapFaceB; snapFaceB = tmp;
+                var tmpH = snapHitA; snapHitA = snapHitB; snapHitB = tmpH;
+                var tmpV = snapHitAValid; snapHitAValid = snapHitBValid; snapHitBValid = tmpV;
+                SceneView.RepaintAll();
+            }
+            if (GUILayout.Button("✕", GUILayout.Height(26), GUILayout.Width(28)))
+            {
+                snapFaceA = snapFaceB = null;
+                snapHitAValid = snapHitBValid = false;
+                pickingSnapFace = 0;
+                SceneView.RepaintAll();
             }
         }
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.Space(4);
-        DrawFacePickButton(1, "Face A", "Moving",     ref snapFaceA, activeColor, pickedColor, ref snapPointModeA);
-        DrawFacePickButton(2, "Face B", "Flush with", ref snapFaceB, activeColor, pickedColor, ref snapPointModeB);
+        DrawFacePickButton(1, "Face A", "Moving",     ref snapFaceA, activeColor, kFaceColorA, ref snapPointModeA);
+        DrawFacePickButton(2, "Face B", "Flush with", ref snapFaceB, activeColor, kFaceColorB, ref snapPointModeB);
 
         bool bothPicked = snapFaceA.HasValue && snapFaceB.HasValue;
 
@@ -164,7 +181,9 @@ public class JointAssistWindow : EditorWindow
             var savedFW = EditorGUIUtility.fieldWidth;
             EditorGUIUtility.labelWidth = 75f;
             EditorGUIUtility.fieldWidth = 40f;
-            overlapAmount = EditorGUILayout.FloatField("Overlap (m)", overlapAmount);
+            overlapAmount = EditorGUILayout.FloatField(
+                new GUIContent("Gap (m)", ">0 = gap between faces\n<0 = overlap/penetration\n=0 = flush"),
+                overlapAmount);
             EditorGUIUtility.labelWidth = savedLW;
             EditorGUIUtility.fieldWidth = savedFW;
             if (GUILayout.Button("Snap", GUILayout.MaxWidth(60)))
@@ -239,18 +258,35 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.LabelField("Joint Compatibility", EditorStyles.boldLabel);
         EditorGUILayout.Space(4);
 
-        compatMeshThreshold = EditorGUILayout.FloatField("Mesh Proximity Threshold (m)", compatMeshThreshold);
+        compatCoplanarThreshold  = EditorGUILayout.FloatField("Coplanar Threshold (m)",  compatCoplanarThreshold);
+        compatCollisionThreshold = EditorGUILayout.FloatField("Collision Threshold (m)", compatCollisionThreshold);
 
         int compatSel = Selection.gameObjects.Length;
+        EditorGUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(compatSel < 2))
         {
-            if (GUILayout.Button($"Check Compatibility  ({compatSel} selected)", GUILayout.Height(30)))
+            if (GUILayout.Button($"Check  ({compatSel} selected)", GUILayout.Height(28)))
                 RunCompatibilityCheck();
         }
+        if (jointPolygons != null)
+        {
+            var prevBG = GUI.backgroundColor;
+            GUI.backgroundColor = showJointPolygons ? new Color(0.2f, 0.8f, 0.4f) : GUI.backgroundColor;
+            string polyLabel = showJointPolygons
+                ? $"Hide Polygons  ({jointPolygons.Count})"
+                : $"Show Polygons  ({jointPolygons.Count})";
+            if (GUILayout.Button(polyLabel, GUILayout.Height(28), GUILayout.ExpandWidth(false)))
+            {
+                showJointPolygons = !showJointPolygons;
+                SceneView.RepaintAll();
+            }
+            GUI.backgroundColor = prevBG;
+        }
+        EditorGUILayout.EndHorizontal();
 
-        DrawCompatResult(compatSPMat,  "SP_Mat / JSA");
-        DrawCompatResult(compatMJC,    "MandatoryJointContainer");
-        DrawCompatMeshResult();
+        DrawCompatResult(compatSPMat, "SP_Mat / JSA");
+        DrawCompatResult(compatMJC,   "MandatoryJointContainer");
+        DrawCompatResult(compatMesh,  "Mesh");
 
         // ── Scene Overlay ─────────────────────────────────────────────────────
         GUILayout.Space(12);
@@ -388,7 +424,9 @@ public class JointAssistWindow : EditorWindow
         var sel = Selection.gameObjects;
         if (sel.Length < 2) return;
 
-        compatOverlapPoly = null;
+        jointPolygons = null;
+        collisionTris = null;
+        showJointPolygons = false;
 
         // ── #1  SP_Mat / JSA ──────────────────────────────────────────────────
         compatSPMat = CheckSPMatCompat(sel);
@@ -396,8 +434,17 @@ public class JointAssistWindow : EditorWindow
         // ── #2  MandatoryJointContainer ───────────────────────────────────────
         compatMJC = CheckMJC(sel);
 
-        // ── #3  Mesh proximity ────────────────────────────────────────────────
-        (compatMesh, compatMeshDist, compatMeshOverlap) = CheckMeshProximity(sel);
+        // ── #3  Mesh joint polygons ───────────────────────────────────────────
+        (compatMesh, jointPolygons) = CheckMeshJoints(sel);
+        if (jointPolygons != null && jointPolygons.Count > 0)
+        {
+            showJointPolygons = true;
+            SceneView.RepaintAll();
+        }
+
+        // ── #4  Collision triangles ───────────────────────────────────────────
+        collisionTris = FindCollisionTris(sel);
+        SceneView.RepaintAll();
 
         Repaint();
     }
@@ -515,178 +562,206 @@ public class JointAssistWindow : EditorWindow
         return new CompatResult { state = CompatResult.State.Fail, message = $"{msg}\n{string.Join("\n", labels)}" };
     }
 
-    // #3: Find the minimum face-center-to-plane distance across all StructurePart
-    // MeshFilter pairs between the two sides. Antiparallel normals only (faces pointing at each other).
-    (CompatResult result, float dist, bool overlap) CheckMeshProximity(GameObject[] sel)
+    // #3: Mirrors the game's TryFindJointPolygonsJob logic.
+    // For each SP pair (A, B): collect vertices of A that are within coplanarThreshold
+    // of B's plane AND whose normals are codirectional with B's normal, and vice versa.
+    // Project each set onto the shared plane, compute their convex hulls, clip them.
+    // Any pair with a non-zero intersection polygon is a qualifying joint.
+    (CompatResult result, List<Vector3[]> polys) CheckMeshJoints(GameObject[] sel)
     {
-        // Gather StructurePart MeshFilters from each side
         var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
-
         if (sidesFilters.Count < 2 || sidesFilters[0].Count == 0 || sidesFilters[1].Count == 0)
             return (new CompatResult { state = CompatResult.State.Warn,
-                message = "Mesh: No StructurePart MeshFilters found on one or both sides." }, float.MaxValue, false);
+                message = "Mesh: No StructurePart MeshFilters found on one or both sides." }, null);
 
-        // Winner = largest overlapping area between antiparallel triangle pairs.
-        // Pairs with no tangential overlap are skipped entirely.
-        float bestArea   = -1f;
-        float winnerDist = float.MaxValue;
-        bool  overlap    = false;
+        var polys   = new List<Vector3[]>();
+        var polyBuf = new List<Vector2>(32);
+        var ptsA2D  = new List<Vector2>(64);
+        var ptsB2D  = new List<Vector2>(64);
 
-        var polyBuf = new List<Vector2>(8); // reused scratch buffer for SH clipping
+        // Run both directions so every triangle on either side gets a chance
+        // to be the reference plane — catches cases where only B's triangles
+        // face the right way toward A.
+        CollectJointPolys(sidesFilters[0], sidesFilters[1], polys, polyBuf, ptsA2D, ptsB2D);
+        CollectJointPolys(sidesFilters[1], sidesFilters[0], polys, polyBuf, ptsA2D, ptsB2D);
 
-        foreach (var mfA in sidesFilters[0])
+        if (polys.Count == 0)
+            return (new CompatResult { state = CompatResult.State.Fail,
+                message = "Mesh: No joint polygons found — parts will not auto-joint." }, null);
+
+        return (new CompatResult { state = CompatResult.State.Pass,
+            message = $"Mesh: {polys.Count} joint polygon{(polys.Count == 1 ? "" : "s")} found." }, polys);
+    }
+
+    // Use triangles of listA as reference planes, collect coplanar verts from both sides,
+    // compute convex hulls, clip — store any non-zero intersection polygon.
+    void CollectJointPolys(List<MeshFilter> listA, List<MeshFilter> listB,
+        List<Vector3[]> polys, List<Vector2> polyBuf, List<Vector2> ptsA2D, List<Vector2> ptsB2D)
+    {
+        foreach (var mfA in listA)
         {
             if (mfA.sharedMesh == null) continue;
             var meshA  = mfA.sharedMesh;
-            var trisA  = meshA.triangles;
             var vertsA = meshA.vertices;
             var normsA = meshA.normals;
             var mA     = mfA.transform.localToWorldMatrix;
 
-            foreach (var mfB in sidesFilters[1])
+            var wVertsA = new Vector3[vertsA.Length];
+            var wNormsA = new Vector3[vertsA.Length];
+            for (int i = 0; i < vertsA.Length; i++)
+            {
+                wVertsA[i] = mA.MultiplyPoint3x4(vertsA[i]);
+                wNormsA[i] = mA.MultiplyVector(normsA.Length > 0 ? normsA[i] : Vector3.up).normalized;
+            }
+
+            foreach (var mfB in listB)
             {
                 if (mfB.sharedMesh == null) continue;
                 var meshB  = mfB.sharedMesh;
-                var trisB  = meshB.triangles;
                 var vertsB = meshB.vertices;
-                var normsB = meshB.normals;
                 var mB     = mfB.transform.localToWorldMatrix;
 
+                var wVertsB = new Vector3[vertsB.Length];
+                for (int i = 0; i < vertsB.Length; i++)
+                    wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
+
+                var trisA = meshA.triangles;
                 for (int ia = 0; ia < trisA.Length; ia += 3)
                 {
-                    Vector3 wa0 = mA.MultiplyPoint3x4(vertsA[trisA[ia]]);
-                    Vector3 wa1 = mA.MultiplyPoint3x4(vertsA[trisA[ia+1]]);
-                    Vector3 wa2 = mA.MultiplyPoint3x4(vertsA[trisA[ia+2]]);
-                    Vector3 centerA = (wa0 + wa1 + wa2) / 3f;
-                    Vector3 lnA = normsA.Length > 0
-                        ? ((normsA[trisA[ia]] + normsA[trisA[ia+1]] + normsA[trisA[ia+2]]) / 3f).normalized
-                        : Vector3.Cross(vertsA[trisA[ia+1]] - vertsA[trisA[ia]], vertsA[trisA[ia+2]] - vertsA[trisA[ia]]).normalized;
-                    Vector3 wnA = mA.MultiplyVector(lnA).normalized;
+                    Vector3 wa0 = wVertsA[trisA[ia]], wa1 = wVertsA[trisA[ia+1]], wa2 = wVertsA[trisA[ia+2]];
+                    Vector3 geomNorm = Vector3.Cross(wa1 - wa0, wa2 - wa0);
+                    if (geomNorm.sqrMagnitude < 1e-10f) continue;
+                    Vector3 faceNorm   = ((wNormsA[trisA[ia]] + wNormsA[trisA[ia+1]] + wNormsA[trisA[ia+2]]) / 3f).normalized;
+                    Vector3 planeOrigin = (wa0 + wa1 + wa2) / 3f;
 
-                    // Build a tangent frame on face A's plane
-                    Vector3 tanA  = Vector3.Cross(wnA, Mathf.Abs(wnA.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
-                    Vector3 bitanA = Vector3.Cross(wnA, tanA).normalized;
+                    Vector3 tan   = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+                    Vector3 bitan = Vector3.Cross(faceNorm, tan).normalized;
 
-                    // Triangle A in 2D plane space
-                    Vector2 a0 = new Vector2(Vector3.Dot(wa0 - centerA, tanA), Vector3.Dot(wa0 - centerA, bitanA));
-                    Vector2 a1 = new Vector2(Vector3.Dot(wa1 - centerA, tanA), Vector3.Dot(wa1 - centerA, bitanA));
-                    Vector2 a2 = new Vector2(Vector3.Dot(wa2 - centerA, tanA), Vector3.Dot(wa2 - centerA, bitanA));
-
-                    for (int ib = 0; ib < trisB.Length; ib += 3)
+                    ptsA2D.Clear();
+                    for (int i = 0; i < wVertsA.Length; i++)
                     {
-                        Vector3 wb0 = mB.MultiplyPoint3x4(vertsB[trisB[ib]]);
-                        Vector3 wb1 = mB.MultiplyPoint3x4(vertsB[trisB[ib+1]]);
-                        Vector3 wb2 = mB.MultiplyPoint3x4(vertsB[trisB[ib+2]]);
-                        Vector3 centerB = (wb0 + wb1 + wb2) / 3f;
-                        Vector3 lnB = normsB.Length > 0
-                            ? ((normsB[trisB[ib]] + normsB[trisB[ib+1]] + normsB[trisB[ib+2]]) / 3f).normalized
-                            : Vector3.Cross(vertsB[trisB[ib+1]] - vertsB[trisB[ib]], vertsB[trisB[ib+2]] - vertsB[trisB[ib]]).normalized;
-                        Vector3 wnB = mB.MultiplyVector(lnB).normalized;
-
-                        // Antiparallel: faces must point toward each other
-                        if (Vector3.Dot(wnA, wnB) > -0.9f) continue;
-
-                        // Plane distance along A's normal
-                        float dAB = Mathf.Abs(Vector3.Dot(centerB - centerA, wnA));
-                        float dBA = Mathf.Abs(Vector3.Dot(centerA - centerB, wnB));
-                        float d = Mathf.Min(dAB, dBA);
-
-                        // Project B's verts onto A's plane and into A's 2D frame
-                        Vector2 b0 = new Vector2(Vector3.Dot(wb0 - centerA, tanA), Vector3.Dot(wb0 - centerA, bitanA));
-                        Vector2 b1 = new Vector2(Vector3.Dot(wb1 - centerA, tanA), Vector3.Dot(wb1 - centerA, bitanA));
-                        Vector2 b2 = new Vector2(Vector3.Dot(wb2 - centerA, tanA), Vector3.Dot(wb2 - centerA, bitanA));
-
-                        // Clip triangle B against triangle A using Sutherland-Hodgman
-                        float area = TriTriOverlapArea(a0, a1, a2, b0, b1, b2, polyBuf);
-                        if (area <= 0f) continue;
-
-                        // Score = area / (plane distance + 1mm): rewards large overlap AND proximity.
-                        // A flush touching pair always beats a distant coplanar pair of equal area.
-                        float score = area / (d + 0.001f);
-                        if (score > bestArea)
-                        {
-                            bestArea   = score;
-                            winnerDist = d;
-                            // overlap = B's center is behind A's face plane (penetrating)
-                            overlap = Vector3.Dot(centerB - centerA, wnA) < 0f;
-                            compatMeshGoA     = mfA.gameObject;
-                            compatMeshGoB     = mfB.gameObject;
-                            compatMeshCenterA = centerA;
-                            compatMeshCenterB = centerB;
-                            compatMeshNormalA = wnA;
-                            compatMeshNormalB = wnB;
-                            // Reconstruct polygon in world space from polyBuf (2D plane coords → 3D)
-                            compatOverlapPoly = new Vector3[polyBuf.Count];
-                            for (int pi = 0; pi < polyBuf.Count; pi++)
-                                compatOverlapPoly[pi] = centerA
-                                    + polyBuf[pi].x * tanA
-                                    + polyBuf[pi].y * bitanA;
-                        }
+                        if (Mathf.Abs(Vector3.Dot(wVertsA[i] - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+                        ptsA2D.Add(new Vector2(Vector3.Dot(wVertsA[i] - planeOrigin, tan),
+                                               Vector3.Dot(wVertsA[i] - planeOrigin, bitan)));
                     }
+                    if (ptsA2D.Count < 3) continue;
+
+                    ptsB2D.Clear();
+                    float signedDistSum = 0f;
+                    int signedDistCount = 0;
+                    for (int i = 0; i < wVertsB.Length; i++)
+                    {
+                        float sd = Vector3.Dot(wVertsB[i] - planeOrigin, faceNorm);
+                        if (Mathf.Abs(sd) > compatCoplanarThreshold) continue;
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wVertsB[i] - planeOrigin, tan),
+                                               Vector3.Dot(wVertsB[i] - planeOrigin, bitan)));
+                        signedDistSum += sd;
+                        signedDistCount++;
+                    }
+                    if (ptsB2D.Count < 3) continue;
+
+                    var hullA = ConvexHull2D(ptsA2D);
+                    var hullB = ConvexHull2D(ptsB2D);
+                    if (hullA.Count < 3 || hullB.Count < 3) continue;
+
+                    if (ClipPolygons(hullA, hullB, polyBuf) <= 1e-6f) continue;
+
+                    var poly = new Vector3[polyBuf.Count];
+                    for (int pi = 0; pi < polyBuf.Count; pi++)
+                        poly[pi] = planeOrigin + polyBuf[pi].x * tan + polyBuf[pi].y * bitan;
+                    polys.Add(poly);
                 }
             }
         }
-
-        if (bestArea < 0f)
-            return (new CompatResult { state = CompatResult.State.Warn,
-                message = "Mesh: No overlapping face pairs found between the two sides." }, float.MaxValue, false);
-
-        bool jointable = winnerDist <= compatMeshThreshold;
-        var state = jointable ? CompatResult.State.Pass : CompatResult.State.Fail;
-        string verdict = jointable ? "Within threshold — likely jointable" : "Too far apart — unlikely to joint";
-        return (new CompatResult { state = state, message = $"Mesh: {verdict}" }, winnerDist, overlap);
     }
 
-    // Returns the area of the intersection polygon of two 2D triangles.
-    // Uses Sutherland-Hodgman: clip subject (B) against each edge of clip (A).
-    static float TriTriOverlapArea(Vector2 a0, Vector2 a1, Vector2 a2,
-                                   Vector2 b0, Vector2 b1, Vector2 b2,
-                                   List<Vector2> buf)
+    // Gift-wrapping convex hull of 2D points. Returns hull in CCW order.
+    static List<Vector2> ConvexHull2D(List<Vector2> pts)
+    {
+        int n = pts.Count;
+        if (n < 3) return new List<Vector2>(pts);
+        // Find leftmost point
+        int start = 0;
+        for (int i = 1; i < n; i++)
+            if (pts[i].x < pts[start].x) start = i;
+
+        var hull = new List<Vector2>();
+        int cur = start;
+        do
+        {
+            hull.Add(pts[cur]);
+            int next = (cur + 1) % n;
+            for (int i = 0; i < n; i++)
+                if (Cross2D(pts[next] - pts[cur], pts[i] - pts[cur]) < 0)
+                    next = i;
+            cur = next;
+        } while (cur != start && hull.Count <= n);
+        return hull;
+    }
+
+    // Sutherland-Hodgman: clip subject polygon against clip polygon, return area.
+    // Result polygon left in buf.
+    static float ClipPolygons(List<Vector2> clip, List<Vector2> subject, List<Vector2> buf)
     {
         buf.Clear();
-        buf.Add(b0); buf.Add(b1); buf.Add(b2);
+        buf.AddRange(subject);
+        var input = new List<Vector2>(buf.Count + 4);
 
-        Vector2[] clip = { a0, a1, a2 };
-        var input = new List<Vector2>(8);
-
-        for (int e = 0; e < 3; e++)
+        for (int e = 0; e < clip.Count; e++)
         {
             if (buf.Count == 0) return 0f;
-            Vector2 edgeA = clip[e], edgeB = clip[(e + 1) % 3];
-            // Inside = left of directed edge (edgeA → edgeB)
+            Vector2 eA = clip[e], eB = clip[(e + 1) % clip.Count];
             input.Clear();
             input.AddRange(buf);
             buf.Clear();
-
             for (int i = 0; i < input.Count; i++)
             {
                 Vector2 cur  = input[i];
                 Vector2 prev = input[(i + input.Count - 1) % input.Count];
-                bool curIn  = Cross2D(edgeB - edgeA, cur  - edgeA) >= 0f;
-                bool prevIn = Cross2D(edgeB - edgeA, prev - edgeA) >= 0f;
-
-                if (curIn)
-                {
-                    if (!prevIn) buf.Add(LineIntersect2D(prev, cur, edgeA, edgeB));
-                    buf.Add(cur);
-                }
-                else if (prevIn)
-                {
-                    buf.Add(LineIntersect2D(prev, cur, edgeA, edgeB));
-                }
+                bool curIn  = Cross2D(eB - eA, cur  - eA) >= 0f;
+                bool prevIn = Cross2D(eB - eA, prev - eA) >= 0f;
+                if (curIn)  { if (!prevIn) buf.Add(LineIntersect2D(prev, cur, eA, eB)); buf.Add(cur); }
+                else if (prevIn) buf.Add(LineIntersect2D(prev, cur, eA, eB));
             }
         }
-
         if (buf.Count < 3) return 0f;
-
-        // Shoelace area
         float area = 0f;
         for (int i = 0; i < buf.Count; i++)
-        {
-            Vector2 p = buf[i], q = buf[(i + 1) % buf.Count];
-            area += p.x * q.y - q.x * p.y;
-        }
+        { Vector2 p = buf[i], q = buf[(i + 1) % buf.Count]; area += p.x * q.y - q.x * p.y; }
         return Mathf.Abs(area) * 0.5f;
+    }
+
+    // Returns the area of the intersection polygon of two 2D triangles.
+    // Uses Sutherland-Hodgman: clip subject (B) against each edge of clip (A).
+    // Returns penetration depth of point p inside mesh (0 if outside).
+    // Casts a ray in +X and counts triangle intersections (odd = inside).
+    // Depth = distance to the nearest intersected face along the ray.
+    // Returns the true penetration depth: minimum exit distance across all 6 cardinal
+    // directions. Using just +X gives the wrong answer when parts overlap along Y or Z.
+    static float PointMeshDepth(Vector3 p, Vector3[] wVerts, int[] tris)
+    {
+        float minDepth = float.MaxValue;
+        foreach (var dir in new[] {
+            Vector3.right, Vector3.left,
+            Vector3.up,    Vector3.down,
+            Vector3.forward, Vector3.back })
+        {
+            int hits = 0;
+            float nearest = float.MaxValue;
+            for (int i = 0; i < tris.Length; i += 3)
+            {
+                if (RayTriangle(p, dir,
+                    wVerts[tris[i]], wVerts[tris[i+1]], wVerts[tris[i+2]],
+                    out float t, out _, out _) && t >= 0f)
+                {
+                    hits++;
+                    if (t < nearest) nearest = t;
+                }
+            }
+            if (hits % 2 == 1 && nearest < minDepth)
+                minDepth = nearest;
+        }
+        return minDepth == float.MaxValue ? 0f : minDepth;
     }
 
     static float Cross2D(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
@@ -698,6 +773,62 @@ public class JointAssistWindow : EditorWindow
         if (Mathf.Abs(denom) < 1e-10f) return (p1 + p2) * 0.5f;
         float t = Cross2D(p3 - p1, d2) / denom;
         return p1 + t * d1;
+    }
+
+    // For each SP pair across the two sides whose bounds intersect, collect all
+    // triangles from A whose centroid is inside B's bounds, and vice versa.
+    List<Vector3[]> FindCollisionTris(GameObject[] sel)
+    {
+        var result = new List<Vector3[]>();
+        var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
+        if (sidesFilters.Count < 2) return result;
+
+        foreach (var mfA in sidesFilters[0])
+        {
+            if (mfA.sharedMesh == null) continue;
+            var meshA  = mfA.sharedMesh;
+            var vertsA = meshA.vertices;
+            var trisA  = meshA.triangles;
+            var mA     = mfA.transform.localToWorldMatrix;
+            var boundsA = TransformBoundsToWorld(mA, meshA.bounds);
+
+            foreach (var mfB in sidesFilters[1])
+            {
+                if (mfB.sharedMesh == null) continue;
+                var meshB  = mfB.sharedMesh;
+                var vertsB = meshB.vertices;
+                var trisB  = meshB.triangles;
+                var mB     = mfB.transform.localToWorldMatrix;
+                var boundsB = TransformBoundsToWorld(mB, meshB.bounds);
+
+                if (!boundsA.Intersects(boundsB)) continue;
+
+                // Pre-transform B and A verts for ray-cast inside test
+                var wVertsB = new Vector3[vertsB.Length];
+                for (int i = 0; i < vertsB.Length; i++) wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
+                var wVertsA = new Vector3[vertsA.Length];
+                for (int i = 0; i < vertsA.Length; i++) wVertsA[i] = mA.MultiplyPoint3x4(vertsA[i]);
+
+                for (int i = 0; i < trisA.Length; i += 3)
+                {
+                    Vector3 w0 = wVertsA[trisA[i]], w1 = wVertsA[trisA[i+1]], w2 = wVertsA[trisA[i+2]];
+                    Vector3 c = (w0 + w1 + w2) / 3f;
+                    if (!boundsB.Contains(c)) continue;
+                    if (PointMeshDepth(c, wVertsB, trisB) > compatCollisionThreshold)
+                        result.Add(new Vector3[] { w0, w1, w2 });
+                }
+
+                for (int i = 0; i < trisB.Length; i += 3)
+                {
+                    Vector3 w0 = wVertsB[trisB[i]], w1 = wVertsB[trisB[i+1]], w2 = wVertsB[trisB[i+2]];
+                    Vector3 c = (w0 + w1 + w2) / 3f;
+                    if (!boundsA.Contains(c)) continue;
+                    if (PointMeshDepth(c, wVertsA, trisA) > compatCollisionThreshold)
+                        result.Add(new Vector3[] { w0, w1, w2 });
+                }
+            }
+        }
+        return result;
     }
 
     static List<MeshFilter> CollectSPMeshFilters(GameObject go)
@@ -738,52 +869,103 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.HelpBox(r.message, msgType);
     }
 
-    void DrawCompatMeshResult()
+
+    void DrawPickedFaceHighlight(PickedFace? face, Color outline, Color fill)
     {
-        if (compatMesh.state == CompatResult.State.None) return;
+        if (!face.HasValue || face.Value.source == null) return;
+        var f = face.Value;
+        // Recompute current world normal from stored local normal
+        Vector3 wn = f.source.transform.localToWorldMatrix.MultiplyVector(f.localNormal).normalized;
+        const float normalTol = 0.15f;
+        const float distTol   = 0.01f;
 
-        // Draw verdict helpbox
-        var msgType = compatMesh.state == CompatResult.State.Pass ? MessageType.Info
-                    : compatMesh.state == CompatResult.State.Warn ? MessageType.Warning
-                    : MessageType.Error;
-        EditorGUILayout.HelpBox(compatMesh.message, msgType);
-
-        if (compatMeshDist == float.MaxValue) return;
-
-        // Distance row with colored number and select button
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.PrefixLabel("Closest face pair");
-        var prevColor = GUI.color;
-        GUI.color = compatMeshOverlap ? new Color(1f, 0.35f, 0.35f) : Color.white;
-        GUILayout.Label($"{compatMeshDist * 100f:F2} cm{(compatMeshOverlap ? "  ⚠ overlapping" : "")}", EditorStyles.boldLabel);
-        GUI.color = prevColor;
-        using (new EditorGUI.DisabledScope(compatMeshGoA == null || compatMeshGoB == null))
+        foreach (var mf in f.source.GetComponentsInChildren<MeshFilter>())
         {
-            if (GUILayout.Button("Select", GUILayout.Width(52)))
-                Selection.objects = new Object[] { compatMeshGoA, compatMeshGoB };
-        }
-        EditorGUILayout.EndHorizontal();
+            if (mf.sharedMesh == null) continue;
+            var mesh    = mf.sharedMesh;
+            var tris    = mesh.triangles;
+            var verts   = mesh.vertices;
+            var normals = mesh.normals;
+            var m       = mf.transform.localToWorldMatrix;
 
-        var miniStyle = EditorStyles.miniLabel;
-        EditorGUILayout.LabelField($"  A: {compatMeshCenterA:F3}  n={compatMeshNormalA:F2}", miniStyle);
-        EditorGUILayout.LabelField($"  B: {compatMeshCenterB:F3}  n={compatMeshNormalB:F2}", miniStyle);
+            for (int ti = 0; ti < tris.Length; ti += 3)
+            {
+                Vector3 lv0 = verts[tris[ti]], lv1 = verts[tris[ti+1]], lv2 = verts[tris[ti+2]];
+                Vector3 ln  = normals.Length > 0
+                    ? ((normals[tris[ti]] + normals[tris[ti+1]] + normals[tris[ti+2]]) / 3f).normalized
+                    : Vector3.Cross(lv1 - lv0, lv2 - lv0).normalized;
+                Vector3 triWn = m.MultiplyVector(ln).normalized;
+                if (Vector3.Dot(triWn, wn) < 1f - normalTol) continue;
+
+                Vector3 wv0 = m.MultiplyPoint3x4(lv0);
+                Vector3 wv1 = m.MultiplyPoint3x4(lv1);
+                Vector3 wv2 = m.MultiplyPoint3x4(lv2);
+                Vector3 center = (wv0 + wv1 + wv2) / 3f;
+                if (Mathf.Abs(Vector3.Dot(center - f.point, wn)) > distTol) continue;
+
+                Handles.color = fill;
+                Handles.DrawAAConvexPolygon(wv0, wv1, wv2);
+                Handles.color = outline;
+                Handles.DrawLine(wv0, wv1);
+                Handles.DrawLine(wv1, wv2);
+                Handles.DrawLine(wv2, wv0);
+            }
+        }
     }
 
     // ── Scene picking ─────────────────────────────────────────────────────────
 
     void OnSceneGUI(SceneView sv)
     {
-        // Draw the winning overlap polygon from the last compatibility check
-        if (compatOverlapPoly != null && compatOverlapPoly.Length >= 3)
+        // Draw all joint polygons from the last compatibility check
+        if (showJointPolygons && jointPolygons != null)
         {
             var prevColor = Handles.color;
-            Handles.color = new Color(0.2f, 1f, 0.4f, 0.35f);
-            Handles.DrawAAConvexPolygon(compatOverlapPoly);
-            Handles.color = new Color(0.2f, 1f, 0.4f, 1f);
-            for (int i = 0; i < compatOverlapPoly.Length; i++)
-                Handles.DrawLine(compatOverlapPoly[i], compatOverlapPoly[(i + 1) % compatOverlapPoly.Length]);
+            foreach (var poly in jointPolygons)
+            {
+                if (poly == null || poly.Length < 3) continue;
+                Handles.color = new Color(0.2f, 1f, 0.4f, 0.35f);
+                Handles.DrawAAConvexPolygon(poly);
+                Handles.color = new Color(0.2f, 1f, 0.4f, 1f);
+                for (int i = 0; i < poly.Length; i++)
+                    Handles.DrawLine(poly[i], poly[(i + 1) % poly.Length]);
+            }
             Handles.color = prevColor;
         }
+
+        // Draw collision triangles (red) — triangles from each SP that are inside the other's bounds
+        if (showJointPolygons && collisionTris != null && collisionTris.Count > 0)
+        {
+            var prevColor = Handles.color;
+            Handles.color = new Color(1f, 0.15f, 0.15f, 0.4f);
+            foreach (var tri in collisionTris)
+                Handles.DrawAAConvexPolygon(tri);
+            Handles.color = new Color(1f, 0.15f, 0.15f, 0.8f);
+            foreach (var tri in collisionTris)
+            {
+                Handles.DrawLine(tri[0], tri[1]);
+                Handles.DrawLine(tri[1], tri[2]);
+                Handles.DrawLine(tri[2], tri[0]);
+            }
+            Handles.color = prevColor;
+        }
+
+        // Draw picked face highlights and crosshair dots
+        var prevC = Handles.color;
+        DrawPickedFaceHighlight(snapFaceA, kFaceColorA, kFaceColorAFill);
+        DrawPickedFaceHighlight(snapFaceB, kFaceColorB, kFaceColorBFill);
+        Handles.color = new Color(0.6f, 0.6f, 0.6f, 1f);
+        if (snapHitAValid && snapFaceA.HasValue)
+        {
+            Vector3 dotA = snapPointModeA ? GetFacePoint(snapFaceA.Value, true) : snapHitA;
+            Handles.DrawSolidDisc(dotA, sv.camera.transform.forward, HandleUtility.GetHandleSize(dotA) * 0.04f);
+        }
+        if (snapHitBValid && snapFaceB.HasValue)
+        {
+            Vector3 dotB = snapPointModeB ? GetFacePoint(snapFaceB.Value, true) : snapHitB;
+            Handles.DrawSolidDisc(dotB, sv.camera.transform.forward, HandleUtility.GetHandleSize(dotB) * 0.04f);
+        }
+        Handles.color = prevC;
 
         bool anyPicking = pickingCutPoint || pickingSnapFace != 0;
         if (!anyPicking) return;
@@ -861,8 +1043,8 @@ public class JointAssistWindow : EditorWindow
                     // Store the normal in local space so it updates when the object rotates
                     Vector3 localNormal = picked.transform.worldToLocalMatrix.MultiplyVector(hitNormal);
                     var pf = new PickedFace { point = hitPoint, normal = hitNormal, source = picked, localNormal = localNormal };
-                    if (slot == 1) snapFaceA = pf;
-                    else           snapFaceB = pf;
+                    if (slot == 1) { snapFaceA = pf; snapHitA = hitPoint; snapHitAValid = true; }
+                    else           { snapFaceB = pf; snapHitB = hitPoint; snapHitBValid = true; }
                     statusMessage = $"Face {(slot == 1 ? "A" : "B")} picked on '{picked.name}'.";
                     statusType    = MessageType.Info;
                 }
@@ -1115,7 +1297,7 @@ public class JointAssistWindow : EditorWindow
         moveRoot.rotation = newRot;
         moveRoot.position = newPos;
 
-        statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm overlap).";
+        statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm {(overlap > 0 ? "gap" : overlap < 0 ? "overlap" : "flush")}).";
         statusType    = MessageType.Info;
         Repaint();
     }
