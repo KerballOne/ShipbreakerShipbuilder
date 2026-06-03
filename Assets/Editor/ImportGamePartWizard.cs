@@ -329,8 +329,8 @@ public class ImportGamePartWizard : EditorWindow
         GUILayout.Label("Search Game Library", EditorStyles.boldLabel);
 
         // Row 1: mode + search field + search button + regex + prefabs only + history nav
-        m_NavigatedThisFrame = false;
-        m_SearchPending      = false;
+        // NOTE: don't reset m_SearchPending / m_NavigatedThisFrame here — they're set on a non-Layout
+        // event (KeyDown / MouseDown) and must survive until the following Layout pass consumes them.
         EditorGUILayout.BeginHorizontal();
         var newMode    = (SearchMode)EditorGUILayout.EnumPopup(m_SearchMode, GUILayout.Width(110));
         // Reserve layout space, then draw TextField manually so we control Return handling
@@ -395,18 +395,26 @@ public class ImportGamePartWizard : EditorWindow
         m_PrefabsOnly = newPrefabs;
         m_UseRegex    = newRegex;
 
+        // Track typed text on every non-Layout event (GUI.TextField returns the live buffer there).
+        // Don't touch m_Search during Layout (newSearch == m_Search then), and don't fight history nav.
+        if (Event.current.type != EventType.Layout && !m_NavigatedThisFrame)
+            m_Search = newSearch;
+
+        // A search/nav was triggered on a non-Layout event — ensure a Layout pass runs to consume it.
+        if ((m_SearchPending || m_NavigatedThisFrame) && Event.current.type != EventType.Layout)
+            Repaint();
+
+        // Trigger rebuilds only during Layout so control counts stay consistent between Layout/Repaint.
         if (Event.current.type == EventType.Layout)
         {
             if (m_NavigatedThisFrame)
             {
-                m_SearchMode = newMode;
+                // m_Search / m_SearchMode were already set by NavigateHistory; don't overwrite with stale popup value.
                 m_LastSearch = m_Search;
                 RebuildResults();
-                Repaint();
             }
             else if (m_SearchPending)
             {
-                m_Search     = newSearch;
                 m_SearchMode = newMode;
                 m_LastSearch = m_Search;
                 RebuildResults();
@@ -417,10 +425,9 @@ public class ImportGamePartWizard : EditorWindow
                 m_LastSearch = m_Search;
                 RebuildResults();
             }
-            else
-            {
-                m_Search = newSearch;
-            }
+            // Consume the one-shot flags now that the Layout pass has handled them.
+            m_NavigatedThisFrame = false;
+            m_SearchPending      = false;
         }
 
 
