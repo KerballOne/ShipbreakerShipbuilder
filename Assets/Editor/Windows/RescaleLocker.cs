@@ -77,6 +77,21 @@ public static class RescaleLocker
         Undo.SetCurrentGroupName("Lock In Rescale");
         int group = Undo.GetCurrentGroup();
 
+        // Bottom-up: LIR any child that carries its own localScale before baking the root's scale,
+        // so the root bake sees already-unit-scale children and positions are consistent.
+        LockRescaleChildren(root.transform);
+
+        int baked = LockRescaleSelf(root);
+
+        Undo.CollapseUndoOperations(group);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        return baked;
+    }
+
+    static int LockRescaleSelf(GameObject root)
+    {
         var restoreLog = new System.Text.StringBuilder();
         restoreLog.AppendLine("[LockInRescale] Restore map (GameObject path → original mesh asset path):");
 
@@ -130,13 +145,20 @@ public static class RescaleLocker
         }
 
         Debug.Log(restoreLog.ToString());
-
-        Undo.CollapseUndoOperations(group);
-        AssetDatabase.SaveAssets();
-        AssetDatabase.Refresh();
-
         Debug.Log($"[LockInRescale] Baked {bakedCount} mesh(es) on '{root.name}'.");
         return bakedCount;
+    }
+
+    // Recursively LIR children that have their own non-unit localScale, bottom-up, before the
+    // parent bake runs. This ensures the root's bake matrix only needs to account for the root's
+    // own scale, not a compounded child scale.
+    static void LockRescaleChildren(Transform t)
+    {
+        foreach (Transform child in t)
+            LockRescaleChildren(child);
+
+        if (IsNonUnitScale(t) && t.parent != null && CountAffected(t) > 0)
+            LockRescaleSelf(t.gameObject);
     }
 
     static string ResolveSaveFolder(GameObject root)
