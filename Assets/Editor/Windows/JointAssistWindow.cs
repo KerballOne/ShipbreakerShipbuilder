@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Newtonsoft.Json;
 using UnityEngine;
 using UnityEditor;
 
@@ -28,6 +30,28 @@ public class JointAssistWindow : EditorWindow
     GameObject invisibleJointPrefab;
     float autoOverlapThreshold = 0.02f;
     float autoDedupRadius      = 0.05f;
+
+    // Joint compatibility check state
+    float compatMeshThreshold = 0.02f;
+
+    struct CompatResult
+    {
+        public enum State { None, Pass, Warn, Fail }
+        public State state;
+        public string message;
+    }
+    CompatResult compatSPMat   = new CompatResult { state = CompatResult.State.None };
+    CompatResult compatMJC     = new CompatResult { state = CompatResult.State.None };
+    CompatResult compatMesh    = new CompatResult { state = CompatResult.State.None };
+    float        compatMeshDist = float.MaxValue;
+    bool         compatMeshOverlap = false;
+    GameObject   compatMeshGoA, compatMeshGoB;
+    Vector3      compatMeshCenterA, compatMeshCenterB;
+    Vector3      compatMeshNormalA, compatMeshNormalB;
+    Vector3[]    compatOverlapPoly; // world-space vertices of the winning overlap polygon
+
+    // jsa_compat.json: key = "JsaName1|JsaName2" (sorted), value = true/false
+    Dictionary<string, bool> jsaCompatTable;
 
     string statusMessage = "";
     MessageType statusType = MessageType.None;
@@ -207,7 +231,31 @@ public class JointAssistWindow : EditorWindow
         DrawSeparator();
         GUILayout.Space(8);
 
+        // ── Joint Compatibility ───────────────────────────────────────────────
+        GUILayout.Space(12);
+        DrawSeparator();
+        GUILayout.Space(8);
+
+        EditorGUILayout.LabelField("Joint Compatibility", EditorStyles.boldLabel);
+        EditorGUILayout.Space(4);
+
+        compatMeshThreshold = EditorGUILayout.FloatField("Mesh Proximity Threshold (m)", compatMeshThreshold);
+
+        int compatSel = Selection.gameObjects.Length;
+        using (new EditorGUI.DisabledScope(compatSel < 2))
+        {
+            if (GUILayout.Button($"Check Compatibility  ({compatSel} selected)", GUILayout.Height(30)))
+                RunCompatibilityCheck();
+        }
+
+        DrawCompatResult(compatSPMat,  "SP_Mat / JSA");
+        DrawCompatResult(compatMJC,    "MandatoryJointContainer");
+        DrawCompatMeshResult();
+
         // ── Scene Overlay ─────────────────────────────────────────────────────
+        GUILayout.Space(12);
+        DrawSeparator();
+        GUILayout.Space(8);
         EditorGUILayout.LabelField("Scene Overlay", EditorStyles.boldLabel);
         if (GUILayout.Button("Redraw", GUILayout.Height(28)))
         {
@@ -333,10 +381,410 @@ public class JointAssistWindow : EditorWindow
         }
     }
 
+    // ── Compatibility check ───────────────────────────────────────────────────
+
+    void RunCompatibilityCheck()
+    {
+        var sel = Selection.gameObjects;
+        if (sel.Length < 2) return;
+
+        compatOverlapPoly = null;
+
+        // ── #1  SP_Mat / JSA ──────────────────────────────────────────────────
+        compatSPMat = CheckSPMatCompat(sel);
+
+        // ── #2  MandatoryJointContainer ───────────────────────────────────────
+        compatMJC = CheckMJC(sel);
+
+        // ── #3  Mesh proximity ────────────────────────────────────────────────
+        (compatMesh, compatMeshDist, compatMeshOverlap) = CheckMeshProximity(sel);
+
+        Repaint();
+    }
+
+    // #1: Read AddressableSOLoader.refs[0] from each selected subtree, look up
+    // the asset name, then check against jsa_compat.json if available.
+    CompatResult CheckSPMatCompat(GameObject[] sel)
+    {
+        // Collect one SP_Mat GUID per side (first AddressableSOLoader.refs[0] found)
+        var guids = sel.Select(go => GetSPMatGuid(go)).ToList();
+        var names = guids.Select(g => GuidToAssetName(g)).ToList();
+
+        if (guids.All(g => g == null))
+            return new CompatResult { state = CompatResult.State.Warn, message = "SP_Mat: No AddressableSOLoader found on any selected object." };
+
+        // Build display string of what we found on each side
+        var sideLabels = sel.Zip(names, (go, n) => $"{go.name} → {n ?? "?"}").ToList();
+        string sides = string.Join("\n", sideLabels);
+
+        // Try JSA compat table
+        EnsureJsaCompatTable();
+        if (jsaCompatTable != null && guids.Count >= 2 && names[0] != null && names[1] != null)
+        {
+            // Strip .asset suffix, sort, look up
+            string a = StripAsset(names[0]), b = StripAsset(names[1]);
+            string key = string.Compare(a, b, System.StringComparison.Ordinal) <= 0 ? $"{a}|{b}" : $"{b}|{a}";
+            if (jsaCompatTable.TryGetValue(key, out bool compat))
+            {
+                var state = compat ? CompatResult.State.Pass : CompatResult.State.Fail;
+                string verdict = compat ? "Compatible" : "Incompatible — will NOT auto-joint";
+                return new CompatResult { state = state, message = $"SP_Mat: {verdict}\n{sides}" };
+            }
+            return new CompatResult { state = CompatResult.State.Warn, message = $"SP_Mat: Pair not in jsa_compat.json (run PartInfoLogger in-game to populate)\n{sides}" };
+        }
+
+        // No table — just report the names
+        string tableNote = jsaCompatTable == null
+            ? " (no jsa_compat.json — run PartInfoLogger in-game to get verdicts)"
+            : " (only one side found)";
+        return new CompatResult { state = CompatResult.State.Warn, message = $"SP_Mat:{tableNote}\n{sides}" };
+    }
+
+    static string GetSPMatGuid(GameObject go)
+    {
+        // Walk subtree for AddressableSOLoader; refs[0] is the SP_Mat GUID
+        foreach (var loader in go.GetComponentsInChildren<BBI.Unity.Game.AddressableSOLoader>(true))
+            if (loader.refs != null && loader.refs.Count > 0 && !string.IsNullOrEmpty(loader.refs[0]))
+                return loader.refs[0];
+        return null;
+    }
+
+    static string GuidToAssetName(string guid)
+    {
+        if (guid == null) return null;
+        var path = AssetDatabase.GUIDToAssetPath(guid);
+        if (!string.IsNullOrEmpty(path)) return Path.GetFileName(path);
+        // Fall back to known_assets.json lookup
+        var knownPath = Path.Combine(Application.dataPath, "..", "known_assets.json");
+        if (!File.Exists(knownPath)) return null;
+        try
+        {
+            var json = File.ReadAllText(knownPath);
+            // Fast string search for the GUID rather than a full parse
+            int idx = json.IndexOf(guid, System.StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            int colon = json.IndexOf(':', idx);
+            if (colon < 0) return null;
+            int q1 = json.IndexOf('"', colon + 1);
+            int q2 = json.IndexOf('"', q1 + 1);
+            if (q1 < 0 || q2 < 0) return null;
+            return Path.GetFileName(json.Substring(q1 + 1, q2 - q1 - 1));
+        }
+        catch { return null; }
+    }
+
+    void EnsureJsaCompatTable()
+    {
+        if (jsaCompatTable != null) return;
+        var path = Path.Combine(Application.dataPath, "..", "jsa_compat.json");
+        if (!File.Exists(path)) return;
+        try
+        {
+            jsaCompatTable = JsonConvert.DeserializeObject<Dictionary<string, bool>>(File.ReadAllText(path));
+        }
+        catch { }
+    }
+
+    static string StripAsset(string name)
+        => name != null && name.EndsWith(".asset", System.StringComparison.OrdinalIgnoreCase)
+            ? name.Substring(0, name.Length - 6) : name;
+
+    // #2: Both sides must share the same MandatoryJointContainer ancestor.
+    // Also accept: neither side has one (they'll rely on JSA pairing instead).
+    static CompatResult CheckMJC(GameObject[] sel)
+    {
+        var mjcPerSide = sel.Select(go =>
+            go.GetComponentInParent<BBI.Unity.Game.MandatoryJointContainer>()).ToList();
+
+        bool anyHasMJC = mjcPerSide.Any(m => m != null);
+        if (!anyHasMJC)
+            return new CompatResult { state = CompatResult.State.Pass, message = "MJC: Neither side has a MandatoryJointContainer — jointing via JSA pairing." };
+
+        // Check that all selected objects share the same MJC
+        var distinct = mjcPerSide.Where(m => m != null).Distinct().ToList();
+        if (distinct.Count == 1 && mjcPerSide.All(m => m == distinct[0]))
+            return new CompatResult { state = CompatResult.State.Pass, message = $"MJC: Shared — '{distinct[0].gameObject.name}' covers all selected parts." };
+
+        // Some have MJC, some don't, or they have different MJCs
+        var labels = sel.Zip(mjcPerSide, (go, m) =>
+            m != null ? $"{go.name} → {m.gameObject.name}" : $"{go.name} → none").ToList();
+        bool someMissing = mjcPerSide.Any(m => m == null);
+        string msg = someMissing
+            ? "MJC: Mismatch — some sides lack a MandatoryJointContainer."
+            : "MJC: Different containers — parts will NOT be mandatory-jointed together.";
+        return new CompatResult { state = CompatResult.State.Fail, message = $"{msg}\n{string.Join("\n", labels)}" };
+    }
+
+    // #3: Find the minimum face-center-to-plane distance across all StructurePart
+    // MeshFilter pairs between the two sides. Antiparallel normals only (faces pointing at each other).
+    (CompatResult result, float dist, bool overlap) CheckMeshProximity(GameObject[] sel)
+    {
+        // Gather StructurePart MeshFilters from each side
+        var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
+
+        if (sidesFilters.Count < 2 || sidesFilters[0].Count == 0 || sidesFilters[1].Count == 0)
+            return (new CompatResult { state = CompatResult.State.Warn,
+                message = "Mesh: No StructurePart MeshFilters found on one or both sides." }, float.MaxValue, false);
+
+        // Winner = largest overlapping area between antiparallel triangle pairs.
+        // Pairs with no tangential overlap are skipped entirely.
+        float bestArea   = -1f;
+        float winnerDist = float.MaxValue;
+        bool  overlap    = false;
+
+        var polyBuf = new List<Vector2>(8); // reused scratch buffer for SH clipping
+
+        foreach (var mfA in sidesFilters[0])
+        {
+            if (mfA.sharedMesh == null) continue;
+            var meshA  = mfA.sharedMesh;
+            var trisA  = meshA.triangles;
+            var vertsA = meshA.vertices;
+            var normsA = meshA.normals;
+            var mA     = mfA.transform.localToWorldMatrix;
+
+            foreach (var mfB in sidesFilters[1])
+            {
+                if (mfB.sharedMesh == null) continue;
+                var meshB  = mfB.sharedMesh;
+                var trisB  = meshB.triangles;
+                var vertsB = meshB.vertices;
+                var normsB = meshB.normals;
+                var mB     = mfB.transform.localToWorldMatrix;
+
+                for (int ia = 0; ia < trisA.Length; ia += 3)
+                {
+                    Vector3 wa0 = mA.MultiplyPoint3x4(vertsA[trisA[ia]]);
+                    Vector3 wa1 = mA.MultiplyPoint3x4(vertsA[trisA[ia+1]]);
+                    Vector3 wa2 = mA.MultiplyPoint3x4(vertsA[trisA[ia+2]]);
+                    Vector3 centerA = (wa0 + wa1 + wa2) / 3f;
+                    Vector3 lnA = normsA.Length > 0
+                        ? ((normsA[trisA[ia]] + normsA[trisA[ia+1]] + normsA[trisA[ia+2]]) / 3f).normalized
+                        : Vector3.Cross(vertsA[trisA[ia+1]] - vertsA[trisA[ia]], vertsA[trisA[ia+2]] - vertsA[trisA[ia]]).normalized;
+                    Vector3 wnA = mA.MultiplyVector(lnA).normalized;
+
+                    // Build a tangent frame on face A's plane
+                    Vector3 tanA  = Vector3.Cross(wnA, Mathf.Abs(wnA.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+                    Vector3 bitanA = Vector3.Cross(wnA, tanA).normalized;
+
+                    // Triangle A in 2D plane space
+                    Vector2 a0 = new Vector2(Vector3.Dot(wa0 - centerA, tanA), Vector3.Dot(wa0 - centerA, bitanA));
+                    Vector2 a1 = new Vector2(Vector3.Dot(wa1 - centerA, tanA), Vector3.Dot(wa1 - centerA, bitanA));
+                    Vector2 a2 = new Vector2(Vector3.Dot(wa2 - centerA, tanA), Vector3.Dot(wa2 - centerA, bitanA));
+
+                    for (int ib = 0; ib < trisB.Length; ib += 3)
+                    {
+                        Vector3 wb0 = mB.MultiplyPoint3x4(vertsB[trisB[ib]]);
+                        Vector3 wb1 = mB.MultiplyPoint3x4(vertsB[trisB[ib+1]]);
+                        Vector3 wb2 = mB.MultiplyPoint3x4(vertsB[trisB[ib+2]]);
+                        Vector3 centerB = (wb0 + wb1 + wb2) / 3f;
+                        Vector3 lnB = normsB.Length > 0
+                            ? ((normsB[trisB[ib]] + normsB[trisB[ib+1]] + normsB[trisB[ib+2]]) / 3f).normalized
+                            : Vector3.Cross(vertsB[trisB[ib+1]] - vertsB[trisB[ib]], vertsB[trisB[ib+2]] - vertsB[trisB[ib]]).normalized;
+                        Vector3 wnB = mB.MultiplyVector(lnB).normalized;
+
+                        // Antiparallel: faces must point toward each other
+                        if (Vector3.Dot(wnA, wnB) > -0.9f) continue;
+
+                        // Plane distance along A's normal
+                        float dAB = Mathf.Abs(Vector3.Dot(centerB - centerA, wnA));
+                        float dBA = Mathf.Abs(Vector3.Dot(centerA - centerB, wnB));
+                        float d = Mathf.Min(dAB, dBA);
+
+                        // Project B's verts onto A's plane and into A's 2D frame
+                        Vector2 b0 = new Vector2(Vector3.Dot(wb0 - centerA, tanA), Vector3.Dot(wb0 - centerA, bitanA));
+                        Vector2 b1 = new Vector2(Vector3.Dot(wb1 - centerA, tanA), Vector3.Dot(wb1 - centerA, bitanA));
+                        Vector2 b2 = new Vector2(Vector3.Dot(wb2 - centerA, tanA), Vector3.Dot(wb2 - centerA, bitanA));
+
+                        // Clip triangle B against triangle A using Sutherland-Hodgman
+                        float area = TriTriOverlapArea(a0, a1, a2, b0, b1, b2, polyBuf);
+                        if (area <= 0f) continue;
+
+                        // Score = area / (plane distance + 1mm): rewards large overlap AND proximity.
+                        // A flush touching pair always beats a distant coplanar pair of equal area.
+                        float score = area / (d + 0.001f);
+                        if (score > bestArea)
+                        {
+                            bestArea   = score;
+                            winnerDist = d;
+                            // overlap = B's center is behind A's face plane (penetrating)
+                            overlap = Vector3.Dot(centerB - centerA, wnA) < 0f;
+                            compatMeshGoA     = mfA.gameObject;
+                            compatMeshGoB     = mfB.gameObject;
+                            compatMeshCenterA = centerA;
+                            compatMeshCenterB = centerB;
+                            compatMeshNormalA = wnA;
+                            compatMeshNormalB = wnB;
+                            // Reconstruct polygon in world space from polyBuf (2D plane coords → 3D)
+                            compatOverlapPoly = new Vector3[polyBuf.Count];
+                            for (int pi = 0; pi < polyBuf.Count; pi++)
+                                compatOverlapPoly[pi] = centerA
+                                    + polyBuf[pi].x * tanA
+                                    + polyBuf[pi].y * bitanA;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bestArea < 0f)
+            return (new CompatResult { state = CompatResult.State.Warn,
+                message = "Mesh: No overlapping face pairs found between the two sides." }, float.MaxValue, false);
+
+        bool jointable = winnerDist <= compatMeshThreshold;
+        var state = jointable ? CompatResult.State.Pass : CompatResult.State.Fail;
+        string verdict = jointable ? "Within threshold — likely jointable" : "Too far apart — unlikely to joint";
+        return (new CompatResult { state = state, message = $"Mesh: {verdict}" }, winnerDist, overlap);
+    }
+
+    // Returns the area of the intersection polygon of two 2D triangles.
+    // Uses Sutherland-Hodgman: clip subject (B) against each edge of clip (A).
+    static float TriTriOverlapArea(Vector2 a0, Vector2 a1, Vector2 a2,
+                                   Vector2 b0, Vector2 b1, Vector2 b2,
+                                   List<Vector2> buf)
+    {
+        buf.Clear();
+        buf.Add(b0); buf.Add(b1); buf.Add(b2);
+
+        Vector2[] clip = { a0, a1, a2 };
+        var input = new List<Vector2>(8);
+
+        for (int e = 0; e < 3; e++)
+        {
+            if (buf.Count == 0) return 0f;
+            Vector2 edgeA = clip[e], edgeB = clip[(e + 1) % 3];
+            // Inside = left of directed edge (edgeA → edgeB)
+            input.Clear();
+            input.AddRange(buf);
+            buf.Clear();
+
+            for (int i = 0; i < input.Count; i++)
+            {
+                Vector2 cur  = input[i];
+                Vector2 prev = input[(i + input.Count - 1) % input.Count];
+                bool curIn  = Cross2D(edgeB - edgeA, cur  - edgeA) >= 0f;
+                bool prevIn = Cross2D(edgeB - edgeA, prev - edgeA) >= 0f;
+
+                if (curIn)
+                {
+                    if (!prevIn) buf.Add(LineIntersect2D(prev, cur, edgeA, edgeB));
+                    buf.Add(cur);
+                }
+                else if (prevIn)
+                {
+                    buf.Add(LineIntersect2D(prev, cur, edgeA, edgeB));
+                }
+            }
+        }
+
+        if (buf.Count < 3) return 0f;
+
+        // Shoelace area
+        float area = 0f;
+        for (int i = 0; i < buf.Count; i++)
+        {
+            Vector2 p = buf[i], q = buf[(i + 1) % buf.Count];
+            area += p.x * q.y - q.x * p.y;
+        }
+        return Mathf.Abs(area) * 0.5f;
+    }
+
+    static float Cross2D(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
+
+    static Vector2 LineIntersect2D(Vector2 p1, Vector2 p2, Vector2 p3, Vector2 p4)
+    {
+        Vector2 d1 = p2 - p1, d2 = p4 - p3;
+        float denom = Cross2D(d1, d2);
+        if (Mathf.Abs(denom) < 1e-10f) return (p1 + p2) * 0.5f;
+        float t = Cross2D(p3 - p1, d2) / denom;
+        return p1 + t * d1;
+    }
+
+    static List<MeshFilter> CollectSPMeshFilters(GameObject go)
+    {
+        var result = new List<MeshFilter>();
+        foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+        {
+            var mf = sp.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null)
+                result.Add(mf);
+        }
+        // Also check fake hierarchy (AddressableLoader children)
+        var loaders = new List<Transform>();
+        CollectTopLevelLoaders(go.transform, loaders);
+        foreach (var loader in loaders)
+        {
+            for (int c = 0; c < loader.childCount; c++)
+            {
+                var ch = loader.GetChild(c);
+                if (ch.GetComponent<FakePrefabDisplay>() == null && ch.GetComponent<SelectAddressableParent>() == null) continue;
+                foreach (var sp in ch.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+                {
+                    var mf = sp.GetComponent<MeshFilter>();
+                    if (mf != null && mf.sharedMesh != null && !result.Contains(mf))
+                        result.Add(mf);
+                }
+            }
+        }
+        return result;
+    }
+
+    void DrawCompatResult(CompatResult r, string _)
+    {
+        if (r.state == CompatResult.State.None) return;
+        var msgType = r.state == CompatResult.State.Pass ? MessageType.Info
+                    : r.state == CompatResult.State.Warn ? MessageType.Warning
+                    : MessageType.Error;
+        EditorGUILayout.HelpBox(r.message, msgType);
+    }
+
+    void DrawCompatMeshResult()
+    {
+        if (compatMesh.state == CompatResult.State.None) return;
+
+        // Draw verdict helpbox
+        var msgType = compatMesh.state == CompatResult.State.Pass ? MessageType.Info
+                    : compatMesh.state == CompatResult.State.Warn ? MessageType.Warning
+                    : MessageType.Error;
+        EditorGUILayout.HelpBox(compatMesh.message, msgType);
+
+        if (compatMeshDist == float.MaxValue) return;
+
+        // Distance row with colored number and select button
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel("Closest face pair");
+        var prevColor = GUI.color;
+        GUI.color = compatMeshOverlap ? new Color(1f, 0.35f, 0.35f) : Color.white;
+        GUILayout.Label($"{compatMeshDist * 100f:F2} cm{(compatMeshOverlap ? "  ⚠ overlapping" : "")}", EditorStyles.boldLabel);
+        GUI.color = prevColor;
+        using (new EditorGUI.DisabledScope(compatMeshGoA == null || compatMeshGoB == null))
+        {
+            if (GUILayout.Button("Select", GUILayout.Width(52)))
+                Selection.objects = new Object[] { compatMeshGoA, compatMeshGoB };
+        }
+        EditorGUILayout.EndHorizontal();
+
+        var miniStyle = EditorStyles.miniLabel;
+        EditorGUILayout.LabelField($"  A: {compatMeshCenterA:F3}  n={compatMeshNormalA:F2}", miniStyle);
+        EditorGUILayout.LabelField($"  B: {compatMeshCenterB:F3}  n={compatMeshNormalB:F2}", miniStyle);
+    }
+
     // ── Scene picking ─────────────────────────────────────────────────────────
 
     void OnSceneGUI(SceneView sv)
     {
+        // Draw the winning overlap polygon from the last compatibility check
+        if (compatOverlapPoly != null && compatOverlapPoly.Length >= 3)
+        {
+            var prevColor = Handles.color;
+            Handles.color = new Color(0.2f, 1f, 0.4f, 0.35f);
+            Handles.DrawAAConvexPolygon(compatOverlapPoly);
+            Handles.color = new Color(0.2f, 1f, 0.4f, 1f);
+            for (int i = 0; i < compatOverlapPoly.Length; i++)
+                Handles.DrawLine(compatOverlapPoly[i], compatOverlapPoly[(i + 1) % compatOverlapPoly.Length]);
+            Handles.color = prevColor;
+        }
+
         bool anyPicking = pickingCutPoint || pickingSnapFace != 0;
         if (!anyPicking) return;
 

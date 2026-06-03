@@ -29,15 +29,10 @@ public static class RescaleLockerContextMenu
         var s = t.localScale;
         string scaleStr = RescaleLocker.IsUniformScale(t) ? $"{s.x:F3}" : $"({s.x:F3}, {s.y:F3}, {s.z:F3})";
 
-        string warning = RescaleLocker.HasNonUniformScaleWithRotatedChildren(t)
-            ? "\n\nWARNING: non-uniform scale with rotated sub-meshes — rotated meshes may be SKEWED. " +
-              "Verify the result; scale uniformly if it distorts."
-            : "";
-
         if (!EditorUtility.DisplayDialog("Lock In Rescale",
                 $"Lock in the rescale {scaleStr} on '{t.name}' into mesh geometry?\n\n" +
                 $"{affected} mesh(es) below this object will be updated, and all transforms reset to (1,1,1) " +
-                "with child positions adjusted to preserve the layout." + warning,
+                "with child positions adjusted to preserve the layout.",
                 "Lock In", "Cancel"))
             return;
 

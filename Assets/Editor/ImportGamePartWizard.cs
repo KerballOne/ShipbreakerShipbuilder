@@ -50,6 +50,7 @@ public class ImportGamePartWizard : EditorWindow
     const int                  MaxSearchHistory = 20;
     bool                       m_NavigatedThisFrame = false;
     bool                       m_SearchPending      = false;
+    bool                       m_FiltersDirty       = false;
     string                     m_ActivePreviewKey   = null;
 
 
@@ -390,44 +391,35 @@ public class ImportGamePartWizard : EditorWindow
         if (!hasGameAssets)
             EditorGUILayout.HelpBox("No game assets loaded. Run  Shipbreaker → Reload Assets  to include game library parts.", MessageType.Warning);
 
-        bool filtersChanged = newPrefabs != m_PrefabsOnly || newMode != m_SearchMode
-                           || newRegex != m_UseRegex;
+        // Apply filter/mode changes immediately so they persist across the Layout/Repaint pass pair.
+        // Mark m_FiltersDirty when any of them actually changed so the next Layout pass rebuilds.
+        if (newPrefabs != m_PrefabsOnly || newRegex != m_UseRegex || newMode != m_SearchMode)
+            m_FiltersDirty = true;
         m_PrefabsOnly = newPrefabs;
         m_UseRegex    = newRegex;
+        m_SearchMode  = newMode;
 
         // Track typed text on every non-Layout event (GUI.TextField returns the live buffer there).
         // Don't touch m_Search during Layout (newSearch == m_Search then), and don't fight history nav.
         if (Event.current.type != EventType.Layout && !m_NavigatedThisFrame)
             m_Search = newSearch;
 
-        // A search/nav was triggered on a non-Layout event — ensure a Layout pass runs to consume it.
-        if ((m_SearchPending || m_NavigatedThisFrame) && Event.current.type != EventType.Layout)
+        // A search/nav/filter change happened on a non-Layout event — ensure a Layout pass runs to consume it.
+        if ((m_SearchPending || m_NavigatedThisFrame || m_FiltersDirty) && Event.current.type != EventType.Layout)
             Repaint();
 
         // Trigger rebuilds only during Layout so control counts stay consistent between Layout/Repaint.
         if (Event.current.type == EventType.Layout)
         {
-            if (m_NavigatedThisFrame)
+            if (m_NavigatedThisFrame || m_SearchPending || m_FiltersDirty || m_LastSearch == null)
             {
-                // m_Search / m_SearchMode were already set by NavigateHistory; don't overwrite with stale popup value.
-                m_LastSearch = m_Search;
-                RebuildResults();
-            }
-            else if (m_SearchPending)
-            {
-                m_SearchMode = newMode;
-                m_LastSearch = m_Search;
-                RebuildResults();
-            }
-            else if (filtersChanged || m_LastSearch == null)
-            {
-                m_SearchMode = newMode;
                 m_LastSearch = m_Search;
                 RebuildResults();
             }
             // Consume the one-shot flags now that the Layout pass has handled them.
             m_NavigatedThisFrame = false;
             m_SearchPending      = false;
+            m_FiltersDirty       = false;
         }
 
 

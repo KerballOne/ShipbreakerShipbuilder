@@ -131,13 +131,6 @@ public class AddressableComponentLoaderEditor : Editor
             "resets to (1,1,1) and child positions are adjusted to keep the layout.",
             MessageType.Info);
 
-        if (RescaleLocker.HasNonUniformScaleWithRotatedChildren(t))
-            EditorGUILayout.HelpBox(
-                "Non-uniform scale with rotated sub-meshes detected. This may SKEW rotated meshes " +
-                "(non-uniform scale only composes cleanly through rotation when scaling along the " +
-                "rotation axis). Verify the result; if skewed, scale uniformly instead.",
-                MessageType.Warning);
-
         using (new EditorGUI.DisabledScope(affected == 0))
         {
             if (GUILayout.Button("Lock In Rescale"))
