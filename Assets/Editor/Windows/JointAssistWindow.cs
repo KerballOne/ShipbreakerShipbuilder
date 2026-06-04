@@ -427,6 +427,10 @@ public class JointAssistWindow : EditorWindow
         jointPolygons = null;
         collisionTris = null;
         showJointPolygons = false;
+        // Re-read data files each check so in-game updates are picked up without reopening the window
+        enrichedJsaMap = null;
+        jsaCompatTable = null;
+        knownAssetsMap = null;
 
         // ── #1  SP_Mat / JSA ──────────────────────────────────────────────────
         compatSPMat = CheckSPMatCompat(sel);
@@ -449,75 +453,189 @@ public class JointAssistWindow : EditorWindow
         Repaint();
     }
 
-    // #1: Read AddressableSOLoader.refs[0] from each selected subtree, look up
-    // the asset name, then check against jsa_compat.json if available.
+    // #1: Collect all MeshFilters (SPs) from each side, resolve JSA per SP via its
+    // nearest prefab root name, then check all A×B JSA pairs against jsa_compat.json.
     CompatResult CheckSPMatCompat(GameObject[] sel)
     {
-        // Collect one SP_Mat GUID per side (first AddressableSOLoader.refs[0] found)
-        var guids = sel.Select(go => GetSPMatGuid(go)).ToList();
-        var names = guids.Select(g => GuidToAssetName(g)).ToList();
-
-        if (guids.All(g => g == null))
-            return new CompatResult { state = CompatResult.State.Warn, message = "SP_Mat: No AddressableSOLoader found on any selected object." };
-
-        // Build display string of what we found on each side
-        var sideLabels = sel.Zip(names, (go, n) => $"{go.name} → {n ?? "?"}").ToList();
-        string sides = string.Join("\n", sideLabels);
-
-        // Try JSA compat table
+        EnsureEnrichedData();
         EnsureJsaCompatTable();
-        if (jsaCompatTable != null && guids.Count >= 2 && names[0] != null && names[1] != null)
+
+        var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
+        if (sidesFilters.Count < 2)
+            return new CompatResult { state = CompatResult.State.Warn, message = "SP_Mat: Need at least 2 selected objects." };
+
+        // Resolve unique JSA names per side
+        var jsasA = sidesFilters[0].Select(mf => GetJsaNameFromMF(mf)).Where(j => j != null).Distinct().ToList();
+        var jsasB = sidesFilters[1].Select(mf => GetJsaNameFromMF(mf)).Where(j => j != null).Distinct().ToList();
+
+        if (jsasA.Count == 0 && jsasB.Count == 0)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = "SP_Mat: Could not determine JSA for any SP in either selection.\nRun PartInfoLogger in-game with these parts loaded." };
+
+        string labelA = jsasA.Count > 0 ? string.Join(", ", jsasA) : "?";
+        string labelB = jsasB.Count > 0 ? string.Join(", ", jsasB) : "?";
+        string sides = $"{sel[0].name} → {labelA}\n{sel[1].name} → {labelB}";
+
+        if (jsaCompatTable == null)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = $"SP_Mat: No jsa_compat.json\n{sides}" };
+
+        if (jsasA.Count == 0 || jsasB.Count == 0)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = $"SP_Mat: JSA unknown for one side — load more ship types in-game\n{sides}" };
+
+        // Check all pairs — any compatible pair means jointing can occur
+        bool anyCompat = false, anyIncompat = false, anyUnknown = false;
+        foreach (var a in jsasA)
         {
-            // Strip .asset suffix, sort, look up
-            string a = StripAsset(names[0]), b = StripAsset(names[1]);
-            string key = string.Compare(a, b, System.StringComparison.Ordinal) <= 0 ? $"{a}|{b}" : $"{b}|{a}";
-            if (jsaCompatTable.TryGetValue(key, out bool compat))
+            foreach (var b in jsasB)
             {
-                var state = compat ? CompatResult.State.Pass : CompatResult.State.Fail;
-                string verdict = compat ? "Compatible" : "Incompatible — will NOT auto-joint";
-                return new CompatResult { state = state, message = $"SP_Mat: {verdict}\n{sides}" };
+                string key = string.Compare(a, b, System.StringComparison.Ordinal) <= 0 ? $"{a}|{b}" : $"{b}|{a}";
+                if (jsaCompatTable.TryGetValue(key, out bool compat))
+                { if (compat) anyCompat = true; else anyIncompat = true; }
+                else anyUnknown = true;
             }
-            return new CompatResult { state = CompatResult.State.Warn, message = $"SP_Mat: Pair not in jsa_compat.json (run PartInfoLogger in-game to populate)\n{sides}" };
         }
 
-        // No table — just report the names
-        string tableNote = jsaCompatTable == null
-            ? " (no jsa_compat.json — run PartInfoLogger in-game to get verdicts)"
-            : " (only one side found)";
-        return new CompatResult { state = CompatResult.State.Warn, message = $"SP_Mat:{tableNote}\n{sides}" };
+        if (anyCompat)
+            return new CompatResult { state = CompatResult.State.Pass, message = $"SP_Mat: Compatible — will auto-joint\n{sides}" };
+        if (anyIncompat && !anyUnknown)
+            return new CompatResult { state = CompatResult.State.Fail, message = $"SP_Mat: Incompatible — will NOT auto-joint\n{sides}" };
+        return new CompatResult { state = CompatResult.State.Warn,
+            message = $"SP_Mat: Some pairs not in jsa_compat.json — load more ship types\n{sides}" };
     }
 
-    static string GetSPMatGuid(GameObject go)
+    // Resolve JSA name for the SP that owns this MeshFilter, by walking up to
+    // its nearest prefab instance root and matching against enriched data.
+    string GetJsaNameFromMF(MeshFilter mf) => GetJsaName(mf.gameObject);
+
+    // Try to resolve JSA name for a GO via two paths:
+    // 1. AddressableSOLoader.refs[0] → SP_Mat GUID → enriched JSON jsaName (custom baked parts)
+    // 2. AddressableLoader.assetGUID → enriched JSON jsaName (game addressable parts)
+    string GetJsaName(GameObject go)
     {
-        // Walk subtree for AddressableSOLoader; refs[0] is the SP_Mat GUID
+        // Path 1: custom parts with AddressableSOLoader
         foreach (var loader in go.GetComponentsInChildren<BBI.Unity.Game.AddressableSOLoader>(true))
-            if (loader.refs != null && loader.refs.Count > 0 && !string.IsNullOrEmpty(loader.refs[0]))
-                return loader.refs[0];
+        {
+            if (loader.refs == null || loader.refs.Count == 0 || string.IsNullOrEmpty(loader.refs[0])) continue;
+            var jsa = EnrichedJsaName(loader.refs[0]);
+            if (jsa != null) return jsa;
+        }
+
+        // Path 2: game addressable parts — walk up to find AddressableLoader
+        for (var t = go.transform; t != null; t = t.parent)
+        {
+            if (!t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out var al)) continue;
+            if (string.IsNullOrEmpty(al.assetGUID)) continue;
+            var jsa = EnrichedJsaName(al.assetGUID);
+            if (jsa != null) return jsa;
+            break;
+        }
+
+        // Path 3: walk up to the nearest prefab instance root matching names against enriched partName.
+        // Only walks if GO is inside a prefab — plain scene GOs don't walk at all.
+        var nearestPrefabRoot = PrefabUtility.GetNearestPrefabInstanceRoot(go);
+        if (nearestPrefabRoot != null && enrichedJsaByName != null)
+        {
+            for (var t = go.transform; t != null; t = t.parent)
+            {
+                string n = System.Text.RegularExpressions.Regex.Replace(t.name, @"\s*\(\d+\)$", "").Trim();
+                n = n.Replace("_Baked", "");
+                if (enrichedJsaByName.TryGetValue(n, out var jsaByName))
+                {
+                    return jsaByName;
+                }
+                if (t == nearestPrefabRoot.transform) break; // checked root, stop
+            }
+
+            // Path 4: for each ancestor up to nearestPrefabRoot, check if it is itself
+            // a prefab instance root and look up its asset GUID → original addressable name.
+            // This handles renamed baked prefabs at any depth (direct parent or grandparent).
+            // Collect all prefab instance roots from go up to (and including) nearestPrefabRoot
+            var rootsToCheck = new HashSet<GameObject>();
+            for (var t = go.transform; t != null; t = t.parent)
+            {
+                var r = PrefabUtility.GetNearestPrefabInstanceRoot(t.gameObject);
+                if (r != null) rootsToCheck.Add(r);
+                if (t == nearestPrefabRoot.transform) break;
+            }
+            foreach (var checkRoot in rootsToCheck)
+            {
+                // Use GetPrefabAssetPathOfNearestInstanceRoot to get the actual prefab asset path,
+                // not GetCorrespondingObjectFromSource which follows the override chain to the parent prefab.
+                var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(checkRoot);
+                if (string.IsNullOrEmpty(assetPath)) continue;
+                var prefabGuid = AssetDatabase.AssetPathToGUID(assetPath);
+                string assetFileName = Path.GetFileNameWithoutExtension(assetPath);
+                string n = (KnownAssetName(prefabGuid) ?? assetFileName).Replace("_Baked", "");
+                if (enrichedJsaByName.TryGetValue(n, out var jsaByName))
+                    return jsaByName;
+            }
+        }
+
         return null;
     }
 
-    static string GuidToAssetName(string guid)
+    // Cache for known_assets.json guid→name lookups
+    Dictionary<string, string> knownAssetsMap;
+
+    string KnownAssetName(string guid)
     {
-        if (guid == null) return null;
-        var path = AssetDatabase.GUIDToAssetPath(guid);
-        if (!string.IsNullOrEmpty(path)) return Path.GetFileName(path);
-        // Fall back to known_assets.json lookup
-        var knownPath = Path.Combine(Application.dataPath, "..", "known_assets.json");
-        if (!File.Exists(knownPath)) return null;
+        if (string.IsNullOrEmpty(guid)) return null;
+        if (knownAssetsMap == null)
+        {
+            knownAssetsMap = new Dictionary<string, string>();
+            var path = Path.Combine(Application.dataPath, "..", "known_assets.json");
+            if (File.Exists(path))
+            {
+                try
+                {
+                    var raw = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+                    if (raw != null)
+                        foreach (var kv in raw)
+                            knownAssetsMap[kv.Key] = Path.GetFileNameWithoutExtension(kv.Value);
+                }
+                catch { }
+            }
+        }
+        knownAssetsMap.TryGetValue(guid, out var name);
+        return name;
+    }
+
+    // enriched JSON lookups: guid → jsaName, partName → jsaName
+    Dictionary<string, string> enrichedJsaMap;     // guid → jsaName
+    Dictionary<string, string> enrichedJsaByName;  // partName (lowercase) → jsaName
+
+    void EnsureEnrichedData()
+    {
+        if (enrichedJsaMap != null) return;
+        enrichedJsaMap    = new Dictionary<string, string>();
+        enrichedJsaByName = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+        var path = Path.Combine(Application.dataPath, "..", "known_assets_enriched.json");
+        if (!File.Exists(path)) return;
         try
         {
-            var json = File.ReadAllText(knownPath);
-            // Fast string search for the GUID rather than a full parse
-            int idx = json.IndexOf(guid, System.StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) return null;
-            int colon = json.IndexOf(':', idx);
-            if (colon < 0) return null;
-            int q1 = json.IndexOf('"', colon + 1);
-            int q2 = json.IndexOf('"', q1 + 1);
-            if (q1 < 0 || q2 < 0) return null;
-            return Path.GetFileName(json.Substring(q1 + 1, q2 - q1 - 1));
+            var raw = JsonConvert.DeserializeObject<Dictionary<string, Newtonsoft.Json.Linq.JObject>>(File.ReadAllText(path));
+            if (raw == null) return;
+            foreach (var kv in raw)
+            {
+                var jsaTok = kv.Value["jsaName"];
+                var jsa = jsaTok != null ? jsaTok.ToString() : null;
+                if (string.IsNullOrEmpty(jsa)) continue;
+                enrichedJsaMap[kv.Key] = jsa!;
+                var nameTok = kv.Value["partName"];
+                if (nameTok != null && !string.IsNullOrEmpty(nameTok.ToString()))
+                    enrichedJsaByName[nameTok.ToString()] = jsa!;
+            }
         }
-        catch { return null; }
+        catch { }
+    }
+
+    string EnrichedJsaName(string guid)
+    {
+        if (enrichedJsaMap == null) return null;
+        enrichedJsaMap.TryGetValue(guid, out var name);
+        return name;
     }
 
     void EnsureJsaCompatTable()
@@ -525,16 +643,9 @@ public class JointAssistWindow : EditorWindow
         if (jsaCompatTable != null) return;
         var path = Path.Combine(Application.dataPath, "..", "jsa_compat.json");
         if (!File.Exists(path)) return;
-        try
-        {
-            jsaCompatTable = JsonConvert.DeserializeObject<Dictionary<string, bool>>(File.ReadAllText(path));
-        }
+        try { jsaCompatTable = JsonConvert.DeserializeObject<Dictionary<string, bool>>(File.ReadAllText(path)); }
         catch { }
     }
-
-    static string StripAsset(string name)
-        => name != null && name.EndsWith(".asset", System.StringComparison.OrdinalIgnoreCase)
-            ? name.Substring(0, name.Length - 6) : name;
 
     // #2: Both sides must share the same MandatoryJointContainer ancestor.
     // Also accept: neither side has one (they'll rely on JSA pairing instead).
