@@ -124,6 +124,10 @@ public static class AddressableBaker
         List<(Component, string, string)> spMatRefs,
         Dictionary<string, string> overridesByPath)
     {
+        // Room Probe objects are transform-only markers with degenerate scale (Z=0) that produce
+        // invalid AABBs and have no components worth baking — skip them entirely.
+        if (inT.name == "Room Probe") return;
+
         var node = new GameObject(inT.name);
         node.transform.SetParent(outParent, false);
         node.transform.localPosition = inT.localPosition;

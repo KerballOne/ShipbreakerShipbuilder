@@ -1230,6 +1230,8 @@ public class ImportGamePartWizard : EditorWindow
                 var spMatRefs = new List<(Component component, string field, string guid)>();
                 AddressableBaker.BakeTree(source, root.transform, assetFolder, spMatRefs);
 
+                RecenterChildren(root.transform);
+
                 if (spMatRefs.Count > 0)
                 {
                     var acl = root.AddComponent<AddressableComponentLoader>();
@@ -1267,6 +1269,45 @@ public class ImportGamePartWizard : EditorWindow
             ? $"Baked {created.Count} prefab(s); {failed} failed. Saved to {prefabsRoot}/"
             : $"Baked {created.Count} prefab(s) to {prefabsRoot}/";
         Repaint();
+    }
+
+    // Shifts all immediate children so their bounding-box center lands at the root origin.
+    static void RecenterChildren(Transform root)
+    {
+        if (root.childCount == 0) return;
+
+        // Compute bounds in root-local space using renderer bounds converted to local space.
+        bool   hasB   = false;
+        Bounds bounds = default;
+        foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+        {
+            // Convert world bounds corners to root-local space.
+            var wb = r.bounds;
+            foreach (var corner in new[]
+            {
+                wb.min,
+                wb.max,
+                new Vector3(wb.min.x, wb.min.y, wb.max.z),
+                new Vector3(wb.min.x, wb.max.y, wb.min.z),
+                new Vector3(wb.max.x, wb.min.y, wb.min.z),
+                new Vector3(wb.min.x, wb.max.y, wb.max.z),
+                new Vector3(wb.max.x, wb.min.y, wb.max.z),
+                new Vector3(wb.max.x, wb.max.y, wb.min.z),
+            })
+            {
+                var lp = root.InverseTransformPoint(corner);
+                if (!hasB) { bounds = new Bounds(lp, Vector3.zero); hasB = true; }
+                else bounds.Encapsulate(lp);
+            }
+        }
+
+        if (!hasB) return;
+
+        Vector3 offset = bounds.center;
+        if (offset.sqrMagnitude < 1e-8f) return;
+
+        foreach (Transform child in root)
+            child.localPosition -= offset;
     }
 
     class EnrichedPart
