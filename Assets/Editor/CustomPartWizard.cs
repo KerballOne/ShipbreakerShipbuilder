@@ -79,6 +79,7 @@ public class CustomPartWizard : EditorWindow
     bool   m_KeepOpening      = false;
     string m_DisplayName      = "";
     int    m_MatTemplate      = 0;
+    bool   m_TexturesFoldout  = false;
 
     Vector2 m_Scroll;
 
@@ -99,10 +100,16 @@ public class CustomPartWizard : EditorWindow
             "Assign your mesh and material, then add the resulting prefab as a child of your ship root prefab.",
             MessageType.Info);
 
-        EditorGUILayout.Space();
-        GUILayout.Label("Part Settings", EditorStyles.boldLabel);
+        // ── Part Settings ─────────────────────────────────────────────────────
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Part Settings", EditorStyles.boldLabel);
+        EditorGUILayout.Separator();
 
-        m_PartName = EditorGUILayout.TextField("Part Name", m_PartName);
+        m_PartName    = EditorGUILayout.TextField("Part Name", m_PartName);
+        m_DisplayName = EditorGUILayout.TextField(
+            new GUIContent("Display Name (optional)",
+                "Name shown in the scanner HUD and salvage ledger. Creates OI_<PartName>.asset. Leave blank to inherit from template."),
+            m_DisplayName);
 
         EditorGUILayout.BeginHorizontal();
         m_OutputFolder = EditorGUILayout.TextField("Output Folder", m_OutputFolder);
@@ -114,127 +121,132 @@ public class CustomPartWizard : EditorWindow
         }
         EditorGUILayout.EndHorizontal();
 
-        // ── Mesh / Hierarchy ──────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("Mesh & Material", EditorStyles.boldLabel);
+        // ── Mesh & Material ───────────────────────────────────────────────────
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Mesh & Material", EditorStyles.boldLabel);
+        EditorGUILayout.Separator();
 
-        bool hierarchyMode = m_SourceObject != null;
+        // Mesh — mutually exclusive with Copy Mesh From.
+        // Always clear the other field when either is assigned; never rely on change detection.
+        m_Mesh = (Mesh)EditorGUILayout.ObjectField("Mesh", m_Mesh, typeof(Mesh), false);
+        if (m_Mesh != null) m_SourceObject = null;
 
-        using (new EditorGUI.DisabledScope(hierarchyMode))
-            m_Mesh = (Mesh)EditorGUILayout.ObjectField("Mesh", m_Mesh, typeof(Mesh), false);
-
-        if (m_Mesh != null && !hierarchyMode)
+        if (m_Mesh != null)
         {
             var meshPath = AssetDatabase.GetAssetPath(m_Mesh);
             var importer = AssetImporter.GetAtPath(meshPath) as ModelImporter;
             if (importer != null && !importer.isReadable)
-                EditorGUILayout.HelpBox("Read/Write is disabled on this mesh — it will be enabled automatically on Create.", MessageType.Warning);
+                EditorGUILayout.HelpBox("Read/Write is disabled — will be enabled automatically on Create.", MessageType.Warning);
         }
 
         m_SourceObject = (GameObject)EditorGUILayout.ObjectField(
-            new GUIContent("Source Object (hierarchy)",
-                "Drag a parent GameObject here to include all its child meshes as a single part. " +
-                "Disables the single Mesh field above."),
+            new GUIContent("Copy Mesh From",
+                "Drag a parent GameObject to include all its child meshes as a single part. Clears the Mesh field above."),
             m_SourceObject, typeof(GameObject), true);
+        if (m_SourceObject != null) m_Mesh = null;
 
-        if (hierarchyMode)
+        if (m_SourceObject != null)
         {
             var meshFilters = m_SourceObject.GetComponentsInChildren<MeshFilter>(true);
             var names = new List<string>();
             foreach (var mf in meshFilters)
                 if (mf.sharedMesh != null) names.Add(mf.gameObject.name);
-            if (names.Count > 0)
-                EditorGUILayout.HelpBox($"Found {names.Count} mesh(es): {string.Join(", ", names)}", MessageType.None);
-            else
-                EditorGUILayout.HelpBox("No MeshFilter components with meshes found in this hierarchy.", MessageType.Warning);
+            EditorGUILayout.HelpBox(
+                names.Count > 0
+                    ? $"Found {names.Count} mesh(es): {string.Join(", ", names)}"
+                    : "No MeshFilter components with meshes found in this hierarchy.",
+                names.Count > 0 ? MessageType.None : MessageType.Warning);
         }
 
-        // ── Material ──────────────────────────────────────────────────────────
-        EditorGUILayout.Space();
+        EditorGUILayout.Space(2);
 
+        // Material — mutually exclusive with Copy Material From.
         m_Material = (Material)EditorGUILayout.ObjectField("Material", m_Material, typeof(Material), false);
+        if (m_Material != null) m_MaterialSourceObject = null;
 
         m_MaterialSourceObject = (GameObject)EditorGUILayout.ObjectField(
             new GUIContent("Copy Material From",
-                "Optional. Reads the MeshRenderer material from this scene object and duplicates it " +
-                "into the output folder. Takes priority over the Material picker above."),
+                "Reads the MeshRenderer material from this scene object and duplicates it into the output folder. Clears the Material field above."),
             m_MaterialSourceObject, typeof(GameObject), true);
-
         if (m_MaterialSourceObject != null)
-            EditorGUILayout.HelpBox("Material will be duplicated from this object's MeshRenderer into the output folder.", MessageType.None);
+        {
+            m_Material = null;
+            var mr = m_MaterialSourceObject.GetComponentInChildren<MeshRenderer>();
+            string matName = (mr != null && mr.sharedMaterial != null) ? mr.sharedMaterial.name : "(no material found)";
+            EditorGUILayout.HelpBox($"Material: {matName}", MessageType.None);
+        }
 
-        // ── Textures ──────────────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("Textures (Optional)", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Assigned to the resolved material using HDRP slot names.", MessageType.None);
-
-        m_BaseColorMap = (Texture2D)EditorGUILayout.ObjectField("Base Color (_BaseColorMap)", m_BaseColorMap, typeof(Texture2D), false);
-        m_NormalMap    = (Texture2D)EditorGUILayout.ObjectField("Normal Map  (_NormalMap)",   m_NormalMap,    typeof(Texture2D), false);
-        m_MaskMap      = (Texture2D)EditorGUILayout.ObjectField("Mask Map    (_MaskMap)",     m_MaskMap,      typeof(Texture2D), false);
-        EditorGUILayout.HelpBox("Mask Map: R=Metallic  G=AO  B=Detail  A=Smoothness", MessageType.None);
-
-        // ── Game Properties ───────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("Game Properties (Optional)", EditorStyles.boldLabel);
-
-        m_DisplayName = EditorGUILayout.TextField(
-            new GUIContent("Display Name",
-                "Name shown in the scanner HUD and salvage ledger. Creates OI_<PartName>.asset automatically. Leave blank to inherit from the template."),
-            m_DisplayName);
+        // Textures — collapsible
+        EditorGUILayout.Space(2);
+        m_TexturesFoldout = EditorGUILayout.Foldout(m_TexturesFoldout, "Textures (optional)", true);
+        if (m_TexturesFoldout)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox("Assigned to the resolved material via HDRP slot names.  Mask: R=Metallic  G=AO  B=Detail  A=Smoothness", MessageType.None);
+            m_BaseColorMap = (Texture2D)EditorGUILayout.ObjectField("Base Color (_BaseColorMap)", m_BaseColorMap, typeof(Texture2D), false);
+            m_NormalMap    = (Texture2D)EditorGUILayout.ObjectField("Normal Map  (_NormalMap)",   m_NormalMap,    typeof(Texture2D), false);
+            m_MaskMap      = (Texture2D)EditorGUILayout.ObjectField("Mask Map    (_MaskMap)",     m_MaskMap,      typeof(Texture2D), false);
+            EditorGUI.indentLevel--;
+        }
 
         // ── SP Material ───────────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("SP Material", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            "Determines density, salvage destination, cut level, and payout. " +
-            "Reactor Core routes to Barge and explodes when cut. " +
-            "Thruster variants also route to Barge and satisfy the reactor coolant pipe mechanic. " +
-            "Aluminum density is unconfirmed — load an aluminum-paneled ship to verify.",
-            MessageType.None);
-        m_MatTemplate = EditorGUILayout.Popup(
-            new GUIContent("SP Material Template", "Game StructurePart material and blueprint to inherit."),
-            m_MatTemplate, MatTemplateLabels);
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("SP Material", EditorStyles.boldLabel);
+        EditorGUILayout.Separator();
 
-        DrawRefOverride(
-            "SP Material Override",
+        m_MatTemplate = EditorGUILayout.Popup("Template", m_MatTemplate, MatTemplateLabels);
+
+        EditorGUILayout.Space(4);
+        EditorGUILayout.LabelField("SP Material Override", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
             "Governs physical/salvage properties: cut grade, salvage destination (Furnace/Barge/Processor), " +
             "mass density, joint behavior, vaporize/yank on cut, and the orange glow (CuttingTargetable). " +
-            "Override to change how the part behaves when cut without affecting entity/network wiring.",
+            "Leave blank to inherit from template.",
+            MessageType.None);
+        DrawRefOverride(
             ref m_SpMatOverrideGuid, ref m_SpMatOverrideName,
             ref m_SpMatSearchFilter, ref m_SpMatDropdownOpen, ref m_SpMatScroll,
             GetSpMatEntries);
 
+        EditorGUILayout.Space(4);
+        EditorGUILayout.LabelField("Blueprint Override", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Governs ECS entity setup: fuel/coolant network membership, pressure explosion logic, " +
+            "vitality/health, scanner HUD entry, physics rigidbody type, and room/atmosphere sealing. " +
+            "Leave blank to inherit from template.",
+            MessageType.None);
         DrawRefOverride(
-            "Blueprint Override",
-            "Governs ECS entity setup: which game systems attach at runtime — fuel/coolant network membership, " +
-            "pressure explosion logic, vitality/health, scanner HUD entry, physics rigidbody type, and " +
-            "room/atmosphere sealing. Override to change network behavior (e.g. fuel pipe, cryo pipe).",
             ref m_BpOverrideGuid, ref m_BpOverrideName,
             ref m_BpSearchFilter, ref m_BpDropdownOpen, ref m_BpScroll,
             GetBpEntries);
 
         // ── Addressables ──────────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("Addressables (Optional)", EditorStyles.boldLabel);
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Addressables (Optional)", EditorStyles.boldLabel);
+        EditorGUILayout.Separator();
+
         m_AddressableGroup = EditorGUILayout.TextField("Group Name", m_AddressableGroup);
-        EditorGUILayout.HelpBox("Leave blank to skip Addressable registration. The group must already exist.", MessageType.None);
+        EditorGUILayout.HelpBox("Leave blank to skip registration. The group must already exist.", MessageType.None);
 
         // ── Advanced ──────────────────────────────────────────────────────────
-        EditorGUILayout.Space();
-        GUILayout.Label("Advanced", EditorStyles.boldLabel);
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Advanced", EditorStyles.boldLabel);
+        EditorGUILayout.Separator();
+
         m_KeepOpening = EditorGUILayout.Toggle("Keep 'Opening' child", m_KeepOpening);
         EditorGUILayout.HelpBox(
             "'Opening' marks a pressure/atmosphere boundary on the ShellConnector template. " +
-            "Keep it only if this part is an airlock or section connector. Remove it for solid parts like engine bells.",
+            "Keep only for airlocks or section connectors. Remove for solid parts like engine bells.",
             MessageType.None);
 
-        EditorGUILayout.Space();
-
+        // ── Create ────────────────────────────────────────────────────────────
+        EditorGUILayout.Space(8);
         string error = Validate();
-        GUI.enabled = error == null;
-        if (GUILayout.Button("Create Part Prefab", GUILayout.Height(32)))
-            CreatePart();
-        GUI.enabled = true;
+        using (new EditorGUI.DisabledScope(error != null))
+        {
+            if (GUILayout.Button("Create Part Prefab", GUILayout.Height(32)))
+                CreatePart();
+        }
 
         if (error != null)
             EditorGUILayout.HelpBox(error, MessageType.Error);
@@ -353,8 +365,7 @@ public class CustomPartWizard : EditorWindow
 
             if (m_SourceObject != null)
             {
-                // Hierarchy mode: root becomes an empty transform container.
-                // StructurePart + EntityBlueprintComponent stay on root from the template.
+                // Root becomes an empty transform container — game components stay from template.
                 var rootMF = root.GetComponent<MeshFilter>();
                 if (rootMF) rootMF.sharedMesh = null;
                 var rootMC = root.GetComponent<MeshCollider>();
@@ -362,31 +373,9 @@ public class CustomPartWizard : EditorWindow
                 var rootMR = root.GetComponent<MeshRenderer>();
                 if (rootMR) rootMR.enabled = false;
 
-                // Create one child per mesh in the source hierarchy
-                var meshFilters = m_SourceObject.GetComponentsInChildren<MeshFilter>(true);
-                foreach (var srcMF in meshFilters)
-                {
-                    if (srcMF.sharedMesh == null) continue;
-
-                    var child = new GameObject(srcMF.gameObject.name);
-                    child.transform.SetParent(root.transform, false);
-
-                    // Preserve local offset relative to source parent
-                    var srcRelPos = m_SourceObject.transform.InverseTransformPoint(srcMF.transform.position);
-                    var srcRelRot = Quaternion.Inverse(m_SourceObject.transform.rotation) * srcMF.transform.rotation;
-                    child.transform.localPosition = srcRelPos;
-                    child.transform.localRotation = srcRelRot;
-                    child.transform.localScale    = srcMF.transform.lossyScale;
-
-                    child.AddComponent<MeshFilter>().sharedMesh = srcMF.sharedMesh;
-
-                    var childMR = child.AddComponent<MeshRenderer>();
-                    if (resolvedMaterial != null) childMR.sharedMaterial = resolvedMaterial;
-
-                    var childMC = child.AddComponent<MeshCollider>();
-                    childMC.sharedMesh = srcMF.sharedMesh;
-                    childMC.convex     = true;
-                }
+                // Mirror the source object itself (not just its children) as the first child,
+                // then recurse into its children — preserving the full parent-child depth.
+                CopyNodeIntoPrefab(m_SourceObject.transform, root.transform, resolvedMaterial);
             }
             else
             {
@@ -501,6 +490,31 @@ public class CustomPartWizard : EditorWindow
         return oiAsset;
     }
 
+    // Creates a node for src itself under destParent (preserving local transform),
+    // adds mesh components if the source has a MeshFilter, then recurses into children.
+    static void CopyNodeIntoPrefab(Transform src, Transform destParent, Material mat)
+    {
+        var node = new GameObject(src.name);
+        node.transform.SetParent(destParent, false);
+        node.transform.localPosition = src.localPosition;
+        node.transform.localRotation = src.localRotation;
+        node.transform.localScale    = src.localScale;
+
+        var srcMF = src.GetComponent<MeshFilter>();
+        if (srcMF != null && srcMF.sharedMesh != null)
+        {
+            node.AddComponent<MeshFilter>().sharedMesh = srcMF.sharedMesh;
+            var mr = node.AddComponent<MeshRenderer>();
+            if (mat != null) mr.sharedMaterial = mat;
+            var mc = node.AddComponent<MeshCollider>();
+            mc.sharedMesh = srcMF.sharedMesh;
+            mc.convex     = true;
+        }
+
+        foreach (Transform srcChild in src)
+            CopyNodeIntoPrefab(srcChild, node.transform, mat);
+    }
+
     static string GuessAddressableGroup(string outFolder)
     {
         const string marker = "_CustomShips/";
@@ -548,14 +562,12 @@ public class CustomPartWizard : EditorWindow
     // ── Shared ref-override UI ────────────────────────────────────────────────
 
     void DrawRefOverride(
-        string label, string tooltip,
         ref string guid, ref string displayName,
         ref string search, ref bool open, ref Vector2 scroll,
         System.Func<List<(string name, string guid)>> getEntries)
     {
         var entries = getEntries();
 
-        EditorGUILayout.LabelField(new GUIContent(label, tooltip));
         EditorGUILayout.BeginHorizontal();
 
         string btnLabel = string.IsNullOrEmpty(displayName) ? "(none — use template)" : displayName;
