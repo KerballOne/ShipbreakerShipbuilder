@@ -51,7 +51,11 @@ public class AddressableRendering : MonoBehaviour
                     var child = loader.transform.GetChild(i);
                     if (child.GetComponent<SelectAddressableParent>() != null ||
                         child.GetComponent<FakePrefabDisplay>() != null)
-                        try { DestroyImmediate(child.gameObject); } catch (System.Exception ex) { Debug.LogError($"[AddressableRendering] ClearView() could not find {child.name}: {ex.Message}"); }
+                    {
+                        if (!EditorUtility.IsPersistent(child.gameObject) &&
+                            !PrefabUtility.IsPartOfPrefabInstance(child.gameObject))
+                            DestroyImmediate(child.gameObject);
+                    }
                 }
             }
 

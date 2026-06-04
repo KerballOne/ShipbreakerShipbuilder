@@ -1,12 +1,14 @@
 {
   "JOINT_Chassis|JOINT_Chassis_CutPoint": true,
   "JOINT_Chassis_CutPoint|JOINT_Prop": true,
-  "JOINT_Chassis_Int|JOINT_PropMount_Exclude_Panel_Ext": true,
   "JOINT_Chassis|JOINT_Chassis": true,
   "JOINT_Chassis|JOINT_Panel_Ext": true,
+  "JOINT_Chassis_Int|JOINT_PropMount_Exclude_Panel_Ext": true,
   "JOINT_Panel_Ext|JOINT_Panel_Ext": false,
-  "JOINT_Chassis_OnlyChassis|JOINT_Panel_Ext": false,
   "JOINT_Chassis_CutPoint|JOINT_Panel_Ext": true,
+  "JOINT_Chassis_OnlyChassis|JOINT_Panel_Ext": false,
+  "JOINT_Chassis_CutPoint|JOINT_Chassis_OnlyChassis": true,
   "JOINT_Chassis_OnlyChassis|JOINT_Chassis_OnlyChassis": true,
-  "JOINT_Chassis_CutPoint|JOINT_Chassis_OnlyChassis": true
+  "JOINT_Everything|JOINT_Panel_Ext": true,
+  "JOINT_Chassis|JOINT_Everything": true
 }
