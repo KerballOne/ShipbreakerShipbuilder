@@ -284,9 +284,11 @@ public class JointAssistWindow : EditorWindow
         }
         EditorGUILayout.EndHorizontal();
 
-        DrawCompatResult(compatSPMat, "SP_Mat / JSA");
-        DrawCompatResult(compatMJC,   "MandatoryJointContainer");
-        DrawCompatResult(compatMesh,  "Mesh");
+        DrawCompatResult(compatSPMat);
+        DrawCompatResult(compatMJC);
+        bool jsaMjcBothFail = compatSPMat.state == CompatResult.State.Fail
+                           && compatMJC.state    == CompatResult.State.Fail;
+        DrawCompatMeshResult(compatMesh, jsaMjcBothFail);
 
         // ── Scene Overlay ─────────────────────────────────────────────────────
         GUILayout.Space(12);
@@ -626,6 +628,9 @@ public class JointAssistWindow : EditorWindow
                 var nameTok = kv.Value["partName"];
                 if (nameTok != null && !string.IsNullOrEmpty(nameTok.ToString()))
                     enrichedJsaByName[nameTok.ToString()] = jsa!;
+                var displayTok = kv.Value["displayName"];
+                if (displayTok != null && !string.IsNullOrEmpty(displayTok.ToString()))
+                    enrichedJsaByName[displayTok.ToString()] = jsa!;
             }
         }
         catch { }
@@ -656,7 +661,7 @@ public class JointAssistWindow : EditorWindow
 
         bool anyHasMJC = mjcPerSide.Any(m => m != null);
         if (!anyHasMJC)
-            return new CompatResult { state = CompatResult.State.Pass, message = "MJC: Neither side has a MandatoryJointContainer — jointing via JSA pairing." };
+            return new CompatResult { state = CompatResult.State.Warn, message = "MJC: Neither side has a MandatoryJointContainer." };
 
         // Check that all selected objects share the same MJC
         var distinct = mjcPerSide.Where(m => m != null).Distinct().ToList();
@@ -709,13 +714,16 @@ public class JointAssistWindow : EditorWindow
     void CollectJointPolys(List<MeshFilter> listA, List<MeshFilter> listB,
         List<Vector3[]> polys, List<Vector2> polyBuf, List<Vector2> ptsA2D, List<Vector2> ptsB2D)
     {
+        const int kMaxVerts = 300; // game's jointable mesh vertex cap
         foreach (var mfA in listA)
         {
             if (mfA.sharedMesh == null) continue;
             var meshA  = mfA.sharedMesh;
+            if (meshA.vertexCount > kMaxVerts) continue;
             var vertsA = meshA.vertices;
             var normsA = meshA.normals;
             var mA     = mfA.transform.localToWorldMatrix;
+            var boundsA = TransformBoundsToWorld(mA, meshA.bounds);
 
             var wVertsA = new Vector3[vertsA.Length];
             var wNormsA = new Vector3[vertsA.Length];
@@ -729,6 +737,11 @@ public class JointAssistWindow : EditorWindow
             {
                 if (mfB.sharedMesh == null) continue;
                 var meshB  = mfB.sharedMesh;
+                if (meshB.vertexCount > kMaxVerts) continue;
+                var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, meshB.bounds);
+                // Quick reject — if bounds don't overlap (with coplanar threshold margin) skip
+                var expandedA = new Bounds(boundsA.center, boundsA.size + Vector3.one * compatCoplanarThreshold * 2f);
+                if (!expandedA.Intersects(boundsB)) continue;
                 var vertsB = meshB.vertices;
                 var mB     = mfB.transform.localToWorldMatrix;
 
@@ -971,13 +984,41 @@ public class JointAssistWindow : EditorWindow
         return result;
     }
 
-    void DrawCompatResult(CompatResult r, string _)
+    void DrawCompatResult(CompatResult r)
     {
         if (r.state == CompatResult.State.None) return;
-        var msgType = r.state == CompatResult.State.Pass ? MessageType.Info
-                    : r.state == CompatResult.State.Warn ? MessageType.Warning
-                    : MessageType.Error;
-        EditorGUILayout.HelpBox(r.message, msgType);
+        if (r.state == CompatResult.State.Pass)
+        {
+            DrawCompatRow("d_winbtn_mac_max", r.message);
+        }
+        else if (r.state == CompatResult.State.Warn)
+            DrawCompatRow("console.infoicon.sml", r.message);
+        else
+            EditorGUILayout.HelpBox(r.message, MessageType.Error);
+    }
+
+    void DrawCompatMeshResult(CompatResult r, bool jsaMjcBothFail)
+    {
+        if (r.state == CompatResult.State.None) return;
+        if (r.state == CompatResult.State.Pass && !jsaMjcBothFail)
+            DrawCompatRow("d_winbtn_mac_max", r.message);
+        else if (r.state == CompatResult.State.Fail || jsaMjcBothFail)
+            DrawCompatRow("d_winbtn_mac_close_h", r.message);
+        else
+            EditorGUILayout.HelpBox(r.message, MessageType.Warning);
+    }
+
+    void DrawCompatRow(string iconName, string message)
+    {
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label(EditorGUIUtility.IconContent(iconName), GUILayout.Width(20), GUILayout.Height(20));
+        var style = new GUIStyle(EditorStyles.helpBox) { richText = true };
+        string msg = message
+            .Replace("will auto-joint",          "<color=#44cc44>will auto-joint</color>")
+            .Replace("Compatible",               "<color=#44cc44>Compatible</color>")
+            .Replace("covers all selected parts","<color=#44cc44>covers all selected parts</color>");
+        EditorGUILayout.LabelField(msg, style);
+        EditorGUILayout.EndHorizontal();
     }
 
 
