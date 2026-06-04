@@ -67,6 +67,15 @@ HG_WALL       = 0.08  * SCALE  # wall thickness throughout
 HG_HEIGHT     = 1.50  * SCALE  # total axial height of the hourglass
 HG_STEPS      = 12             # rings per half (more = smoother curve)
 
+# Mounting pads on the hourglass — 4 square plates just below the upper rim
+HG_PAD_COUNT      = 4
+HG_PAD_WIDTH      = 0.20  * SCALE  # tangential haldf-width of each pad
+HG_PAD_HEIGHT     = 0.30  * SCALE  # axial height of each pad
+HG_PAD_THICKNESS  = 0.80  * SCALE  # radial thickness of each pad
+HG_PAD_OFFSET_Z   = 0.10  * SCALE  # how far below the top rim the pad sits
+HG_PAD_R          = 1.20  * SCALE  # inner radius of the pads (distance from axis)
+HG_PAD_CHAMFER    = 0.30  * SCALE  # 45° chamfer on inner vertical edges (top narrower than bottom)
+
 # Inner turbine structure — vanes
 VANE_COUNT   = 16
 VANE_THICK   = 0.055 * SCALE
@@ -637,6 +646,44 @@ for i in range(_hg_steps):
 
 annular_cap(bm, _hg_outer_rings[0],  _hg_inner_rings[0],  flip=True)   # bottom cap
 annular_cap(bm, _hg_outer_rings[-1], _hg_inner_rings[-1], flip=False)  # top cap
+
+# ── Mounting pads just below the hourglass upper rim ─────────────────────────
+# 4 rectangular plates seated on the outer surface of the hourglass, evenly
+# spaced 90° apart, with their top face flush to HG_PAD_OFFSET_Z below the rim.
+
+_pad_top_z   = (_hg_base_z + HG_HEIGHT) - HG_PAD_OFFSET_Z
+_pad_bot_z   = _pad_top_z - HG_PAD_HEIGHT
+_pad_r_inner = HG_PAD_R
+_pad_r_outer = HG_PAD_R + HG_PAD_THICKNESS
+# chamfer shifts the inner top edge outward so the top is narrower than the bottom
+_pad_r_inner_top = _pad_r_inner + HG_PAD_CHAMFER
+
+for k in range(HG_PAD_COUNT):
+    angle = 2 * math.pi * k / HG_PAD_COUNT
+    ca, sa = math.cos(angle), math.sin(angle)
+    ta, tb = -sa, ca  # tangent for width
+
+    def _pv(r, hw, z):
+        return bm.verts.new((r * ca + ta * hw, r * sa + tb * hw, z))
+
+    # Outer corners — full rectangle, flat outward face
+    ota = _pv(_pad_r_outer,      HG_PAD_WIDTH, _pad_top_z)
+    otb = _pv(_pad_r_outer,     -HG_PAD_WIDTH, _pad_top_z)
+    oba = _pv(_pad_r_outer,      HG_PAD_WIDTH, _pad_bot_z)
+    obb = _pv(_pad_r_outer,     -HG_PAD_WIDTH, _pad_bot_z)
+    # Inner bottom corners — full width at bottom
+    iba = _pv(_pad_r_inner,      HG_PAD_WIDTH, _pad_bot_z)
+    ibb = _pv(_pad_r_inner,     -HG_PAD_WIDTH, _pad_bot_z)
+    # Inner top corners — chamfered outward, so inner face is a trapezoid
+    ita = _pv(_pad_r_inner_top,  HG_PAD_WIDTH, _pad_top_z)
+    itb = _pv(_pad_r_inner_top, -HG_PAD_WIDTH, _pad_top_z)
+
+    bm.faces.new([ota, otb, obb, oba])       # outer face (flat, radial normal)
+    bm.faces.new([itb, ita, iba, ibb])       # inner face (trapezoid, recessed at top)
+    bm.faces.new([ota, ita, itb, otb])       # top cap
+    bm.faces.new([oba, obb, ibb, iba])       # bottom cap
+    bm.faces.new([ota, oba, iba, ita])       # side A
+    bm.faces.new([otb, itb, ibb, obb])       # side B
 
 # ── Flare panels hanging from the collar bottom ───────────────────────────────
 # Each panel roots at COLLAR_INNER_R (inside face of collar), at z=VANE_BOT_Z,
