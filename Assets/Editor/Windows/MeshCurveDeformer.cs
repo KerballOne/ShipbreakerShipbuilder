@@ -97,10 +97,7 @@ public class MeshCurveDeformer : EditorWindow
         if (_srcFace.HasValue)
         {
             var f = _srcFace.Value;
-            string srcName = f.source != null ? f.source.name : "?";
-            EditorGUILayout.HelpBox(
-                $"{srcName}\nPoint:  {f.point:F3}\nNormal: {f.normal:F3}",
-                MessageType.None);
+            EditorGUILayout.HelpBox($"Point:  {f.point:F3}\nNormal: {f.normal:F3}", MessageType.None);
         }
 
         EditorGUILayout.Space(6);
@@ -115,10 +112,7 @@ public class MeshCurveDeformer : EditorWindow
         if (_dstFace.HasValue)
         {
             var f = _dstFace.Value;
-            string dstName = f.source != null ? f.source.name : "?";
-            EditorGUILayout.HelpBox(
-                $"{dstName}\nPoint:  {f.point:F3}\nNormal: {f.normal:F3}",
-                MessageType.None);
+            EditorGUILayout.HelpBox($"Point:  {f.point:F3}\nNormal: {f.normal:F3}", MessageType.None);
         }
 
         EditorGUILayout.Space(6);
@@ -194,10 +188,27 @@ public class MeshCurveDeformer : EditorWindow
     {
         EditorGUILayout.BeginHorizontal();
         var prevBG = GUI.backgroundColor;
-        if (pickingThis) GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
-        else if (current.HasValue) GUI.backgroundColor = activeColor * 0.8f;
 
-        if (GUILayout.Button(pickingThis ? "Cancel" : (current.HasValue ? "Re-pick" : label), GUILayout.Height(26)))
+        string btnText;
+        int btnHeight = 26;
+        var btnStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft, wordWrap = true };
+
+        if (pickingThis)
+        {
+            GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
+            btnText = "Cancel";
+        }
+        else if (current.HasValue && current.Value.source != null)
+        {
+            GUI.backgroundColor = activeColor * 0.8f;
+            btnText = current.Value.source.name;
+        }
+        else
+        {
+            btnText = label;
+        }
+
+        if (GUILayout.Button(btnText, btnStyle, GUILayout.Height(btnHeight)))
         {
             pickingThis = !pickingThis;
             if (pickingThis) { pickingOther = false; SceneView.lastActiveSceneView?.Focus(); }
