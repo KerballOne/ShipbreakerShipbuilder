@@ -80,9 +80,11 @@ public class RadialDuplicateWindow : EditorWindow
             Vector3 srcScale       = src.transform.localScale;
             Vector3 srcOffset      = srcWorldPos - pivot;
 
+            Vector3 worldAxis = refT != null ? refT.rotation * axisVec : axisVec;
+
             for (int i = 1; i < _count; i++)
             {
-                var q        = Quaternion.AngleAxis(step * i, axisVec);
+                var q        = Quaternion.AngleAxis(step * i, worldAxis);
                 var worldPos = pivot + q * srcOffset;
                 var worldRot = q * srcWorldRot;
 
