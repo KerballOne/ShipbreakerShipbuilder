@@ -103,34 +103,18 @@ public class JointAssistWindow : EditorWindow
 
     void OnSelectionChange() => Repaint();
 
+    void ReloadEnrichedData()
+    {
+        enrichedJsaMap    = null;
+        enrichedJsaByName = null;
+        EnsureEnrichedData();
+        Repaint();
+    }
+
     void OnGUI()
     {
         scrollPos = GUILayout.BeginScrollView(
             scrollPos, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
-
-        // ── Cut Point Prefab ──────────────────────────────────────────────────
-        EditorGUI.BeginChangeCheck();
-        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(
-            "Cut Point Prefab", cutPointPrefab, typeof(GameObject), false);
-        if (EditorGUI.EndChangeCheck()) SavePref(CutPrefKey, cutPointPrefab);
-
-        using (new EditorGUI.DisabledScope(cutPointPrefab == null))
-        {
-            var prevBG = GUI.backgroundColor;
-            if (pickingCutPoint) GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
-            if (GUILayout.Button(pickingCutPoint ? "Cancel Pick" : "Place Cut Point", GUILayout.Height(28)))
-            {
-                pickingCutPoint  = !pickingCutPoint;
-                pickingSnapFace  = 0;
-                if (pickingCutPoint) { statusMessage = ""; SceneView.lastActiveSceneView?.Focus(); }
-            }
-            GUI.backgroundColor = prevBG;
-        }
-
-        // ── Section break ─────────────────────────────────────────────────────
-        GUILayout.Space(12);
-        DrawSeparator();
-        GUILayout.Space(8);
 
         // ── Face Snapping ─────────────────────────────────────────────────────
         EditorGUILayout.LabelField("Face Snapping", EditorStyles.boldLabel);
@@ -201,61 +185,13 @@ public class JointAssistWindow : EditorWindow
         DrawSeparator();
         GUILayout.Space(8);
 
-        // ── Joint Placement ───────────────────────────────────────────────────
-        EditorGUILayout.LabelField("Joint Placement", EditorStyles.boldLabel);
-        EditorGUILayout.Space(4);
-
-        EditorGUI.BeginChangeCheck();
-        invisibleJointPrefab = (GameObject)EditorGUILayout.ObjectField(
-            "InvisibleJoint Prefab", invisibleJointPrefab, typeof(GameObject), false);
-        if (EditorGUI.EndChangeCheck()) SavePref(PrefKey, invisibleJointPrefab);
-
-        if (invisibleJointPrefab == null)
-            EditorGUILayout.HelpBox("Assign an InvisibleJoint prefab above.", MessageType.Info);
-
-        EditorGUILayout.Space(6);
-
-        EditorGUILayout.LabelField("Auto-Placement", EditorStyles.miniBoldLabel);
-        EditorGUILayout.HelpBox(
-            "Select 2+ parts in the hierarchy, then click Auto-Place. " +
-            "Invisible Joints are created as siblings of the first selected part. " +
-            "Existing joints at the same positions are not duplicated.",
-            MessageType.None);
-
-        autoOverlapThreshold = EditorGUILayout.FloatField("Adjacency Threshold (m)", autoOverlapThreshold);
-        autoDedupRadius      = EditorGUILayout.FloatField("Dedup Radius (m)",        autoDedupRadius);
-
-        EditorGUILayout.Space(4);
-
-        int autoSel = Selection.gameObjects.Length;
-        bool canAuto = invisibleJointPrefab != null && autoSel >= 2;
-        if (autoSel >= 2)
-        {
-            bool anyAsync   = Selection.gameObjects.Any(IsAsyncPart);
-            int islandCount = Selection.gameObjects.Sum(g => GetIslandFSPs(g).Count);
-            if (anyAsync)
-                EditorGUILayout.HelpBox(
-                    $"{autoSel} selected ({islandCount} islands) — async parts detected. Invisible Joints needed at interfaces.",
-                    MessageType.Warning);
-        }
-
-        using (new EditorGUI.DisabledScope(!canAuto))
-        {
-            if (GUILayout.Button("Auto-Place Joints", GUILayout.Height(36)))
-                AutoPlaceInvisibleJoints();
-        }
-
-        // ── Section break ─────────────────────────────────────────────────────
-        GUILayout.Space(12);
-        DrawSeparator();
-        GUILayout.Space(8);
-
         // ── Joint Compatibility ───────────────────────────────────────────────
-        GUILayout.Space(12);
-        DrawSeparator();
-        GUILayout.Space(8);
-
+        EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Joint Compatibility", EditorStyles.boldLabel);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Reload Enriched Data", EditorStyles.miniButton))
+            ReloadEnrichedData();
+        EditorGUILayout.EndHorizontal();
         EditorGUILayout.Space(4);
 
         compatCoplanarThreshold  = EditorGUILayout.FloatField("Coplanar Threshold (m)",  compatCoplanarThreshold);
@@ -288,7 +224,84 @@ public class JointAssistWindow : EditorWindow
         DrawCompatResult(compatMJC);
         bool jsaMjcBothFail = compatSPMat.state == CompatResult.State.Fail
                            && compatMJC.state    == CompatResult.State.Fail;
+        EditorGUILayout.Space(4);
+        DrawSeparator();
+        EditorGUILayout.Space(4);
         DrawCompatMeshResult(compatMesh, jsaMjcBothFail);
+
+        // ── Section break ─────────────────────────────────────────────────────
+        GUILayout.Space(12);
+        DrawSeparator();
+        GUILayout.Space(8);
+
+        // ── Joint & Cut Point Placement ───────────────────────────────────────
+        EditorGUILayout.LabelField("Joint & Cut Point Placement", EditorStyles.boldLabel);
+        EditorGUILayout.Space(4);
+
+        EditorGUI.BeginChangeCheck();
+        invisibleJointPrefab = (GameObject)EditorGUILayout.ObjectField(
+            "InvisibleJoint Prefab", invisibleJointPrefab, typeof(GameObject), false);
+        if (EditorGUI.EndChangeCheck()) SavePref(PrefKey, invisibleJointPrefab);
+
+        if (invisibleJointPrefab == null)
+            EditorGUILayout.HelpBox("Assign an InvisibleJoint prefab above.", MessageType.Info);
+
+        EditorGUILayout.Space(6);
+
+        EditorGUILayout.LabelField("Auto-Placement", EditorStyles.miniBoldLabel);
+        EditorGUILayout.HelpBox(
+            "Select 2+ parts in the hierarchy, then click Auto-Place. " +
+            "Invisible Joints are created as siblings of the first selected part. " +
+            "Existing joints at the same positions are not duplicated.",
+            MessageType.None);
+
+        autoOverlapThreshold = EditorGUILayout.FloatField("Adjacency Threshold (m)", autoOverlapThreshold);
+        autoDedupRadius      = EditorGUILayout.FloatField("Dedup Radius (m)",        autoDedupRadius);
+
+        EditorGUILayout.Space(4);
+
+        int autoSel = Selection.gameObjects.Length;
+        bool canAuto = invisibleJointPrefab != null && autoSel >= 2;
+        if (autoSel >= 2)
+        {
+            bool anyAsync   = Selection.gameObjects.Any(IsAsyncPart);
+            int islandCount = Selection.gameObjects.Sum(g => GetIslandFSPs(g).Count);
+            EditorGUILayout.HelpBox(
+                $"{autoSel} selected ({islandCount} islands){(anyAsync ? " — async parts detected. Invisible Joints needed at interfaces." : "")}",
+                MessageType.None);
+        }
+
+        using (new EditorGUI.DisabledScope(!canAuto))
+        {
+            if (GUILayout.Button("Auto-Place Joints", GUILayout.Height(36)))
+                AutoPlaceInvisibleJoints();
+        }
+
+        if (!string.IsNullOrEmpty(statusMessage))
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.HelpBox(statusMessage, statusType);
+        }
+
+        EditorGUILayout.Space(8);
+
+        EditorGUI.BeginChangeCheck();
+        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(
+            "Cut Point Prefab", cutPointPrefab, typeof(GameObject), false);
+        if (EditorGUI.EndChangeCheck()) SavePref(CutPrefKey, cutPointPrefab);
+
+        using (new EditorGUI.DisabledScope(cutPointPrefab == null))
+        {
+            var prevBG = GUI.backgroundColor;
+            if (pickingCutPoint) GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
+            if (GUILayout.Button(pickingCutPoint ? "Cancel Pick" : "Place Cut Point", GUILayout.Height(28)))
+            {
+                pickingCutPoint  = !pickingCutPoint;
+                pickingSnapFace  = 0;
+                if (pickingCutPoint) { statusMessage = ""; SceneView.lastActiveSceneView?.Focus(); }
+            }
+            GUI.backgroundColor = prevBG;
+        }
 
         // ── Scene Overlay ─────────────────────────────────────────────────────
         GUILayout.Space(12);
@@ -300,12 +313,6 @@ public class JointAssistWindow : EditorWindow
             AddressableRendering.ForceResetUpdateFlag();
             AddressableRendering.ClearView();
             AddressableRendering.UpdateViewList();
-        }
-
-        if (!string.IsNullOrEmpty(statusMessage))
-        {
-            EditorGUILayout.Space(4);
-            EditorGUILayout.HelpBox(statusMessage, statusType);
         }
 
         GUILayout.EndScrollView();
@@ -466,9 +473,9 @@ public class JointAssistWindow : EditorWindow
         if (sidesFilters.Count < 2)
             return new CompatResult { state = CompatResult.State.Warn, message = "SP_Mat: Need at least 2 selected objects." };
 
-        // Resolve unique JSA names per side
-        var jsasA = sidesFilters[0].Select(mf => GetJsaNameFromMF(mf)).Where(j => j != null).Distinct().ToList();
-        var jsasB = sidesFilters[1].Select(mf => GetJsaNameFromMF(mf)).Where(j => j != null).Distinct().ToList();
+        // Resolve unique JSA names per side — use owner GO so fake-child MFs walk the right hierarchy
+        var jsasA = sidesFilters[0].Select(p => GetJsaName(p.owner)).Where(j => j != null).Distinct().ToList();
+        var jsasB = sidesFilters[1].Select(p => GetJsaName(p.owner)).Where(j => j != null).Distinct().ToList();
 
         if (jsasA.Count == 0 && jsasB.Count == 0)
             return new CompatResult { state = CompatResult.State.Warn,
@@ -500,7 +507,20 @@ public class JointAssistWindow : EditorWindow
         }
 
         if (anyCompat)
-            return new CompatResult { state = CompatResult.State.Pass, message = $"SP_Mat: Compatible — will auto-joint\n{sides}" };
+        {
+            var asyncNames = sel.Where(go => {
+                for (var t = go.transform; t != null; t = t.parent)
+                    if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return true;
+                return false;
+            }).Select(go => go.name).ToList();
+
+            if (asyncNames.Count > 0)
+            {
+                var asyncLines = string.Join("\n", asyncNames.Select(n => $"{n} is addressable (async)"));
+                return new CompatResult { state = CompatResult.State.Fail, message = $"SP_Mat: Compatible\n{sides}\n{asyncLines}" };
+            }
+            return new CompatResult { state = CompatResult.State.Pass, message = $"SP_Mat: Compatible\n{sides}\nWill Auto-Joint" };
+        }
         if (anyIncompat && !anyUnknown)
             return new CompatResult { state = CompatResult.State.Fail, message = $"SP_Mat: Incompatible — will NOT auto-joint\n{sides}" };
         return new CompatResult { state = CompatResult.State.Warn,
@@ -516,12 +536,15 @@ public class JointAssistWindow : EditorWindow
     // 2. AddressableLoader.assetGUID → enriched JSON jsaName (game addressable parts)
     string GetJsaName(GameObject go)
     {
+        var log = $"[JAW:GetJsaName] go='{go.name}' mapSize={enrichedJsaMap?.Count.ToString() ?? "null"} byNameSize={enrichedJsaByName?.Count.ToString() ?? "null"}";
+
         // Path 1: custom parts with AddressableSOLoader
         foreach (var loader in go.GetComponentsInChildren<BBI.Unity.Game.AddressableSOLoader>(true))
         {
             if (loader.refs == null || loader.refs.Count == 0 || string.IsNullOrEmpty(loader.refs[0])) continue;
             var jsa = EnrichedJsaName(loader.refs[0]);
-            if (jsa != null) return jsa;
+            log += $"\n  P1: SOLoader ref={loader.refs[0]} → {jsa ?? "miss"}";
+            if (jsa != null) { Debug.Log(log); return jsa; }
         }
 
         // Path 2: game addressable parts — walk up to find AddressableLoader
@@ -530,30 +553,27 @@ public class JointAssistWindow : EditorWindow
             if (!t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out var al)) continue;
             if (string.IsNullOrEmpty(al.assetGUID)) continue;
             var jsa = EnrichedJsaName(al.assetGUID);
-            if (jsa != null) return jsa;
+            log += $"\n  P2: AddressableLoader on '{t.name}' guid={al.assetGUID} → {jsa ?? "miss"}";
+            if (jsa != null) { Debug.Log(log); return jsa; }
             break;
         }
 
         // Path 3: walk up to the nearest prefab instance root matching names against enriched partName.
-        // Only walks if GO is inside a prefab — plain scene GOs don't walk at all.
         var nearestPrefabRoot = PrefabUtility.GetNearestPrefabInstanceRoot(go);
+        log += $"\n  nearestPrefabRoot={nearestPrefabRoot?.name ?? "null"}";
         if (nearestPrefabRoot != null && enrichedJsaByName != null)
         {
             for (var t = go.transform; t != null; t = t.parent)
             {
                 string n = System.Text.RegularExpressions.Regex.Replace(t.name, @"\s*\(\d+\)$", "").Trim();
                 n = n.Replace("_Baked", "");
-                if (enrichedJsaByName.TryGetValue(n, out var jsaByName))
-                {
-                    return jsaByName;
-                }
-                if (t == nearestPrefabRoot.transform) break; // checked root, stop
+                enrichedJsaByName.TryGetValue(n, out var jsaByName);
+                log += $"\n  P3: name='{n}' → {jsaByName ?? "miss"}";
+                if (jsaByName != null) { Debug.Log(log); return jsaByName; }
+                if (t == nearestPrefabRoot.transform) break;
             }
 
-            // Path 4: for each ancestor up to nearestPrefabRoot, check if it is itself
-            // a prefab instance root and look up its asset GUID → original addressable name.
-            // This handles renamed baked prefabs at any depth (direct parent or grandparent).
-            // Collect all prefab instance roots from go up to (and including) nearestPrefabRoot
+            // Path 4: prefab asset GUID → known_assets name → enrichedJsaByName
             var rootsToCheck = new HashSet<GameObject>();
             for (var t = go.transform; t != null; t = t.parent)
             {
@@ -563,18 +583,18 @@ public class JointAssistWindow : EditorWindow
             }
             foreach (var checkRoot in rootsToCheck)
             {
-                // Use GetPrefabAssetPathOfNearestInstanceRoot to get the actual prefab asset path,
-                // not GetCorrespondingObjectFromSource which follows the override chain to the parent prefab.
                 var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(checkRoot);
                 if (string.IsNullOrEmpty(assetPath)) continue;
                 var prefabGuid = AssetDatabase.AssetPathToGUID(assetPath);
                 string assetFileName = Path.GetFileNameWithoutExtension(assetPath);
                 string n = (KnownAssetName(prefabGuid) ?? assetFileName).Replace("_Baked", "");
-                if (enrichedJsaByName.TryGetValue(n, out var jsaByName))
-                    return jsaByName;
+                enrichedJsaByName.TryGetValue(n, out var jsaByName);
+                log += $"\n  P4: root='{checkRoot.name}' assetFile='{assetFileName}' knownName='{KnownAssetName(prefabGuid) ?? "null"}' n='{n}' → {jsaByName ?? "miss"}";
+                if (jsaByName != null) { Debug.Log(log); return jsaByName; }
             }
         }
 
+        Debug.LogWarning(log + "\n  → FAILED (returning null)");
         return null;
     }
 
@@ -652,7 +672,8 @@ public class JointAssistWindow : EditorWindow
         catch { }
     }
 
-    // #2: Both sides must share the same MandatoryJointContainer ancestor.
+    // #2: Detect async (addressable) parts — they cannot auto-joint; require InvisibleJoint.
+    // #3: Both sides must share the same MandatoryJointContainer ancestor.
     // Also accept: neither side has one (they'll rely on JSA pairing instead).
     static CompatResult CheckMJC(GameObject[] sel)
     {
@@ -698,8 +719,8 @@ public class JointAssistWindow : EditorWindow
         // Run both directions so every triangle on either side gets a chance
         // to be the reference plane — catches cases where only B's triangles
         // face the right way toward A.
-        CollectJointPolys(sidesFilters[0], sidesFilters[1], polys, polyBuf, ptsA2D, ptsB2D);
-        CollectJointPolys(sidesFilters[1], sidesFilters[0], polys, polyBuf, ptsA2D, ptsB2D);
+        CollectJointPolys(sidesFilters[0].Select(p => p.mf).ToList(), sidesFilters[1].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D);
+        CollectJointPolys(sidesFilters[1].Select(p => p.mf).ToList(), sidesFilters[0].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D);
 
         if (polys.Count == 0)
             return (new CompatResult { state = CompatResult.State.Fail,
@@ -907,7 +928,7 @@ public class JointAssistWindow : EditorWindow
         var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
         if (sidesFilters.Count < 2) return result;
 
-        foreach (var mfA in sidesFilters[0])
+        foreach (var (mfA, _) in sidesFilters[0])
         {
             if (mfA.sharedMesh == null) continue;
             var meshA  = mfA.sharedMesh;
@@ -916,7 +937,7 @@ public class JointAssistWindow : EditorWindow
             var mA     = mfA.transform.localToWorldMatrix;
             var boundsA = TransformBoundsToWorld(mA, meshA.bounds);
 
-            foreach (var mfB in sidesFilters[1])
+            foreach (var (mfB, _) in sidesFilters[1])
             {
                 if (mfB.sharedMesh == null) continue;
                 var meshB  = mfB.sharedMesh;
@@ -955,14 +976,22 @@ public class JointAssistWindow : EditorWindow
         return result;
     }
 
-    static List<MeshFilter> CollectSPMeshFilters(GameObject go)
+    // Returns (MeshFilter, ownerGO) pairs. ownerGO is the AddressableLoader GO for fake-child
+    // MeshFilters so GetJsaName can walk the correct scene hierarchy for GUID lookup.
+    static List<(MeshFilter mf, GameObject owner)> CollectSPMeshFilters(GameObject go)
     {
-        var result = new List<MeshFilter>();
+        var result = new List<(MeshFilter, GameObject)>();
         foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
         {
             var mf = sp.GetComponent<MeshFilter>();
             if (mf != null && mf.sharedMesh != null)
-                result.Add(mf);
+                result.Add((mf, mf.gameObject));
+        }
+        foreach (var fsp in go.GetComponentsInChildren<FakeStructurePart>(true))
+        {
+            var mf = fsp.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
+                result.Add((mf, mf.gameObject));
         }
         // Also check fake hierarchy (AddressableLoader children)
         var loaders = new List<Transform>();
@@ -976,8 +1005,14 @@ public class JointAssistWindow : EditorWindow
                 foreach (var sp in ch.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
                 {
                     var mf = sp.GetComponent<MeshFilter>();
-                    if (mf != null && mf.sharedMesh != null && !result.Contains(mf))
-                        result.Add(mf);
+                    if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
+                        result.Add((mf, loader.gameObject));
+                }
+                foreach (var fsp in ch.GetComponentsInChildren<FakeStructurePart>(true))
+                {
+                    var mf = fsp.GetComponent<MeshFilter>();
+                    if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
+                        result.Add((mf, loader.gameObject));
                 }
             }
         }
@@ -1014,9 +1049,10 @@ public class JointAssistWindow : EditorWindow
         GUILayout.Label(EditorGUIUtility.IconContent(iconName), GUILayout.Width(20), GUILayout.Height(20));
         var style = new GUIStyle(EditorStyles.helpBox) { richText = true };
         string msg = message
-            .Replace("will auto-joint",          "<color=#44cc44>will auto-joint</color>")
             .Replace("Compatible",               "<color=#44cc44>Compatible</color>")
-            .Replace("covers all selected parts","<color=#44cc44>covers all selected parts</color>");
+            .Replace("Will Auto-Joint",          "<color=#44cc44>Will Auto-Joint</color>")
+            .Replace("covers all selected parts","<color=#44cc44>covers all selected parts</color>")
+            .Replace("is addressable (async)",   "<color=#cc4444>is addressable (async)</color>");
         EditorGUILayout.LabelField(msg, style);
         EditorGUILayout.EndHorizontal();
     }
@@ -1637,10 +1673,20 @@ public class JointAssistWindow : EditorWindow
 
         if (loaders.Count == 0)
         {
-            var fsps = go.GetComponentsInChildren<FakeStructurePart>(true)
-                         .Select(fsp => TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds))
-                         .ToList();
-            if (fsps.Count > 0) result.Add(fsps);
+            var bounds = new List<Bounds>();
+            foreach (var fsp in go.GetComponentsInChildren<FakeStructurePart>(true))
+                bounds.Add(TransformBoundsToWorld(fsp.transform.localToWorldMatrix, fsp.localColliderBounds));
+            foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+            {
+                Bounds b;
+                if (sp.TryGetComponent<MeshCollider>(out var mc) && mc.sharedMesh != null)
+                    b = TransformBoundsToWorld(sp.transform.localToWorldMatrix, mc.sharedMesh.bounds);
+                else if (sp.TryGetComponent<BoxCollider>(out var bc))
+                    b = TransformBoundsToWorld(sp.transform.localToWorldMatrix, new Bounds(bc.center, bc.size));
+                else continue;
+                bounds.Add(b);
+            }
+            if (bounds.Count > 0) result.Add(bounds);
             return result;
         }
 
