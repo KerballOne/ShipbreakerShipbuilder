@@ -157,8 +157,16 @@ public static class RescaleLocker
         foreach (Transform child in t)
             LockRescaleChildren(child);
 
-        if (IsNonUnitScale(t) && t.parent != null && CountAffected(t) > 0)
-            LockRescaleSelf(t.gameObject);
+        // Use localScale (not lossyScale via CountAffected) to decide whether this child needs
+        // processing — a child whose localScale is non-unit must be baked even if its lossyScale
+        // happens to be near-unit because the parent's scale cancels it out.
+        if (IsNonUnitScale(t) && t.parent != null)
+        {
+            var mf = t.GetComponent<MeshFilter>();
+            var mc = t.GetComponent<MeshCollider>();
+            if (mf != null || mc != null)
+                LockRescaleSelf(t.gameObject);
+        }
     }
 
     static string ResolveSaveFolder(GameObject root)
