@@ -75,9 +75,16 @@ public class AddressableRendering : MonoBehaviour
     static GameObject[] GetActiveRootObjects()
     {
         var stage = PrefabStageUtility.GetCurrentPrefabStage();
-        return stage != null
-            ? stage.scene.GetRootGameObjects()
-            : SceneManager.GetActiveScene().GetRootGameObjects();
+        if (stage != null)
+        {
+            var mainRoots = SceneManager.GetActiveScene().GetRootGameObjects();
+            var stageRoots = stage.scene.GetRootGameObjects();
+            var combined = new GameObject[mainRoots.Length + stageRoots.Length];
+            mainRoots.CopyTo(combined, 0);
+            stageRoots.CopyTo(combined, mainRoots.Length);
+            return combined;
+        }
+        return SceneManager.GetActiveScene().GetRootGameObjects();
     }
 
     public async static void UpdateViewList()
