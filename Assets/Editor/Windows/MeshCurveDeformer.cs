@@ -85,6 +85,17 @@ public class MeshCurveDeformer : EditorWindow
         if (!validTarget)
             EditorGUILayout.HelpBox("Select a GameObject with a MeshFilter.", MessageType.Warning);
 
+        if (validTarget)
+        {
+            var s = target.transform.lossyScale;
+            if (Mathf.Abs(s.x - 1f) > 1e-4f || Mathf.Abs(s.y - 1f) > 1e-4f || Mathf.Abs(s.z - 1f) > 1e-4f)
+                EditorGUILayout.HelpBox(
+                    $"Non-unit scale detected ({s.x:F3}, {s.y:F3}, {s.z:F3}). " +
+                    "Run Lock In Rescale on this object before deforming meshes, and again before using Custom Part Wizard. " +
+                    "In-game joints and mass require unit scale.",
+                    MessageType.Warning);
+        }
+
         EditorGUILayout.Space(4);
 
         // ── Source end pick ───────────────────────────────────────────────────

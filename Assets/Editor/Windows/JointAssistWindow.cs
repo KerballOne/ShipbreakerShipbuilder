@@ -994,7 +994,7 @@ public class JointAssistWindow : EditorWindow
         else if (r.state == CompatResult.State.Warn)
             DrawCompatRow("console.infoicon.sml", r.message);
         else
-            EditorGUILayout.HelpBox(r.message, MessageType.Error);
+            DrawCompatRow("d_winbtn_mac_close_h", r.message);
     }
 
     void DrawCompatMeshResult(CompatResult r, bool jsaMjcBothFail)
@@ -1005,7 +1005,7 @@ public class JointAssistWindow : EditorWindow
         else if (r.state == CompatResult.State.Fail || jsaMjcBothFail)
             DrawCompatRow("d_winbtn_mac_close_h", r.message);
         else
-            EditorGUILayout.HelpBox(r.message, MessageType.Warning);
+            DrawCompatRow("console.warnicon.sml", r.message);
     }
 
     void DrawCompatRow(string iconName, string message)

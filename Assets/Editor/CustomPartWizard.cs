@@ -8,7 +8,8 @@ using UnityEngine;
 
 public class CustomPartWizard : EditorWindow
 {
-    const string PrefOutputFolder = "CustomPartWizard.OutputFolder";
+    const string PrefOutputFolder    = "CustomPartWizard.OutputFolder";
+    const string PrefSourceObjectID  = "CustomPartWizard.SourceObjectID";
 
     // Labels must not contain '/' (Unity treats it as a submenu separator).
     // Format: Material  density  SP_Mat origin  Destination
@@ -80,6 +81,7 @@ public class CustomPartWizard : EditorWindow
     // ── Shared ────────────────────────────────────────────────────────────────
     string m_AddressableGroup = "";
     bool   m_KeepOpening      = false;
+    bool   m_CopySpToChildren = true;
     string m_DisplayName      = "";
     int    m_MatTemplate      = 0;
     bool   m_TexturesFoldout  = false;
@@ -91,6 +93,14 @@ public class CustomPartWizard : EditorWindow
     {
         var w = GetWindow<CustomPartWizard>("Custom Part Wizard");
         w.m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+    }
+
+    void OnEnable()
+    {
+        m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+        int id = EditorPrefs.GetInt(PrefSourceObjectID, 0);
+        if (id != 0)
+            m_SourceObject = EditorUtility.InstanceIDToObject(id) as GameObject;
     }
 
     void OnGUI()
@@ -142,10 +152,15 @@ public class CustomPartWizard : EditorWindow
                 EditorGUILayout.HelpBox("Read/Write is disabled — will be enabled automatically on Create.", MessageType.Warning);
         }
 
-        m_SourceObject = (GameObject)EditorGUILayout.ObjectField(
+        var newSourceObject = (GameObject)EditorGUILayout.ObjectField(
             new GUIContent("Copy Mesh From",
                 "Drag a parent GameObject to include all its child meshes as a single part. Clears the Mesh field above."),
             m_SourceObject, typeof(GameObject), true);
+        if (newSourceObject != m_SourceObject)
+        {
+            m_SourceObject = newSourceObject;
+            EditorPrefs.SetInt(PrefSourceObjectID, m_SourceObject != null ? m_SourceObject.GetInstanceID() : 0);
+        }
         if (m_SourceObject != null) m_Mesh = null;
 
         if (m_SourceObject != null)
@@ -159,6 +174,12 @@ public class CustomPartWizard : EditorWindow
                     ? $"Found {names.Count} mesh(es): {string.Join(", ", names)}"
                     : "No MeshFilter components with meshes found in this hierarchy.",
                 names.Count > 0 ? MessageType.None : MessageType.Warning);
+
+            var ls = m_SourceObject.transform.lossyScale;
+            if (Mathf.Abs(ls.x - 1f) > 1e-4f || Mathf.Abs(ls.y - 1f) > 1e-4f || Mathf.Abs(ls.z - 1f) > 1e-4f)
+                EditorGUILayout.HelpBox(
+                    $"Non-unit scale ({ls.x:F3}, {ls.y:F3}, {ls.z:F3}). Run Lock In Rescale before using this object as a mesh source — in-game joints and mass will be wrong otherwise.",
+                    MessageType.Warning);
         }
 
         EditorGUILayout.Space(2);
@@ -251,6 +272,13 @@ public class CustomPartWizard : EditorWindow
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("Advanced", EditorStyles.boldLabel);
         EditorGUILayout.Separator();
+
+        m_CopySpToChildren = EditorGUILayout.Toggle(
+            new GUIContent("Copy SP to Children",
+                "When using Copy Mesh From, also adds StructurePart + EntityBlueprintComponent + loader " +
+                "to each child node that has a mesh, using the same SP_Mat and blueprint as the root. " +
+                "Required for child cutpoint nodes to participate in in-game jointing."),
+            m_CopySpToChildren);
 
         m_KeepOpening = EditorGUILayout.Toggle("Keep 'Opening' child", m_KeepOpening);
         EditorGUILayout.HelpBox(
@@ -404,8 +432,18 @@ public class CustomPartWizard : EditorWindow
                 var srcMF = m_SourceObject.GetComponent<MeshFilter>();
                 if (srcMF != null && srcMF.sharedMesh != null)
                 {
-                    rootMF.sharedMesh = srcMF.sharedMesh;
-                    rootMC.sharedMesh = srcMF.sharedMesh;
+                    var rootMesh = srcMF.sharedMesh;
+                    if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(rootMesh)))
+                    {
+                        var guids = AssetDatabase.FindAssets($"{rootMesh.name} t:Mesh");
+                        foreach (var guid in guids)
+                        {
+                            var candidate = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(guid));
+                            if (candidate != null && candidate.name == rootMesh.name) { rootMesh = candidate; break; }
+                        }
+                    }
+                    rootMF.sharedMesh = rootMesh;
+                    rootMC.sharedMesh = rootMesh;
                     rootMC.convex     = true;
                     rootMR.enabled    = true;
                     if (resolvedMaterial != null) rootMR.sharedMaterials = new[] { resolvedMaterial };
@@ -418,8 +456,9 @@ public class CustomPartWizard : EditorWindow
                 }
 
                 // Mirror only the children (and their descendants) — preserving depth.
+                var rootLoaderForChildren = m_CopySpToChildren ? FindLoaderMonoBehaviour(root) : null;
                 foreach (Transform srcChild in m_SourceObject.transform)
-                    CopyNodeIntoPrefab(srcChild, root.transform, resolvedMaterial);
+                    CopyNodeIntoPrefab(srcChild, root.transform, resolvedMaterial, rootLoaderForChildren);
             }
             else
             {
@@ -542,7 +581,8 @@ public class CustomPartWizard : EditorWindow
 
     // Creates a node for src itself under destParent (preserving local transform),
     // adds mesh components if the source has a MeshFilter, then recurses into children.
-    static void CopyNodeIntoPrefab(Transform src, Transform destParent, Material mat)
+    // rootLoader: when non-null, also wires StructurePart+EBC+loader onto mesh-bearing children.
+    static void CopyNodeIntoPrefab(Transform src, Transform destParent, Material mat, MonoBehaviour rootLoader = null)
     {
         var node = new GameObject(src.name);
         node.transform.SetParent(destParent, false);
@@ -553,16 +593,81 @@ public class CustomPartWizard : EditorWindow
         var srcMF = src.GetComponent<MeshFilter>();
         if (srcMF != null && srcMF.sharedMesh != null)
         {
-            node.AddComponent<MeshFilter>().sharedMesh = srcMF.sharedMesh;
+            // If the mesh has no asset path it's an in-memory instance — find the saved asset by name.
+            var mesh = srcMF.sharedMesh;
+            if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(mesh)))
+            {
+                var guids = AssetDatabase.FindAssets($"{mesh.name} t:Mesh");
+                foreach (var guid in guids)
+                {
+                    var candidate = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(guid));
+                    if (candidate != null && candidate.name == mesh.name) { mesh = candidate; break; }
+                }
+            }
+            node.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = node.AddComponent<MeshRenderer>();
             if (mat != null) mr.sharedMaterial = mat;
             var mc = node.AddComponent<MeshCollider>();
-            mc.sharedMesh = srcMF.sharedMesh;
+            mc.sharedMesh = mesh;
             mc.convex     = true;
+
+            if (rootLoader != null)
+            {
+                node.AddComponent(typeof(BBI.Unity.Game.StructurePart));
+                node.AddComponent(typeof(BBI.Unity.Game.EntityBlueprintComponent));
+                CopyLoaderOntoGameObject(rootLoader, node);
+            }
         }
 
         foreach (Transform srcChild in src)
-            CopyNodeIntoPrefab(srcChild, node.transform, mat);
+            CopyNodeIntoPrefab(srcChild, node.transform, mat, rootLoader);
+    }
+
+    // Adds the same loader type as srcLoader onto dest and copies address/ref/field strings.
+    // Component fileID references are NOT copied — the dest loader wires up its own components at runtime.
+    static void CopyLoaderOntoGameObject(MonoBehaviour srcLoader, GameObject dest)
+    {
+        var loaderType = srcLoader.GetType();
+        var destLoader = dest.AddComponent(loaderType) as MonoBehaviour;
+        if (destLoader == null) return;
+
+        var srcSO  = new SerializedObject(srcLoader);
+        var destSO = new SerializedObject(destLoader);
+
+        foreach (var propName in new[] { "refs", "addresses", "fields", "comp", "field" })
+        {
+            var srcProp  = srcSO.FindProperty(propName);
+            var destProp = destSO.FindProperty(propName);
+            if (srcProp == null || destProp == null || !srcProp.isArray) continue;
+            destProp.arraySize = srcProp.arraySize;
+            for (int i = 0; i < srcProp.arraySize; i++)
+            {
+                var srcEl  = srcProp.GetArrayElementAtIndex(i);
+                var destEl = destProp.GetArrayElementAtIndex(i);
+                if (srcEl.propertyType == SerializedPropertyType.String)
+                    destEl.stringValue = srcEl.stringValue;
+            }
+        }
+
+        var srcCV  = srcSO.FindProperty("componentValues");
+        var destCV = destSO.FindProperty("componentValues");
+        if (srcCV != null && srcCV.isArray && destCV != null)
+        {
+            destCV.arraySize = srcCV.arraySize;
+            for (int i = 0; i < srcCV.arraySize; i++)
+            {
+                var srcEntry  = srcCV.GetArrayElementAtIndex(i);
+                var destEntry = destCV.GetArrayElementAtIndex(i);
+                foreach (var field in new[] { "address", "field" })
+                {
+                    var s = srcEntry.FindPropertyRelative(field);
+                    var d = destEntry.FindPropertyRelative(field);
+                    if (s != null && d != null) d.stringValue = s.stringValue;
+                }
+            }
+        }
+
+        destSO.ApplyModifiedProperties();
     }
 
     // Returns the loader MonoBehaviour (either AddressableComponentLoader or AddressableSOLoader)
