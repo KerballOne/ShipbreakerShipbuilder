@@ -56,6 +56,9 @@ public class CustomPartWizard : EditorWindow
     // ── Material override ─────────────────────────────────────────────────────
     GameObject m_MaterialSourceObject; // copy material FROM this scene GO's MeshRenderer
 
+    // ── Loader source ─────────────────────────────────────────────────────────
+    GameObject m_LoaderSourceObject;   // copy AddressableComponentLoader/SOLoader from this GO
+
     // ── SP Material override (refs[0]) ────────────────────────────────────────
     string  m_SpMatOverrideGuid   = "";
     string  m_SpMatOverrideName   = "";
@@ -195,6 +198,22 @@ public class CustomPartWizard : EditorWindow
         EditorGUILayout.Separator();
 
         m_MatTemplate = EditorGUILayout.Popup("Template", m_MatTemplate, MatTemplateLabels);
+
+        var newLoaderSrc = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Copy Loader From",
+                "Optional. Copies the AddressableComponentLoader or AddressableSOLoader from this " +
+                "prefab/scene object onto the new part. Overrides the template's loader entirely, " +
+                "preserving the exact SP material, blueprint, and loader format of the source part."),
+            m_LoaderSourceObject, typeof(GameObject), true);
+        if (newLoaderSrc != m_LoaderSourceObject) m_LoaderSourceObject = newLoaderSrc;
+
+        if (m_LoaderSourceObject != null)
+        {
+            string loaderName = FindLoaderMonoBehaviour(m_LoaderSourceObject) != null
+                ? FindLoaderMonoBehaviour(m_LoaderSourceObject).GetType().Name
+                : "(no loader found)";
+            EditorGUILayout.HelpBox($"Loader source: {m_LoaderSourceObject.name}  [{loaderName}]", MessageType.None);
+        }
 
         EditorGUILayout.Space(4);
         EditorGUILayout.LabelField("SP Material Override", EditorStyles.boldLabel);
@@ -365,17 +384,42 @@ public class CustomPartWizard : EditorWindow
 
             if (m_SourceObject != null)
             {
-                // Root becomes an empty transform container — game components stay from template.
-                var rootMF = root.GetComponent<MeshFilter>();
-                if (rootMF) rootMF.sharedMesh = null;
-                var rootMC = root.GetComponent<MeshCollider>();
-                if (rootMC) rootMC.sharedMesh = null;
-                var rootMR = root.GetComponent<MeshRenderer>();
-                if (rootMR) rootMR.enabled = false;
+                // Remove any children the template brought in — we replace them entirely.
+                var existingChildren = new List<GameObject>();
+                foreach (Transform c in root.transform)
+                    existingChildren.Add(c.gameObject);
+                foreach (var c in existingChildren)
+                    DestroyImmediate(c);
 
-                // Mirror the source object itself (not just its children) as the first child,
-                // then recurse into its children — preserving the full parent-child depth.
-                CopyNodeIntoPrefab(m_SourceObject.transform, root.transform, resolvedMaterial);
+                // Root inherits the source object's local transform.
+                root.transform.localPosition = m_SourceObject.transform.localPosition;
+                root.transform.localRotation = m_SourceObject.transform.localRotation;
+                root.transform.localScale    = m_SourceObject.transform.localScale;
+
+                // Ensure mesh components exist on root (some templates omit them).
+                var rootMF = root.GetComponent<MeshFilter>()  ?? root.AddComponent<MeshFilter>();
+                var rootMC = root.GetComponent<MeshCollider>() ?? root.AddComponent<MeshCollider>();
+                var rootMR = root.GetComponent<MeshRenderer>() ?? root.AddComponent<MeshRenderer>();
+
+                var srcMF = m_SourceObject.GetComponent<MeshFilter>();
+                if (srcMF != null && srcMF.sharedMesh != null)
+                {
+                    rootMF.sharedMesh = srcMF.sharedMesh;
+                    rootMC.sharedMesh = srcMF.sharedMesh;
+                    rootMC.convex     = true;
+                    rootMR.enabled    = true;
+                    if (resolvedMaterial != null) rootMR.sharedMaterials = new[] { resolvedMaterial };
+                }
+                else
+                {
+                    rootMF.sharedMesh = null;
+                    rootMC.sharedMesh = null;
+                    rootMR.enabled    = false;
+                }
+
+                // Mirror only the children (and their descendants) — preserving depth.
+                foreach (Transform srcChild in m_SourceObject.transform)
+                    CopyNodeIntoPrefab(srcChild, root.transform, resolvedMaterial);
             }
             else
             {
@@ -404,10 +448,16 @@ public class CustomPartWizard : EditorWindow
             if (oiAsset != null)
                 SetMonoBehaviourField(root, "m_ObjectInfoAssetOverride", oiAsset);
 
-            if (!string.IsNullOrEmpty(m_SpMatOverrideGuid))
-                SetLoaderRef(root, 0, m_SpMatOverrideGuid);
-            if (!string.IsNullOrEmpty(m_BpOverrideGuid))
-                SetLoaderRef(root, 1, m_BpOverrideGuid);
+            // Loader copy takes priority over individual SP/blueprint overrides
+            if (m_LoaderSourceObject != null)
+                CopyLoaderFromSource(m_LoaderSourceObject, root);
+            else
+            {
+                if (!string.IsNullOrEmpty(m_SpMatOverrideGuid))
+                    SetLoaderRef(root, 0, m_SpMatOverrideGuid);
+                if (!string.IsNullOrEmpty(m_BpOverrideGuid))
+                    SetLoaderRef(root, 1, m_BpOverrideGuid);
+            }
         }
 
         // Apply texture overrides to the duplicated material
@@ -515,6 +565,95 @@ public class CustomPartWizard : EditorWindow
             CopyNodeIntoPrefab(srcChild, node.transform, mat);
     }
 
+    // Returns the loader MonoBehaviour (either AddressableComponentLoader or AddressableSOLoader)
+    // from the given GO, identified by having either a "refs", "addresses", or "componentValues" property.
+    static MonoBehaviour FindLoaderMonoBehaviour(GameObject go)
+    {
+        foreach (var mb in go.GetComponents<MonoBehaviour>())
+        {
+            if (mb == null) continue;
+            var so = new SerializedObject(mb);
+            if (so.FindProperty("refs")            != null) return mb;
+            if (so.FindProperty("addresses")       != null) return mb;
+            if (so.FindProperty("componentValues") != null) return mb;
+        }
+        return null;
+    }
+
+    // Copies the loader GUIDs from the source GO's loader onto the destination root's loader.
+    // Only transfers the address/ref strings and field names — never the component fileID references,
+    // which are source-prefab-specific and would point at wrong objects in the new prefab.
+    // The dest loader's own component references (pointing at StructurePart/EBC on the dest root)
+    // are preserved intact.
+    static void CopyLoaderFromSource(GameObject srcGO, GameObject destRoot)
+    {
+        var srcLoader = FindLoaderMonoBehaviour(srcGO);
+        if (srcLoader == null) return;
+
+        var destLoader = FindLoaderMonoBehaviour(destRoot);
+        if (destLoader == null) return;
+
+        var srcSO  = new SerializedObject(srcLoader);
+        var destSO = new SerializedObject(destLoader);
+
+        // Copy addresses (old loader) or refs (new loader) — the GUID strings only
+        var srcAddresses = srcSO.FindProperty("addresses");
+        var srcRefs      = srcSO.FindProperty("refs");
+        var srcFields    = srcSO.FindProperty("fields");
+
+        var destAddresses = destSO.FindProperty("addresses");
+        var destRefs      = destSO.FindProperty("refs");
+        var destFields    = destSO.FindProperty("fields");
+
+        // Copy address GUIDs
+        if (srcAddresses != null && srcAddresses.isArray && destAddresses != null && destAddresses.isArray)
+        {
+            destAddresses.arraySize = srcAddresses.arraySize;
+            for (int i = 0; i < srcAddresses.arraySize; i++)
+                destAddresses.GetArrayElementAtIndex(i).stringValue =
+                    srcAddresses.GetArrayElementAtIndex(i).stringValue;
+        }
+        else if (srcRefs != null && srcRefs.isArray && destRefs != null && destRefs.isArray)
+        {
+            destRefs.arraySize = srcRefs.arraySize;
+            for (int i = 0; i < srcRefs.arraySize; i++)
+                destRefs.GetArrayElementAtIndex(i).stringValue =
+                    srcRefs.GetArrayElementAtIndex(i).stringValue;
+        }
+
+        // Copy field names
+        if (srcFields != null && srcFields.isArray && destFields != null && destFields.isArray)
+        {
+            destFields.arraySize = srcFields.arraySize;
+            for (int i = 0; i < srcFields.arraySize; i++)
+                destFields.GetArrayElementAtIndex(i).stringValue =
+                    srcFields.GetArrayElementAtIndex(i).stringValue;
+        }
+
+        // For old loader: update componentValues[i].address and .field to match,
+        // but leave componentValues[i].component pointing at the dest's own components.
+        var srcCV  = srcSO.FindProperty("componentValues");
+        var destCV = destSO.FindProperty("componentValues");
+        if (srcCV != null && srcCV.isArray && destCV != null && destCV.isArray
+            && srcCV.arraySize == destCV.arraySize)
+        {
+            for (int i = 0; i < srcCV.arraySize; i++)
+            {
+                var srcEntry  = srcCV.GetArrayElementAtIndex(i);
+                var destEntry = destCV.GetArrayElementAtIndex(i);
+                var srcAddr   = srcEntry.FindPropertyRelative("address");
+                var destAddr  = destEntry.FindPropertyRelative("address");
+                var srcFld    = srcEntry.FindPropertyRelative("field");
+                var destFld   = destEntry.FindPropertyRelative("field");
+                if (srcAddr != null && destAddr != null) destAddr.stringValue = srcAddr.stringValue;
+                if (srcFld  != null && destFld  != null) destFld.stringValue  = srcFld.stringValue;
+                // NOTE: do NOT copy "component" — it contains source fileIDs
+            }
+        }
+
+        destSO.ApplyModifiedProperties();
+    }
+
     static string GuessAddressableGroup(string outFolder)
     {
         const string marker = "_CustomShips/";
@@ -543,19 +682,43 @@ public class CustomPartWizard : EditorWindow
         }
     }
 
-    // Overwrites refs[index] in the AddressableComponentLoader on root with a new GUID string.
-    // refs[0] = m_StructurePartAsset GUID, refs[1] = m_BlueprintAsset GUID.
+    // Overwrites the SP mat or blueprint GUID in whichever loader component is present.
+    // Handles both loader formats:
+    //   New loader (65951d54): writes to "refs[index]"
+    //   Old loader (daf0f29e): writes to "addresses[index]" and "componentValues[index].address"
     static void SetLoaderRef(GameObject root, int index, string guid)
     {
         foreach (var mb in root.GetComponents<MonoBehaviour>())
         {
-            var so   = new SerializedObject(mb);
+            var so = new SerializedObject(mb);
+
+            // Try new loader format first
             var refs = so.FindProperty("refs");
-            if (refs == null || !refs.isArray) continue;
-            if (index >= refs.arraySize) continue;
-            refs.GetArrayElementAtIndex(index).stringValue = guid;
-            so.ApplyModifiedProperties();
-            return;
+            if (refs != null && refs.isArray && index < refs.arraySize)
+            {
+                refs.GetArrayElementAtIndex(index).stringValue = guid;
+                so.ApplyModifiedProperties();
+                return;
+            }
+
+            // Try old loader format
+            var addresses = so.FindProperty("addresses");
+            if (addresses != null && addresses.isArray && index < addresses.arraySize)
+            {
+                addresses.GetArrayElementAtIndex(index).stringValue = guid;
+
+                // Also update componentValues[index].address for consistency
+                var compValues = so.FindProperty("componentValues");
+                if (compValues != null && compValues.isArray && index < compValues.arraySize)
+                {
+                    var entry = compValues.GetArrayElementAtIndex(index);
+                    var addrProp = entry.FindPropertyRelative("address");
+                    if (addrProp != null) addrProp.stringValue = guid;
+                }
+
+                so.ApplyModifiedProperties();
+                return;
+            }
         }
     }
 
