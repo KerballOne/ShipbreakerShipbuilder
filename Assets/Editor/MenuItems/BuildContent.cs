@@ -25,6 +25,12 @@ public class BuildContent
             return false;
         }
 
+        if (!ShipValidator.ValidateAll())
+        {
+            Debug.LogError("Build aborted: fix validation errors above before building.");
+            return false;
+        }
+
         foreach(var typeAsset in Resources.FindObjectsOfTypeAll<BBI.Unity.Game.TypeAsset>())
         {
             if(AssetDatabase.TryGetGUIDAndLocalFileIdentifier(typeAsset, out string guid, out long id))

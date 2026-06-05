@@ -10,6 +10,19 @@ public static class RoomGizmos
         SceneView.duringSceneGui += OnSceneGUI;
     }
 
+    // Walks up the transform chain to find the first ancestor that is a real scene object
+    // (not a DontSave fake), then checks if it is hidden in the Scene Visibility Manager.
+    static bool IsEffectivelyHidden(Transform t)
+    {
+        while (t != null)
+        {
+            if ((t.gameObject.hideFlags & HideFlags.DontSave) == 0)
+                return SceneVisibilityManager.instance.IsHidden(t.gameObject, true);
+            t = t.parent;
+        }
+        return false;
+    }
+
     static void OnSceneGUI(SceneView sv)
     {
         if (GameRenderWindow.drawRooms)
@@ -17,6 +30,7 @@ public static class RoomGizmos
             foreach (var room in AddressableRendering.rooms)
             {
                 if (room.parent == null || !room.parent.gameObject.activeInHierarchy) continue;
+                if (!GameRenderWindow.showHidden && IsEffectivelyHidden(room.parent)) continue;
                 if (!room.parent.TryGetComponent<RoomSubVolumeDefinition>(out var rvd)) continue;
 
                 var m = Matrix4x4.TRS(room.parent.position, room.parent.rotation, room.parent.lossyScale)
@@ -32,6 +46,7 @@ public static class RoomGizmos
             foreach (var room in AddressableRendering.roomOverlaps)
             {
                 if (room.parent == null || !room.parent.gameObject.activeInHierarchy) continue;
+                if (!GameRenderWindow.showHidden && IsEffectivelyHidden(room.parent)) continue;
                 if (!room.parent.TryGetComponent<RoomOpeningDefinition>(out var rod)) continue;
 
                 var baseM = Matrix4x4.TRS(room.parent.position, room.parent.rotation, room.parent.lossyScale)

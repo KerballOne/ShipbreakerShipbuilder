@@ -5,6 +5,7 @@ using BBI.Unity.Game;
 public class GameRenderWindow : EditorWindow
 {
     public static int maxLoopDepth = 8;
+    public static bool showHidden = false;
     public static bool drawRooms = true;
     public static Color roomColorInclude = new Color(0, 1, 0, .2f);
     public static Color roomColorExclude = new Color(1, 0, 0, .2f);
@@ -39,6 +40,7 @@ public class GameRenderWindow : EditorWindow
     void OnEnable()
     {
         maxLoopDepth          = EditorPrefs.GetInt(K + "maxLoopDepth", maxLoopDepth);
+        showHidden            = EditorPrefs.GetBool(K + "showHidden", showHidden);
         drawRooms             = EditorPrefs.GetBool(K + "drawRooms", drawRooms);
         roomColorInclude      = LoadColor(K + "roomColorInclude",      roomColorInclude);
         roomColorExclude      = LoadColor(K + "roomColorExclude",      roomColorExclude);
@@ -68,8 +70,11 @@ public class GameRenderWindow : EditorWindow
 
         EditorGUI.BeginChangeCheck();
 
-        GUILayout.Label("Max render depth", EditorStyles.boldLabel);
-        maxLoopDepth = EditorGUILayout.IntField(maxLoopDepth);
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label("Max render depth", EditorStyles.boldLabel, GUILayout.Width(130));
+        maxLoopDepth = EditorGUILayout.IntField(maxLoopDepth, GUILayout.Width(40));
+        showHidden = GUILayout.Toggle(showHidden, "Show hidden", GUILayout.ExpandWidth(false));
+        EditorGUILayout.EndHorizontal();
 
         GUILayout.Label("Room volumes", EditorStyles.boldLabel);
         drawRooms = GUILayout.Toggle(drawRooms, "Draw Rooms");
@@ -111,6 +116,7 @@ public class GameRenderWindow : EditorWindow
     void SaveAll()
     {
         EditorPrefs.SetInt(K + "maxLoopDepth", maxLoopDepth);
+        EditorPrefs.SetBool(K + "showHidden", showHidden);
         EditorPrefs.SetBool(K + "drawRooms", drawRooms);
         SaveColor(K + "roomColorInclude",     roomColorInclude);
         SaveColor(K + "roomColorExclude",     roomColorExclude);
