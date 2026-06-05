@@ -324,6 +324,16 @@ public static class RescaleLocker
             baked.normals = normals;
         }
 
+        // A mirror transform (det < 0) reverses triangle winding, flipping normals and culling.
+        // Swap index 0 and 1 of every triangle to restore correct handedness.
+        if (M.determinant < 0)
+        {
+            int[] tris = baked.triangles;
+            for (int i = 0; i < tris.Length; i += 3)
+                (tris[i], tris[i + 1]) = (tris[i + 1], tris[i]);
+            baked.triangles = tris;
+        }
+
         baked.RecalculateBounds();
         baked.RecalculateTangents();
 
