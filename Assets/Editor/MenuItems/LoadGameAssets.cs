@@ -98,7 +98,8 @@ public class LoadGameAssets
     public static void RebuildAddressables()
     {
         AddressableAssetSettings.BuildPlayerContent();
-        ReloadAssets();
+        // Delay reload so the catalog file is fully written before we try to load it.
+        EditorApplication.delayCall += ReloadAssets;
     }
 
     static int lastNumRoot;

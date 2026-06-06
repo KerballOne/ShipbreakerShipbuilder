@@ -123,8 +123,11 @@ public class BuildContent
             }
             Debug.Log("Moving ship bundles completed");
 
-            LoadGameAssets.ReloadAssets();
-            AddressableRendering.UpdateViewList();
+            // Delay reload so the catalog file is fully flushed before we load it.
+            EditorApplication.delayCall += () => {
+                LoadGameAssets.ReloadAssets();
+                AddressableRendering.UpdateViewList();
+            };
             Debug.Log("Build Complete");
             return true;
         }
