@@ -113,14 +113,14 @@ The GUID goes in the `AddressableSOLoader` on the `Room` object (`Refs → Eleme
 
 | Room Type | GUID | Default pressurisation |
 |---|---|---|
-| Airlock | `b9a0d54595ea6a74ca6fa24768b72a15` | Mixed |
-| Bathroom | `1e2fc202254a9b142821666f0de99c43` | Mixed |
-| Bulkhead | `1618146055ee06241a21a0a070fcb285` | Mixed |
-| BulkheadStructure | `27f96a65f1a36ce42879c5c6b295e9cf` | Mixed |
-| Cabin | `be0601d7017703647a188f1690c9a487` | Pressurised |
-| CargoBay | `1890b7b43c4fe394fade0ed5247ce74f` | Mixed |
-| Cockpit | `944e7dc3b121bc842a1d206109d5ed3f` | Pressurised |
-| Corridor | `c69f6c1382018f447bd3ab232bf02176` | Mixed |
+| Airlock | `1e2fc202254a9b142821666f0de99c43` | Mixed |
+| Bathroom | `1618146055ee06241a21a0a070fcb285` | Mixed |
+| Bulkhead | `27f96a65f1a36ce42879c5c6b295e9cf` | Mixed |
+| BulkheadStructure | `be0601d7017703647a188f1690c9a487` | Mixed |
+| Cabin | `1890b7b43c4fe394fade0ed5247ce74f` | Pressurised |
+| CargoBay | `944e7dc3b121bc842a1d206109d5ed3f` | Mixed |
+| Cockpit | `c69f6c1382018f447bd3ab232bf02176` | Pressurised |
+| Corridor | `f960f0730be516340995562ac0b6e597` | Mixed |
 | Crawlspace | `4360c7aed7fee3e42b466b34f1cf2270` | Mixed |
 | CrewQuarters | `f7ff5f8c1aed42041b653e9eaa54287b` | Pressurised |
 | CrewStorage | `1b66cb083eeef6149b41005abdd173ae` | Mixed |
@@ -137,7 +137,7 @@ The GUID goes in the `AddressableSOLoader` on the `Room` object (`Refs → Eleme
 | SalvageBay | `92745bbdc73bbe2468d61f192647841c` | Mixed |
 | ThrusterRoom | `35255e7fddb53ec4b84d410aa0947566` | Mixed |
 | ThrusterRoom (always unpressurised) | `c3916206ca44e364eae1bad0e4fa602c` | **Always unpressurised** |
-| Workshop | `f960f0730be516340995562ac0b6e597` | Mixed |
+| Workshop | `f1d1b2120f26b4e4ba3386ff70936917` | Mixed |
 
 *Mixed = random chance each run. Exact probabilities are defined inside each asset and not directly editable from the prefab.*
 
@@ -196,12 +196,12 @@ Use this when:
 
 After placing a baked part, you can freely reposition and rotate it using the standard Unity transform tools.
 
-If you **rescale** a baked part (non-unit scale on the transform), the game's joint and mass systems will not see the scaled geometry — they read directly from mesh bounds and vertex data. You must bake the scale into the mesh before building:
+If you **rescale** a baked part (non-unit scale on the transform), the game's joint and mass systems will not see the scaled geometry — they read directly from mesh bounds and vertex data. You must lock in the scale before building:
 
 1. Select the part in the hierarchy
 2. In the Inspector, the **Addressable Component Loader** will show a **Lock In Rescale** button when a non-unit scale is detected
 3. Alternatively, right-click the Transform component → **Lock In Rescale**
-4. This bakes the scale into the mesh geometry and resets the transform to (1,1,1)
+4. This writes the scale into the mesh geometry and resets the transform to (1,1,1)
 
 The pre-build validator (`Shipbreaker/Build`) will warn you if any part with a `StructurePart` component still has a non-unit scale — fix these before building.
 
@@ -234,7 +234,7 @@ If you are adding parts to a **nested prefab instance** (a GO with the `>` arrow
 ### Lock In Rescale checklist
 
 Before building, confirm:
-- [ ] All rescaled baked parts have had **Lock In Rescale** applied (transform reads (1,1,1))
+- [ ] All rescaled parts have had **Lock In Rescale** applied (transform reads (1,1,1))
 - [ ] All deleted parts have had their **ACL entries removed** from the parent loader
 - [ ] All duplicated or new parts have been **registered in the parent ACL**
 - [ ] The validator (`Shipbreaker/Build`) reports no errors and no scale warnings
