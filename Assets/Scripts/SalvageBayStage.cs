@@ -1,7 +1,6 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
 
 /*
     Load the in-game bay, to find the right place to put the ship
@@ -28,20 +27,23 @@ public class SalvageBayStage : MonoBehaviour
     {
         if(bay == null || jack == null)
         {
-            Addressables.LoadAssetsAsync<GameObject>(((IEnumerable)new AssetReferenceGameObject[] {new AssetReferenceGameObject("4e97499d6abdd314a83597595300db8d"), new AssetReferenceGameObject("9d2adb8555f4e794d874d4c67f643547") }), go => {
-                if(go.name == "PRF_HexStation_Composite")
-                    bay = go;
-                if(go.name == "PRF_MasterJack")
-                    jack = go;
-                
-                if(bay != null && jack != null)
-                    RenderBay();
-            }, Addressables.MergeMode.Union);
+            LoadAssetByGuid("4e97499d6abdd314a83597595300db8d", go => { bay = go; if (bay != null && jack != null) RenderBay(); });
+            LoadAssetByGuid("9d2adb8555f4e794d874d4c67f643547", go => { jack = go; if (bay != null && jack != null) RenderBay(); });
         }
         else
         {
             RenderBay();
         }
+    }
+
+    void LoadAssetByGuid(string guid, System.Action<GameObject> onLoaded)
+    {
+        var locOp = Addressables.LoadResourceLocationsAsync(guid, typeof(GameObject));
+        locOp.Completed += locHandle => {
+            if (locHandle.Result == null || locHandle.Result.Count == 0) { Debug.LogWarning($"SalvageBayStage: no locations for {guid}"); return; }
+            var loadOp = Addressables.LoadAssetAsync<GameObject>(locHandle.Result[0]);
+            loadOp.Completed += h => { if (h.Result != null) onLoaded(h.Result); else Debug.LogWarning($"SalvageBayStage: failed to load {guid}"); };
+        };
     }
 
     void RenderBay()
