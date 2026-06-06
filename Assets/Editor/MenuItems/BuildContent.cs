@@ -25,10 +25,26 @@ public class BuildContent
             return false;
         }
 
-        if (!ShipValidator.ValidateAll())
+        var validation = ShipValidator.Validate();
+        if (validation.HasErrors)
         {
             Debug.LogError("Build aborted: fix validation errors above before building.");
             return false;
+        }
+        if (validation.Warnings.Count > 0)
+        {
+            var msg = string.Join("\n\n", validation.Warnings);
+            bool proceed = EditorUtility.DisplayDialog(
+                "Build Warnings",
+                $"Validation produced {validation.Warnings.Count} warning(s):\n\n{msg}\n\nProceed with build anyway?",
+                "Proceed",
+                "Cancel"
+            );
+            if (!proceed)
+            {
+                Debug.Log("Build cancelled by user after warnings.");
+                return false;
+            }
         }
 
         foreach(var typeAsset in Resources.FindObjectsOfTypeAll<BBI.Unity.Game.TypeAsset>())

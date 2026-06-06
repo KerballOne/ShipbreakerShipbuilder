@@ -164,6 +164,81 @@ The top half of this texture will get the triplaner texture applied (as the outs
 * Paste it into 'Asset GUID' of the 'GameInspectorWindow' (If this is missing, open with `Shipbreaker/Show Game Inspector`)
 * Click 'Load GameObject'
 
+## Working with game parts
+
+Game parts are assets from the base game that you can place, reposition, rescale, or combine in your ship. There are two ways to bring them in, and understanding which to use is important.
+
+### Importing a game part: Bake vs Import Addressable
+
+Open the wizard via `Shipbreaker/Import Game Part Wizard`. Search for the part by name, then choose how to import it:
+
+**Bake (recommended for structural parts)**
+Baking downloads the addressable asset and converts it into a self-contained prefab in your project. The geometry, colliders, StructurePart, and EntityBlueprintComponent are all embedded — no runtime address lookup required.
+
+Use baking when:
+- You need to **rescale** the part (the game reads joint anchor points and mass from mesh geometry; non-unit scale is invisible to those systems without baking)
+- The part is purely structural (wall panels, floor tiles, hull pieces)
+- You want a fully independent prefab you can modify freely
+
+Do not bake when:
+- The part has **animations or complex runtime behaviour** (doors, airlocks, reactors) — baking strips the addressable loader and those systems will stop working
+- The part loads child content via its own `AddressableSOLoader` at runtime
+
+**Import Addressable**
+Places a lightweight loader GO in your hierarchy that tells the game to stream the part at runtime, identical to how the base game places it.
+
+Use this when:
+- The part needs to remain a live addressable (animated doors, functional subsystems, powered parts)
+- You are not rescaling it
+- You want the game to manage its lifecycle exactly as it would on a stock ship
+
+### Repositioning and rescaling
+
+After placing a baked part, you can freely reposition and rotate it using the standard Unity transform tools.
+
+If you **rescale** a baked part (non-unit scale on the transform), the game's joint and mass systems will not see the scaled geometry — they read directly from mesh bounds and vertex data. You must bake the scale into the mesh before building:
+
+1. Select the part in the hierarchy
+2. In the Inspector, the **Addressable Component Loader** will show a **Lock In Rescale** button when a non-unit scale is detected
+3. Alternatively, right-click the Transform component → **Lock In Rescale**
+4. This bakes the scale into the mesh geometry and resets the transform to (1,1,1)
+
+The pre-build validator (`Shipbreaker/Build`) will warn you if any part with a `StructurePart` component still has a non-unit scale — fix these before building.
+
+### Deleting a part
+
+When you delete a part GO from the hierarchy, any `AddressableComponentLoader` on its parent that referenced components on that GO will have **null/missing entries**. These broken entries will cause a crash at runtime.
+
+After deleting a part:
+1. Select the parent GO that holds the `AddressableComponentLoader`
+2. In the Inspector, expand each entry in the ACL list — entries showing **Missing Component** are dead references
+3. Remove each missing entry using the `−` button
+4. Save the prefab
+
+The pre-build validator will catch any remaining null ACL entries as an **error** and block the build until they are cleaned up.
+
+### Copying a part or adding a new one
+
+When you duplicate an existing part GO (Ctrl+D or right-click → Duplicate), the new GO's child components (`StructurePart`, `EntityBlueprintComponent`) are not registered in any parent `AddressableComponentLoader` — so the game will not load their asset data at runtime and the part will not appear in-game.
+
+After duplicating or adding a new part:
+1. Reposition it as needed
+2. Right-click the new GO in the hierarchy → **Register Components in Parent ACL**
+3. The tool walks up to find the nearest ancestor with an `AddressableComponentLoader`, finds all `StructurePart` and `EntityBlueprintComponent` components under your GO, and appends the correct entries — reusing addresses already present in that ACL for the same component types
+4. Save the prefab
+
+> **Note:** The parent must already have ACL entries of the same component types (i.e. at least one existing panel of the same kind), so the tool can infer the correct asset addresses. If the ACL has no matching entries to copy from, the tool will tell you rather than add broken entries.
+
+If you are adding parts to a **nested prefab instance** (a GO with the `>` arrow badge in the hierarchy), prefer opening that nested prefab in isolation and making the addition there — otherwise your new GOs are prefab overrides and may not behave correctly at runtime. Use the **Overrides** dropdown in the Inspector to apply overrides back to the base prefab on disk when you are satisfied with the result.
+
+### Lock In Rescale checklist
+
+Before building, confirm:
+- [ ] All rescaled baked parts have had **Lock In Rescale** applied (transform reads (1,1,1))
+- [ ] All deleted parts have had their **ACL entries removed** from the parent loader
+- [ ] All duplicated or new parts have been **registered in the parent ACL**
+- [ ] The validator (`Shipbreaker/Build`) reports no errors and no scale warnings
+
 ## Other important gotchas
 * If something doesn't load correctly, make sure that everything that needs to be marked as addressable, is!
 * I am caching all (game based) addressables at the moment. This means that the view of an addressable prefab won't update unless you remove it's prefab from "Assets/EditorCache"

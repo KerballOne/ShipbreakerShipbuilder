@@ -19,9 +19,8 @@ public static class ShipValidator
 
     /// <summary>
     /// Validates all prefabs in the project that are marked addressable.
-    /// Returns false and logs errors if any blocking issues are found.
     /// </summary>
-    public static bool ValidateAll()
+    public static ValidationResult Validate()
     {
         var result = new ValidationResult
         {
@@ -33,7 +32,7 @@ public static class ShipValidator
         if (settings == null)
         {
             Debug.LogError("[ShipValidator] Addressable settings not found.");
-            return false;
+            return result;
         }
 
         foreach (var group in settings.groups)
@@ -67,8 +66,13 @@ public static class ShipValidator
         if (!result.HasErrors)
             Debug.Log($"[ShipValidator] Passed ({result.Warnings.Count} warning(s)).");
 
-        return !result.HasErrors;
+        return result;
     }
+
+    /// <summary>
+    /// Validates and returns false if there are blocking errors.
+    /// </summary>
+    public static bool ValidateAll() => !Validate().HasErrors;
 
     static void ValidatePrefab(GameObject prefab, string path, ref ValidationResult result)
     {
