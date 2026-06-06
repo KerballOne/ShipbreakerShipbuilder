@@ -31,6 +31,11 @@ public class JointAssistWindow : EditorWindow
     bool snapPointModeA = true; // false = Click Point, true = Center of Face
     bool snapPointModeB = true;
 
+    // How many ancestors to walk up from Face A's source before moving.
+    // Initialized to the auto-sibling depth when both faces are resolved; ▼ reduces toward 1.
+    int snapAncestorsUpA = 1;
+    int snapAncestorsUpACeiling = 1; // the auto-sibling depth — ▲ is disabled at this value
+
     // Axis constraints for Part A (pos X Y Z, rot X Y Z) — all default true
     bool snapPosX = true, snapPosY = true, snapPosZ = true;
     bool snapRotX = true, snapRotY = true, snapRotZ = true;
@@ -116,6 +121,10 @@ public class JointAssistWindow : EditorWindow
         scrollPos = GUILayout.BeginScrollView(
             scrollPos, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
 
+        // Keep label width proportional so fields shrink with the window
+        float lw = Mathf.Clamp(EditorGUIUtility.currentViewWidth * 0.45f, 80f, 160f);
+        EditorGUIUtility.labelWidth = lw;
+
         // ── Face Snapping ─────────────────────────────────────────────────────
         EditorGUILayout.LabelField("Face Snapping", EditorStyles.boldLabel);
         EditorGUILayout.Space(4);
@@ -128,7 +137,7 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(selCount != 2))
         {
-            if (GUILayout.Button($"Auto-Detect Faces  ({selCount} selected)", GUILayout.Height(26)))
+            if (GUILayout.Button($"Auto-Detect Faces  ({selCount})", GUILayout.Height(26), GUILayout.MinWidth(0)))
                 AutoDetectFaces();
         }
         using (new EditorGUI.DisabledScope(!snapFaceA.HasValue && !snapFaceB.HasValue))
@@ -138,6 +147,7 @@ public class JointAssistWindow : EditorWindow
                 var tmp = snapFaceA; snapFaceA = snapFaceB; snapFaceB = tmp;
                 var tmpH = snapHitA; snapHitA = snapHitB; snapHitB = tmpH;
                 var tmpV = snapHitAValid; snapHitAValid = snapHitBValid; snapHitBValid = tmpV;
+                ResetAncestorDepth();
                 SceneView.RepaintAll();
             }
             if (GUILayout.Button("✕", GUILayout.Height(26), GUILayout.Width(28)))
@@ -161,22 +171,16 @@ public class JointAssistWindow : EditorWindow
             EditorGUILayout.Space(4);
 
             EditorGUILayout.BeginHorizontal();
-            var savedLW = EditorGUIUtility.labelWidth;
-            var savedFW = EditorGUIUtility.fieldWidth;
-            EditorGUIUtility.labelWidth = 75f;
-            EditorGUIUtility.fieldWidth = 40f;
             overlapAmount = EditorGUILayout.FloatField(
                 new GUIContent("Gap (m)", ">0 = gap between faces\n<0 = overlap/penetration\n=0 = flush"),
-                overlapAmount);
-            EditorGUIUtility.labelWidth = savedLW;
-            EditorGUIUtility.fieldWidth = savedFW;
-            if (GUILayout.Button("Snap", GUILayout.MaxWidth(60)))
+                overlapAmount, GUILayout.MinWidth(0));
+            if (GUILayout.Button("Snap", GUILayout.MaxWidth(60), GUILayout.MinWidth(0)))
                 ApplyFaceSnap(overlapAmount);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(4);
 
-            if (GUILayout.Button("Snap Flush  (0 gap)", GUILayout.Height(32)))
+            if (GUILayout.Button("Snap Flush  (0 gap)", GUILayout.Height(32), GUILayout.MinWidth(0)))
                 ApplyFaceSnap(0f);
         }
 
@@ -189,7 +193,7 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Joint Compatibility", EditorStyles.boldLabel);
         GUILayout.FlexibleSpace();
-        if (GUILayout.Button("Reload Enriched Data", EditorStyles.miniButton))
+        if (GUILayout.Button("Reload Enriched Data", EditorStyles.miniButton, GUILayout.MinWidth(0)))
             ReloadEnrichedData();
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.Space(4);
@@ -201,7 +205,7 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         using (new EditorGUI.DisabledScope(compatSel < 2))
         {
-            if (GUILayout.Button($"Check  ({compatSel} selected)", GUILayout.Height(28)))
+            if (GUILayout.Button($"Check  ({compatSel})", GUILayout.Height(28), GUILayout.MinWidth(0)))
                 RunCompatibilityCheck();
         }
         if (jointPolygons != null)
@@ -273,7 +277,7 @@ public class JointAssistWindow : EditorWindow
 
         using (new EditorGUI.DisabledScope(!canAuto))
         {
-            if (GUILayout.Button("Auto-Place Joints", GUILayout.Height(36)))
+            if (GUILayout.Button("Auto-Place Joints", GUILayout.Height(36), GUILayout.MinWidth(0)))
                 AutoPlaceInvisibleJoints();
         }
 
@@ -294,7 +298,7 @@ public class JointAssistWindow : EditorWindow
         {
             var prevBG = GUI.backgroundColor;
             if (pickingCutPoint) GUI.backgroundColor = new Color(0.3f, 0.6f, 1f);
-            if (GUILayout.Button(pickingCutPoint ? "Cancel Pick" : "Place Cut Point", GUILayout.Height(28)))
+            if (GUILayout.Button(pickingCutPoint ? "Cancel Pick" : "Place Cut Point", GUILayout.Height(28), GUILayout.MinWidth(0)))
             {
                 pickingCutPoint  = !pickingCutPoint;
                 pickingSnapFace  = 0;
@@ -308,7 +312,7 @@ public class JointAssistWindow : EditorWindow
         DrawSeparator();
         GUILayout.Space(8);
         EditorGUILayout.LabelField("Scene Overlay", EditorStyles.boldLabel);
-        if (GUILayout.Button("Redraw", GUILayout.Height(28)))
+        if (GUILayout.Button("Redraw", GUILayout.Height(28), GUILayout.MinWidth(0)))
         {
             AddressableRendering.ForceResetUpdateFlag();
             AddressableRendering.ClearView();
@@ -323,8 +327,42 @@ public class JointAssistWindow : EditorWindow
         bool isPickingThis = pickingSnapFace == slot;
         var prevBG = GUI.backgroundColor;
 
+        // For slot 1 (Part A): compute ancestor context when both faces are picked
+        bool showAncestorControls = false;
+        Transform currentAncestor = null;
+
+        if (slot == 1 && face.HasValue && face.Value.source != null && snapFaceB.HasValue && snapFaceB.Value.source != null)
+        {
+            showAncestorControls = true;
+            currentAncestor = FindMoveRoot(face.Value.source, snapFaceB.Value.source, snapAncestorsUpA);
+        }
+
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField(staticPrefix, GUILayout.Width(68));
+
+        // Left column: label + ▲▼ arrows (Part A only, below the label text)
+        if (slot == 1)
+        {
+            EditorGUILayout.BeginVertical(GUILayout.Width(68));
+            EditorGUILayout.LabelField(staticPrefix, GUILayout.Width(68));
+            EditorGUILayout.BeginHorizontal(GUILayout.Width(68));
+            var arrowStyle = new GUIStyle(GUI.skin.button) { fontSize = 10, padding = new RectOffset(0, 0, 1, 1) };
+            using (new EditorGUI.DisabledScope(!showAncestorControls || snapAncestorsUpA >= snapAncestorsUpACeiling))
+            {
+                if (GUILayout.Button("▲", arrowStyle, GUILayout.Width(26), GUILayout.Height(16)))
+                    snapAncestorsUpA++;
+            }
+            using (new EditorGUI.DisabledScope(!showAncestorControls || snapAncestorsUpA <= 0))
+            {
+                if (GUILayout.Button("▼", arrowStyle, GUILayout.Width(26), GUILayout.Height(16)))
+                    snapAncestorsUpA--;
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+        }
+        else
+        {
+            EditorGUILayout.LabelField(staticPrefix, GUILayout.Width(68));
+        }
 
         string btnText;
         bool showTwoRows = false;
@@ -340,20 +378,21 @@ public class JointAssistWindow : EditorWindow
             GUI.backgroundColor = pickedColor;
             string faceName = face.Value.source.name;
 
-            // Only show ancestor row if the other face is also selected (we can calculate the ancestor)
             GameObject otherSource = slot == 1 ? (snapFaceB?.source) : (snapFaceA?.source);
             if (otherSource != null)
             {
-                Transform ancestor = FindMoveRoot(face.Value.source, otherSource);
+                // Part A: use current snapAncestorsUpA (already resolved to currentAncestor).
+                // Part B: show the auto-sibling for display only (B never moves).
+                Transform ancestor = slot == 1
+                    ? currentAncestor
+                    : FindMoveRoot(face.Value.source, otherSource, AutoSiblingDepth(face.Value.source, otherSource));
                 string ancestorName = ancestor != null ? ancestor.name : "?";
 
-                // Build button text and measure it to truncate dynamically
-                btnText = $"{ancestorName}\n└ {faceName}";
                 showTwoRows = true;
                 buttonHeight = 35;
 
-                // Measure text and truncate if needed
-                btnText = TruncateButtonText(ancestorName, faceName, 0.8f);
+                string depthTag = slot == 1 && snapAncestorsUpA > 0 ? $"[{snapAncestorsUpA}] " : "";
+                btnText = TruncateButtonText(ancestorName, depthTag + faceName, 0.8f);
             }
             else
             {
@@ -365,7 +404,7 @@ public class JointAssistWindow : EditorWindow
             btnText = $"Pick {label}";
         }
 
-        // Create left-aligned button style with normal size when 1 row, smaller when 2 rows
+        // Create left-aligned button style
         var buttonStyle = new GUIStyle(GUI.skin.button);
         buttonStyle.wordWrap = true;
         buttonStyle.alignment = TextAnchor.MiddleLeft;
@@ -376,7 +415,7 @@ public class JointAssistWindow : EditorWindow
             buttonStyle.margin = new RectOffset(0, 0, 0, 0);
         }
 
-        if (GUILayout.Button(btnText, buttonStyle, GUILayout.Height(buttonHeight)))
+        if (GUILayout.Button(btnText, buttonStyle, GUILayout.Height(buttonHeight), GUILayout.MinWidth(0)))
         {
             if (isPickingThis)
             {
@@ -396,10 +435,10 @@ public class JointAssistWindow : EditorWindow
 
         // Snap point mode row
         EditorGUILayout.BeginHorizontal();
-        GUILayout.Space(72); // align under button
+        GUILayout.Space(68);
         string[] modeLabels = { "Click Point", "Center of Face" };
         int modeIdx = centerMode ? 1 : 0;
-        int newIdx = EditorGUILayout.Popup(modeIdx, modeLabels);
+        int newIdx = EditorGUILayout.Popup(modeIdx, modeLabels, GUILayout.MinWidth(0));
         centerMode = newIdx == 1;
         EditorGUILayout.EndHorizontal();
 
@@ -408,7 +447,7 @@ public class JointAssistWindow : EditorWindow
         {
             // Position row
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(72);
+            GUILayout.Space(68);
             GUILayout.Label("Pos:", GUILayout.Width(28));
             snapPosX = GUILayout.Toggle(snapPosX, "X", GUILayout.Width(26));
             snapPosY = GUILayout.Toggle(snapPosY, "Y", GUILayout.Width(26));
@@ -417,7 +456,7 @@ public class JointAssistWindow : EditorWindow
 
             // Rotation row
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(72);
+            GUILayout.Space(68);
             GUILayout.Label("Rot:", GUILayout.Width(28));
             snapRotX = GUILayout.Toggle(snapRotX, "X", GUILayout.Width(26));
             snapRotY = GUILayout.Toggle(snapRotY, "Y", GUILayout.Width(26));
@@ -1233,6 +1272,7 @@ public class JointAssistWindow : EditorWindow
                     var pf = new PickedFace { point = hitPoint, normal = hitNormal, source = picked, localNormal = localNormal };
                     if (slot == 1) { snapFaceA = pf; snapHitA = hitPoint; snapHitAValid = true; }
                     else           { snapFaceB = pf; snapHitB = hitPoint; snapHitBValid = true; }
+                    ResetAncestorDepth();
                     statusMessage = $"Face {(slot == 1 ? "A" : "B")} picked on '{picked.name}'.";
                     statusType    = MessageType.Info;
                 }
@@ -1261,28 +1301,48 @@ public class JointAssistWindow : EditorWindow
 
     // ── Face snap ─────────────────────────────────────────────────────────────
 
-    static Transform FindMoveRoot(GameObject partA, GameObject partBSource)
+    // Walk exactly maxAncestors steps up from partA (0 = the source itself, clamped at root).
+    static Transform FindMoveRoot(GameObject partA, GameObject partBSource, int maxAncestors)
     {
-        if (partBSource == null) return partA.transform;
-
-        // Collect all ancestors of B (including B itself)
-        var bAncestors = new HashSet<Transform>();
-        for (var t = partBSource.transform; t != null; t = t.parent)
-            bAncestors.Add(t);
-
-        // Walk up A until A's parent is in B's ancestor chain (i.e., A and B share a parent)
         Transform a = partA.transform;
-        while (a.parent != null && !bAncestors.Contains(a.parent))
+        for (int i = 0; i < maxAncestors && a.parent != null; i++)
             a = a.parent;
         return a;
     }
 
+    // Compute the auto-sibling depth: hops up from partA until its parent is shared with partB.
+    static int AutoSiblingDepth(GameObject partA, GameObject partBSource)
+    {
+        if (partBSource == null) return 1;
+        var bAncestors = new HashSet<Transform>();
+        for (var t = partBSource.transform; t != null; t = t.parent)
+            bAncestors.Add(t);
+        int depth = 0;
+        Transform cur = partA.transform;
+        while (cur.parent != null && !bAncestors.Contains(cur.parent))
+        {
+            cur = cur.parent;
+            depth++;
+        }
+        return Mathf.Max(0, depth);
+    }
+
+    // Call whenever both faces are freshly set — resets the ancestor slider to the auto-sibling ceiling.
+    void ResetAncestorDepth()
+    {
+        if (snapFaceA.HasValue && snapFaceA.Value.source != null &&
+            snapFaceB.HasValue && snapFaceB.Value.source != null)
+        {
+            snapAncestorsUpACeiling = AutoSiblingDepth(snapFaceA.Value.source, snapFaceB.Value.source);
+            snapAncestorsUpA = snapAncestorsUpACeiling;
+        }
+    }
+
     string TruncateButtonText(string ancestorName, string faceName, float fontSizeScale)
     {
-        // Measure available width from the last BeginHorizontal (approximate)
-        // Account for label (68px) + padding (8px) = 76px used, so remaining width is window - 76
-        float availableWidth = EditorGUIUtility.currentViewWidth - 90f; // Conservative margin
-        availableWidth = Mathf.Max(availableWidth, 100f); // Minimum readable width
+        // Left column (68px) + scrollbar (~15px) + window/scroll margins (~20px) = ~103px consumed.
+        float availableWidth = EditorGUIUtility.currentViewWidth - 103f;
+        availableWidth = Mathf.Max(availableWidth, 40f);
 
         // Create a temporary style to measure text
         var tempStyle = new GUIStyle(GUI.skin.button);
@@ -1416,6 +1476,7 @@ public class JointAssistWindow : EditorWindow
 
         snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = sel[0], localNormal = sel[0].transform.worldToLocalMatrix.MultiplyVector(dir) };
         snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = sel[1], localNormal = sel[1].transform.worldToLocalMatrix.MultiplyVector(-dir) };
+        ResetAncestorDepth();
 
         statusMessage = $"Auto-detected faces: '{sel[0].name}' → '{sel[1].name}'.";
         statusType    = MessageType.Info;
@@ -1429,26 +1490,25 @@ public class JointAssistWindow : EditorWindow
         var fB = snapFaceB.Value;
         if (fA.source == null) { statusMessage = "Face A source object is missing."; statusType = MessageType.Warning; Repaint(); return; }
 
-        Transform moveRoot = FindMoveRoot(fA.source, fB.source);
+        Transform moveRoot = FindMoveRoot(fA.source, fB.source, snapAncestorsUpA);
         Undo.RecordObject(moveRoot, "Face Snap");
 
         // Compute current face normals from local normals (accounts for rotation)
         Vector3 currentNormalA = fA.source.transform.localToWorldMatrix.MultiplyVector(fA.localNormal).normalized;
         Vector3 currentNormalB = fB.source.transform.localToWorldMatrix.MultiplyVector(fB.localNormal).normalized;
 
-        // For Part A: if in Center of Face mode, recompute center in current state.
-        // If in Click Point mode, preserve the original offset but apply it relative to the current position.
+        // For Part A: if in Center of Face mode, recompute center with current normal + coplanar filter.
+        // If in Click Point mode, the clicked point is fixed in local space of the source.
         Vector3 ptA;
         if (snapPointModeA)
         {
-            ptA = FindFaceCenter(fA.source, currentNormalA);
+            // Use a temporary face with the current world normal so GetFacePoint picks the right triangles
+            var fACurrent = new PickedFace { point = fA.point, normal = currentNormalA, source = fA.source, localNormal = fA.localNormal };
+            ptA = GetFacePoint(fACurrent, true);
         }
         else
         {
-            // Click Point mode: compute offset from original source position to the clicked point,
-            // then apply that offset to the current source position
-            Vector3 offset = fA.point - fA.source.transform.position;
-            ptA = fA.source.transform.position + offset;
+            ptA = fA.point;
         }
         Vector3 ptB = GetFacePoint(fB, snapPointModeB);
 
