@@ -14,6 +14,14 @@ public class CustomStage : PreviewSceneStage
         return new GUIContent(go != null ? go.name : "Preview");
     }
 
+    protected override void OnCloseStage()
+    {
+        // Destroy all objects in the preview scene so nothing leaks between previews.
+        foreach (var root in scene.GetRootGameObjects())
+            DestroyImmediate(root);
+        base.OnCloseStage();
+    }
+
     protected override bool OnOpenStage()
     {
         base.OnOpenStage();
@@ -21,15 +29,13 @@ public class CustomStage : PreviewSceneStage
         if(go == null)
             return false;
 
-
-        // Add the lights to the preview scene
-        var lights = GameObject.Find("Lights");
-        if(lights != null)
-        {
-            var previewLights = Instantiate(lights, Vector3.zero, Quaternion.identity);
-            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(previewLights, scene);
-            previewLights.hideFlags = HideFlags.HideAndDontSave;
-        }
+        // Add a simple directional light directly into the preview scene.
+        var lightGo = new GameObject("PreviewLight");
+        var light = lightGo.AddComponent<Light>();
+        light.type = LightType.Directional;
+        light.intensity = 1.2f;
+        light.transform.rotation = Quaternion.Euler(45f, 45f, 0f);
+        UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(lightGo, scene);
 
         var customStageGoInstance = Instantiate(go, Vector3.zero, Quaternion.identity);
 

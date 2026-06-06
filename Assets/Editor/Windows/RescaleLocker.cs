@@ -4,8 +4,8 @@ using UnityEditor;
 using UnityEngine;
 
 /// <summary>
-/// Locks in a non-unit transform rescale by baking it into mesh geometry, then resets localScale to
-/// (1,1,1) and scales child localPositions so multi-mesh layouts stay correct. Required because the
+/// Locks in a non-unit transform rescale by writing scale into mesh geometry, then resets localScale
+/// to (1,1,1) and scales child localPositions so multi-mesh layouts stay correct. Required because the
 /// game reads raw mesh vertices/bounds for joints + mass and rejects non-unit scale. Uniform scale is
 /// always safe; non-uniform scale skews descendant meshes that are rotated relative to the scaled
 /// transform (caller should warn). Invoked from the AddressableComponentLoader inspector button and
@@ -13,7 +13,7 @@ using UnityEngine;
 /// </summary>
 public static class RescaleLocker
 {
-    const string FallbackSaveFolder = "Assets/_CustomShips/Meshes/BakedScale";
+    const string FallbackSaveFolder = "Assets/_CustomShips/Meshes/LockedScale";
 
     /// <summary>When true, LockRescale logs detailed per-node transforms, matrices and position deltas.</summary>
     public static bool VerboseLogging = false;
@@ -54,7 +54,7 @@ public static class RescaleLocker
         return false;
     }
 
-    /// <summary>Counts descendant transforms with a mesh and non-unit lossyScale (what will be baked).</summary>
+    /// <summary>Counts descendant transforms with a mesh and non-unit lossyScale (what will be locked).</summary>
     public static int CountAffected(Transform t)
     {
         int count = 0;
@@ -67,27 +67,27 @@ public static class RescaleLocker
     }
 
     /// <summary>
-    /// Bakes scale for one root object and its descendants. The scaled root's localScale S is applied
-    /// in the ROOT's local space; to bake it into rotated sub-meshes without skew, each mesh vertex is
+    /// Locks scale for one root object and its descendants. The scaled root's localScale S is applied
+    /// in the ROOT's local space; to lock it into rotated sub-meshes without skew, each mesh vertex is
     /// transformed by R⁻¹·diag(S)·R where R is the mesh node's rotation relative to the scaled root.
-    /// Child positions are likewise scaled in the root's frame. After baking, all localScales are 1.
+    /// Child positions are likewise scaled in the root's frame. After locking, all localScales are 1.
     /// </summary>
     public static int LockRescale(GameObject root)
     {
         Undo.SetCurrentGroupName("Lock In Rescale");
         int group = Undo.GetCurrentGroup();
 
-        // Bottom-up: LIR any child that carries its own localScale before baking the root's scale,
-        // so the root bake sees already-unit-scale children and positions are consistent.
+        // Bottom-up: LIR any child that carries its own localScale before locking the root's scale,
+        // so the root lock sees already-unit-scale children and positions are consistent.
         LockRescaleChildren(root.transform);
 
-        int baked = LockRescaleSelf(root);
+        int locked = LockRescaleSelf(root);
 
         Undo.CollapseUndoOperations(group);
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
-        return baked;
+        return locked;
     }
 
     static int LockRescaleSelf(GameObject root)
@@ -105,11 +105,11 @@ public static class RescaleLocker
             Debug.Log($"[LockRescale] ===== '{root.name}'  S={S}  rootWorldRot={rootRot.eulerAngles}  rootWorldPos={root.transform.position} =====");
 
         // Snapshot the content's world-bounds center NOW (original meshes, original scale), before any
-        // baking, so we can re-anchor at the end and keep the assembly visually in place.
+        // locking, so we can re-anchor at the end and keep the assembly visually in place.
         Bounds? preBounds = ComputeWorldBounds(root.transform);
 
-        // Pass 1: bake meshes. R is each node's rotation relative to the scaled root.
-        int bakedCount = BakeMeshesInHierarchy(root.transform, rootRot, S, saveFolder, restoreLog);
+        // Pass 1: lock meshes. R is each node's rotation relative to the scaled root.
+        int lockedCount = LockMeshesInHierarchy(root.transform, rootRot, S, saveFolder, restoreLog);
 
         // Pass 2: preserve world positions through the scale reset. When root.localScale=(1.5,1.5,1.5),
         // child world positions already reflect the scaled layout. After ResetScalesToOne, the parent
@@ -145,12 +145,12 @@ public static class RescaleLocker
         }
 
         Debug.Log(restoreLog.ToString());
-        Debug.Log($"[LockInRescale] Baked {bakedCount} mesh(es) on '{root.name}'.");
-        return bakedCount;
+        Debug.Log($"[LockInRescale] Locked {lockedCount} mesh(es) on '{root.name}'.");
+        return lockedCount;
     }
 
     // Recursively LIR children that have their own non-unit localScale, bottom-up, before the
-    // parent bake runs. This ensures the root's bake matrix only needs to account for the root's
+    // parent lock runs. This ensures the root's lock matrix only needs to account for the root's
     // own scale, not a compounded child scale.
     static void LockRescaleChildren(Transform t)
     {
@@ -158,7 +158,7 @@ public static class RescaleLocker
             LockRescaleChildren(child);
 
         // Use localScale (not lossyScale via CountAffected) to decide whether this child needs
-        // processing — a child whose localScale is non-unit must be baked even if its lossyScale
+        // processing — a child whose localScale is non-unit must be locked even if its lossyScale
         // happens to be near-unit because the parent's scale cancels it out.
         if (IsNonUnitScale(t) && t.parent != null)
         {
@@ -175,7 +175,7 @@ public static class RescaleLocker
         if (!string.IsNullOrEmpty(prefabPath))
         {
             string shipFolder = Path.GetDirectoryName(prefabPath).Replace('\\', '/');
-            return $"{shipFolder}/Meshes/BakedScale";
+            return $"{shipFolder}/Meshes/LockedScale";
         }
         return FallbackSaveFolder;
     }
@@ -189,14 +189,14 @@ public static class RescaleLocker
         AssetDatabase.CreateFolder(parent, name);
     }
 
-    // Pass 1: bake each mesh through M = R⁻¹·diag(S)·R, where R is the node's rotation relative to the
+    // Pass 1: lock each mesh through M = R⁻¹·diag(S)·R, where R is the node's rotation relative to the
     // scaled root. For uniform S this reduces to plain vertex scaling; for non-uniform S it elongates
     // rotated meshes along the root's axes without skew.
-    static int BakeMeshesInHierarchy(Transform t, Quaternion rootRot, Vector3 S, string saveFolder, System.Text.StringBuilder restoreLog)
+    static int LockMeshesInHierarchy(Transform t, Quaternion rootRot, Vector3 S, string saveFolder, System.Text.StringBuilder restoreLog)
     {
         int count = 0;
         foreach (Transform child in t)
-            count += BakeMeshesInHierarchy(child, rootRot, S, saveFolder, restoreLog);
+            count += LockMeshesInHierarchy(child, rootRot, S, saveFolder, restoreLog);
 
         if (Vector3.Distance(S, Vector3.one) < 1e-5f)
             return count;
@@ -208,12 +208,12 @@ public static class RescaleLocker
 
         // Rotation of this node relative to the scaled root.
         Quaternion R = Quaternion.Inverse(rootRot) * t.rotation;
-        // Vertex bake matrix: into root space (R), apply non-uniform scale (diag S), back to local (R⁻¹).
+        // Vertex lock matrix: into root space (R), apply non-uniform scale (diag S), back to local (R⁻¹).
         Matrix4x4 M = Matrix4x4.Rotate(Quaternion.Inverse(R)) * Matrix4x4.Scale(S) * Matrix4x4.Rotate(R);
         string scaleTag = $"{S.x:F3}x{S.y:F3}x{S.z:F3}_r{R.eulerAngles.x:F0}_{R.eulerAngles.y:F0}_{R.eulerAngles.z:F0}";
 
         string goPath = GetHierarchyPath(t);
-        Mesh preBakeMFMesh = mf != null ? mf.sharedMesh : null;
+        Mesh preLockMFMesh = mf != null ? mf.sharedMesh : null;
 
         if (VerboseLogging)
         {
@@ -230,29 +230,29 @@ public static class RescaleLocker
         {
             string originalPath = AssetDatabase.GetAssetPath(mf.sharedMesh);
             restoreLog.AppendLine($"  MeshFilter  {goPath}  ←  {originalPath}");
-            var bakedMesh = BakeMesh(mf.sharedMesh, M, mf.sharedMesh.name, scaleTag, saveFolder);
+            var lockedMesh = LockMesh(mf.sharedMesh, M, mf.sharedMesh.name, scaleTag, saveFolder);
             Undo.RecordObject(mf, "Lock In Rescale");
-            mf.sharedMesh = bakedMesh;
+            mf.sharedMesh = lockedMesh;
             count++;
         }
 
         if (mc != null && mc.sharedMesh != null)
         {
             Mesh colliderSource = mc.sharedMesh;
-            Mesh bakedCollider;
-            if (mf != null && colliderSource == preBakeMFMesh)
+            Mesh lockedCollider;
+            if (mf != null && colliderSource == preLockMFMesh)
             {
-                bakedCollider = mf.sharedMesh; // reuse just-baked mesh
+                lockedCollider = mf.sharedMesh; // reuse just-locked mesh
             }
             else
             {
                 string originalPath = AssetDatabase.GetAssetPath(colliderSource);
                 restoreLog.AppendLine($"  MeshCollider {goPath}  ←  {originalPath}");
-                bakedCollider = BakeMesh(colliderSource, M, colliderSource.name + "_col", scaleTag, saveFolder);
+                lockedCollider = LockMesh(colliderSource, M, colliderSource.name + "_col", scaleTag, saveFolder);
                 count++;
             }
             Undo.RecordObject(mc, "Lock In Rescale");
-            mc.sharedMesh = bakedCollider;
+            mc.sharedMesh = lockedCollider;
         }
 
         return count;
@@ -285,7 +285,7 @@ public static class RescaleLocker
     }
 
     // Pass 2b: reset localScale on the root and every descendant to (1,1,1). Mesh geometry already
-    // carries the scale; positions were fixed in pass 2a.
+    // carries the locked scale; positions were fixed in pass 2a.
     static void ResetScalesToOne(Transform t)
     {
         if (Vector3.Distance(t.localScale, Vector3.one) > 1e-5f)
@@ -297,22 +297,32 @@ public static class RescaleLocker
             ResetScalesToOne(child);
     }
 
-    static Mesh BakeMesh(Mesh source, Matrix4x4 M, string baseName, string scaleTag, string saveFolder)
+    static string HashScaleTag(string scaleTag)
     {
-        // Reuse existing baked asset if it already exists for this source + transform combination.
-        string safeName = $"{baseName}_{scaleTag}".Replace('.', 'd').Replace('-', 'm');
+        // Shorten the scale+rotation tag to 8 hex chars so filenames stay under 260 chars on Windows.
+        uint h = 2166136261u;
+        foreach (char c in scaleTag) { h ^= c; h *= 16777619u; }
+        return h.ToString("x8");
+    }
+
+    static Mesh LockMesh(Mesh source, Matrix4x4 M, string baseName, string scaleTag, string saveFolder)
+    {
+        // Reuse existing locked asset if it already exists for this source + transform combination.
+        string safeBase = baseName.Replace('.', 'd').Replace('-', 'm');
+        if (safeBase.Length > 60) safeBase = safeBase.Substring(0, 60);
+        string safeName = $"{safeBase}_{HashScaleTag(scaleTag)}";
         string assetPath = $"{saveFolder}/{safeName}.asset";
 
         var existing = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
         if (existing != null) return existing;
 
-        var baked = Object.Instantiate(source);
-        baked.name = safeName;
+        var locked = Object.Instantiate(source);
+        locked.name = safeName;
 
         var verts = source.vertices;
         for (int i = 0; i < verts.Length; i++)
             verts[i] = M.MultiplyPoint3x4(verts[i]);
-        baked.vertices = verts;
+        locked.vertices = verts;
 
         // Normals transform by the inverse-transpose of the linear part, then renormalize.
         var normals = source.normals;
@@ -321,30 +331,30 @@ public static class RescaleLocker
             Matrix4x4 nrm = M.inverse.transpose;
             for (int i = 0; i < normals.Length; i++)
                 normals[i] = nrm.MultiplyVector(normals[i]).normalized;
-            baked.normals = normals;
+            locked.normals = normals;
         }
 
         // A mirror transform (det < 0) reverses triangle winding, flipping normals and culling.
         // Swap index 0 and 1 of every triangle to restore correct handedness.
         if (M.determinant < 0)
         {
-            int[] tris = baked.triangles;
+            int[] tris = locked.triangles;
             for (int i = 0; i < tris.Length; i += 3)
                 (tris[i], tris[i + 1]) = (tris[i + 1], tris[i]);
-            baked.triangles = tris;
+            locked.triangles = tris;
         }
 
-        baked.RecalculateBounds();
-        baked.RecalculateTangents();
+        locked.RecalculateBounds();
+        locked.RecalculateTangents();
 
         if (VerboseLogging)
-            Debug.Log($"[LockRescale][BAKED] '{baseName}'  srcBounds={source.bounds.size}  →  bakedBounds={baked.bounds.size}  ({verts.Length} verts)");
+            Debug.Log($"[LockRescale][LOCKED] '{baseName}'  srcBounds={source.bounds.size}  →  lockedBounds={locked.bounds.size}  ({verts.Length} verts)");
 
         // The joint system reads mesh.vertices/bounds at runtime, which requires the mesh to be
         // CPU-readable. Asset meshes default to non-readable; force it on so jointing works.
-        baked.UploadMeshData(false);
+        locked.UploadMeshData(false);
 
-        AssetDatabase.CreateAsset(baked, assetPath);
-        return baked;
+        AssetDatabase.CreateAsset(locked, assetPath);
+        return locked;
     }
 }
