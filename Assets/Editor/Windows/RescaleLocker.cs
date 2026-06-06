@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using BBI.Unity.Game;
 using UnityEditor;
 using UnityEngine;
 
@@ -110,6 +111,20 @@ public static class RescaleLocker
 
         // Pass 1: lock meshes. R is each node's rotation relative to the scaled root.
         int lockedCount = LockMeshesInHierarchy(root.transform, rootRot, S, saveFolder, restoreLog);
+
+        // Pass 1b: scale RoomOpeningDefinition overlap volumes by S, so they stay proportional
+        // to the mesh after the scale bake. Without this, a scaled-down panel retains its original
+        // overlap volume size and may swallow adjacent room probes.
+        foreach (var rod in root.GetComponentsInChildren<RoomOpeningDefinition>(true))
+        {
+            var so = new SerializedObject(rod);
+            var sizeProp = so.FindProperty("m_Size");
+            if (sizeProp != null)
+            {
+                sizeProp.vector3Value = Vector3.Scale(sizeProp.vector3Value, S);
+                so.ApplyModifiedProperties();
+            }
+        }
 
         // Pass 2: preserve world positions through the scale reset. When root.localScale=(1.5,1.5,1.5),
         // child world positions already reflect the scaled layout. After ResetScalesToOne, the parent
