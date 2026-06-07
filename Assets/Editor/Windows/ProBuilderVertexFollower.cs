@@ -19,6 +19,7 @@ public class ProBuilderVertexFollower : EditorWindow
     {
         public ProBuilderMesh pbMesh;
         public int            subdivideCount = 1;
+        public bool           subdivideApplied;
         public int[]          sharedVertexIds;   // set after Attach
         public Vector3[]      localPositions;    // set after Attach
         public Vector3        targetPosAtAttach;
@@ -117,17 +118,25 @@ public class ProBuilderVertexFollower : EditorWindow
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField("  └ Subdivide", GUILayout.Width(95));
                 GUILayout.FlexibleSpace();
+                EditorGUI.BeginChangeCheck();
                 if (GUILayout.Button("▼", GUILayout.Width(22)) && entry.subdivideCount > 1)
                     entry.subdivideCount--;
                 entry.subdivideCount = EditorGUILayout.IntField(entry.subdivideCount, GUILayout.Width(28));
                 if (GUILayout.Button("▲", GUILayout.Width(22)) && entry.subdivideCount < 8)
                     entry.subdivideCount++;
+                if (EditorGUI.EndChangeCheck())
+                    entry.subdivideApplied = false;
                 if (GUILayout.Button("Detect", GUILayout.Width(50)))
-                    entry.subdivideCount = ComputeSubdivisions(entry);
+                { entry.subdivideCount = ComputeSubdivisions(entry); entry.subdivideApplied = false; }
                 var prevBG2 = GUI.backgroundColor;
-                GUI.backgroundColor = new Color(0.9f, 0.25f, 0.25f);
-                if (GUILayout.Button("Apply", GUILayout.Width(48)))
-                    DoSubdivideFace(entry);
+                GUI.backgroundColor = entry.subdivideApplied
+                    ? new Color(0.3f, 0.3f, 0.3f)
+                    : new Color(0.9f, 0.25f, 0.25f);
+                using (new EditorGUI.DisabledScope(entry.subdivideApplied))
+                {
+                    if (GUILayout.Button(entry.subdivideApplied ? "Applied" : "Apply", GUILayout.Width(54)))
+                        DoSubdivideFace(entry);
+                }
                 GUI.backgroundColor = prevBG2;
                 EditorGUILayout.EndHorizontal();
             }
@@ -300,6 +309,7 @@ public class ProBuilderVertexFollower : EditorWindow
         }
 
         _diagnoseText = diagSb.ToString().TrimEnd();
+        entry.subdivideApplied = true;
         ClearAttach();
         SceneView.RepaintAll();
         Repaint();
@@ -307,13 +317,11 @@ public class ProBuilderVertexFollower : EditorWindow
 
     // ── Insert boundary vertices ──────────────────────────────────────────────
 
-    // Computes the world-space IBV points without modifying the mesh.
-    // Returns the local-space points for insertion, or null on failure.
-    List<Vector3> ComputeIBVPoints(PBEntry entry, out Face pbFace, out List<Face> allFacingFaces, out string log)
+    // Computes the local-space rect corners for the target-facing side of a PB entry, or null on failure.
+    List<Vector3> ComputeIBVPoints(PBEntry entry, out Face pbFace, out List<Face> allFacingFaces)
     {
         pbFace         = null;
         allFacingFaces = new List<Face>();
-        log            = "";
         if (_targetGO == null || entry.pbMesh == null) return null;
 
         var pb        = entry.pbMesh;
@@ -324,8 +332,8 @@ public class ProBuilderVertexFollower : EditorWindow
         Bounds  targetBounds = GetHierarchyBounds(_targetGO);
         Vector3 dir          = GetClosestFaceDirection(pbBounds, targetBounds);
 
-        // Find the furthest face alignment value, then collect ALL faces within a tolerance
-        // (the whole target-facing side, which may be many triangles after subdivision)
+        // Find face whose center is furthest from the PB mesh center in the dir direction.
+        // Subtract pbBounds.center so absolute world offset doesn't dominate.
         float bestAlign = float.MinValue;
         foreach (var face in pb.faces)
         {
@@ -333,10 +341,11 @@ public class ProBuilderVertexFollower : EditorWindow
             int     count       = 0;
             foreach (int idx in face.distinctIndexes) { localCenter += pb.positions[idx]; count++; }
             if (count == 0) continue;
-            float align = Vector3.Dot(pbToWorld.MultiplyPoint3x4(localCenter), dir);
+            Vector3 worldCenter = pbToWorld.MultiplyPoint3x4(localCenter / count);
+            float align = Vector3.Dot(worldCenter - pbBounds.center, dir);
             if (align > bestAlign) { bestAlign = align; pbFace = face; }
         }
-        if (pbFace == null) { log = "No PB face found."; return null; }
+        if (pbFace == null) return null;
 
         // Collect all faces on the same side (within 0.01m of bestAlign)
         foreach (var face in pb.faces)
@@ -345,15 +354,17 @@ public class ProBuilderVertexFollower : EditorWindow
             int     count       = 0;
             foreach (int idx in face.distinctIndexes) { localCenter += pb.positions[idx]; count++; }
             if (count == 0) continue;
-            float align = Vector3.Dot(pbToWorld.MultiplyPoint3x4(localCenter), dir);
+            Vector3 worldCenter = pbToWorld.MultiplyPoint3x4(localCenter / count);
+            float align = Vector3.Dot(worldCenter - pbBounds.center, dir);
             if (align >= bestAlign - 0.01f) allFacingFaces.Add(face);
         }
 
-        Vector3 pbFaceNormalWorld = pbToWorld.MultiplyVector(FaceNormal(pb, pbFace)).normalized;
+        // Use dir as the projection plane normal so rotation of the PB mesh doesn't matter.
+        Vector3 pbFaceNormalWorld = dir;
         Vector3 pbFacePtWorld     = pbToWorld.MultiplyPoint3x4(pb.positions[pbFace.distinctIndexes[0]]);
 
         List<Vector3> targetCorners = GetBoundsFaceCorners(targetBounds, -dir);
-        if (targetCorners == null || targetCorners.Count == 0) { log = "Could not determine target face corners."; return null; }
+        if (targetCorners == null || targetCorners.Count == 0) return null;
 
         // Project target corners onto PB face plane along gap direction
         var localPoints = new List<Vector3>();
@@ -374,33 +385,30 @@ public class ProBuilderVertexFollower : EditorWindow
             localPoints.Add(worldToPB.MultiplyPoint3x4(projected));
         }
 
-        // Clamp to AABB of all facing faces combined
-        Vector3 faceMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-        Vector3 faceMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-        foreach (var f in allFacingFaces)
-            foreach (int idx in f.distinctIndexes)
-            {
-                faceMin = Vector3.Min(faceMin, pb.positions[idx]);
-                faceMax = Vector3.Max(faceMax, pb.positions[idx]);
-            }
-        for (int i = 0; i < localPoints.Count; i++)
+        // Clamp projected rect to the AABB of the facing-side faces (allFacingFaces).
+        // Using face-center alignment (not face normals) means all faces on the same side
+        // contribute regardless of how subdivision has rotated their individual normals.
+        Vector3 clampMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 clampMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        foreach (var face in allFacingFaces)
         {
-            Vector3 p = localPoints[i];
-            localPoints[i] = new Vector3(
-                Mathf.Clamp(p.x, faceMin.x, faceMax.x),
-                Mathf.Clamp(p.y, faceMin.y, faceMax.y),
-                Mathf.Clamp(p.z, faceMin.z, faceMax.z));
+            foreach (int idx in face.distinctIndexes)
+            {
+                clampMin = Vector3.Min(clampMin, pb.positions[idx]);
+                clampMax = Vector3.Max(clampMax, pb.positions[idx]);
+            }
         }
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"v50  IBV preview for '{pb.gameObject.name}'  dir: {dir}");
-        sb.AppendLine($"  target bounds center: {targetBounds.center:F3}  extents: {targetBounds.extents:F3}");
-        sb.AppendLine($"  target corners (world):");
-        foreach (var p in targetCorners) sb.AppendLine($"    {p:F3}");
-        sb.AppendLine($"  points to insert (local, clamped):");
-        foreach (var p in localPoints) sb.AppendLine($"    {p:F3}");
-        sb.AppendLine("Click 'Confirm IBV' to apply, or ✕ to cancel.");
-        log = sb.ToString().TrimEnd();
+        if (clampMin.x < float.MaxValue)
+        {
+            for (int i = 0; i < localPoints.Count; i++)
+            {
+                Vector3 p = localPoints[i];
+                localPoints[i] = new Vector3(
+                    Mathf.Clamp(p.x, clampMin.x, clampMax.x),
+                    Mathf.Clamp(p.y, clampMin.y, clampMax.y),
+                    Mathf.Clamp(p.z, clampMin.z, clampMax.z));
+            }
+        }
 
         return localPoints;
     }
@@ -410,16 +418,15 @@ public class ProBuilderVertexFollower : EditorWindow
     {
         _ibvPreviewPoints     = new List<Vector3>();
         _ibvPreviewMovePoints = new List<Vector3>();
-        var logSb = new System.Text.StringBuilder();
+        _diagnoseText         = "";
 
         foreach (var entry in _entries)
         {
             if (entry.pbMesh == null) continue;
             Face       pbFace;
             List<Face> facingFaces;
-            string     log;
-            var localPoints = ComputeIBVPoints(entry, out pbFace, out facingFaces, out log);
-            if (localPoints == null) { logSb.AppendLine(log); continue; }
+            var localPoints = ComputeIBVPoints(entry, out pbFace, out facingFaces);
+            if (localPoints == null) continue;
 
             var pb        = entry.pbMesh;
             var pbToWorld = pb.transform.localToWorldMatrix;
@@ -445,11 +452,17 @@ public class ProBuilderVertexFollower : EditorWindow
                 float v1 = planeAxis1 == 0 ? pos.x : planeAxis1 == 1 ? pos.y : pos.z;
                 float v2 = planeAxis2 == 0 ? pos.x : planeAxis2 == 1 ? pos.y : pos.z;
 
-                bool isCorner = (Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol)
-                             && (Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol);
+                // A face outer edge is a fixed anchor unless it coincides with a rect boundary line.
+                // axis1 outer edge is fixed if its value doesn't match rect1Min or rect1Max.
+                // axis2 outer edge is fixed if its value doesn't match rect2Min or rect2Max.
+                bool onAxis1Outer = Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol;
+                bool onAxis2Outer = Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol;
+                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= outerTol || Mathf.Abs(v1 - rect1Max) <= outerTol;
+                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= outerTol || Mathf.Abs(v2 - rect2Max) <= outerTol;
+                bool isFixedAnchor = (onAxis1Outer && !axis1EdgeCoincides) || (onAxis2Outer && !axis2EdgeCoincides);
 
-                float new1 = isCorner ? v1 : Mathf.Clamp(v1, rect1Min, rect1Max);
-                float new2 = isCorner ? v2 : Mathf.Clamp(v2, rect2Min, rect2Max);
+                float new1 = isFixedAnchor ? v1 : Mathf.Clamp(v1, rect1Min, rect1Max);
+                float new2 = isFixedAnchor ? v2 : Mathf.Clamp(v2, rect2Min, rect2Max);
 
                 // Only show verts that pass the attach rule (within rect after clamping)
                 if (new1 < rect1Min - outerTol || new1 > rect1Max + outerTol) continue;
@@ -466,7 +479,6 @@ public class ProBuilderVertexFollower : EditorWindow
             }
         }
 
-        _diagnoseText = logSb.Length > 0 ? logSb.ToString().TrimEnd() : "";
         SceneView.RepaintAll();
         Repaint();
     }
@@ -482,9 +494,8 @@ public class ProBuilderVertexFollower : EditorWindow
             if (entry.pbMesh == null) continue;
 
             List<Face> facingFaces;
-            string     log;
-            var localPoints = ComputeIBVPoints(entry, out _, out facingFaces, out log);
-            if (localPoints == null) { diagSb.AppendLine(log); continue; }
+            var localPoints = ComputeIBVPoints(entry, out _, out facingFaces);
+            if (localPoints == null) continue;
 
             var pb = entry.pbMesh;
             Undo.RegisterCompleteObjectUndo(new Object[] { pb, pb.GetComponent<MeshFilter>().sharedMesh }, "Move Boundary Vertices");
@@ -507,11 +518,17 @@ public class ProBuilderVertexFollower : EditorWindow
                 float v1 = planeAxis1 == 0 ? pos.x : planeAxis1 == 1 ? pos.y : pos.z;
                 float v2 = planeAxis2 == 0 ? pos.x : planeAxis2 == 1 ? pos.y : pos.z;
 
-                bool isCorner = (Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol)
-                             && (Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol);
+                // A face outer edge is a fixed anchor unless it coincides with a rect boundary line.
+                // axis1 outer edge is fixed if its value doesn't match rect1Min or rect1Max.
+                // axis2 outer edge is fixed if its value doesn't match rect2Min or rect2Max.
+                bool onAxis1Outer = Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol;
+                bool onAxis2Outer = Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol;
+                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= outerTol || Mathf.Abs(v1 - rect1Max) <= outerTol;
+                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= outerTol || Mathf.Abs(v2 - rect2Max) <= outerTol;
+                bool isFixedAnchor = (onAxis1Outer && !axis1EdgeCoincides) || (onAxis2Outer && !axis2EdgeCoincides);
 
                 float new1 = v1, new2 = v2;
-                if (!isCorner)
+                if (!isFixedAnchor)
                 {
                     new1 = Mathf.Clamp(v1, rect1Min, rect1Max);
                     new2 = Mathf.Clamp(v2, rect2Min, rect2Max);
@@ -562,9 +579,8 @@ public class ProBuilderVertexFollower : EditorWindow
             if (entry.pbMesh == null || entry.movedVertexIds == null) continue;
 
             List<Face> facingFaces;
-            string     log;
-            var localPoints = ComputeIBVPoints(entry, out _, out facingFaces, out log);
-            if (localPoints == null) { diagSb.AppendLine(log); continue; }
+            var localPoints = ComputeIBVPoints(entry, out _, out facingFaces);
+            if (localPoints == null) continue;
 
             var pb = entry.pbMesh;
             ComputeFaceAxes(pb, facingFaces, localPoints,
@@ -686,17 +702,6 @@ public class ProBuilderVertexFollower : EditorWindow
             center - u * ru - v * rv,
             center + u * ru - v * rv,
         };
-    }
-
-    // Compute approximate face normal from a PB face's vertices
-    static Vector3 FaceNormal(ProBuilderMesh pb, Face face)
-    {
-        var idx = face.distinctIndexes;
-        if (idx.Count < 3) return Vector3.up;
-        Vector3 a = pb.positions[idx[0]];
-        Vector3 b = pb.positions[idx[1]];
-        Vector3 c = pb.positions[idx[2]];
-        return Vector3.Cross(b - a, c - a).normalized;
     }
 
     // ── Bounds helpers (mirror of JointAssistWindow logic) ────────────────────
