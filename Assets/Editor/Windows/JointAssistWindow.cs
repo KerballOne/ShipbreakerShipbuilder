@@ -39,6 +39,8 @@ public class JointAssistWindow : EditorWindow
     // Axis constraints for Part A (pos X Y Z, rot X Y Z) — all default true
     bool snapPosX = true, snapPosY = true, snapPosZ = true;
     bool snapRotX = true, snapRotY = true, snapRotZ = true;
+    // Scale snap axes — default unchecked; mutually exclusive with position per axis
+    bool snapScaleX = false, snapScaleY = false, snapScaleZ = false;
 
     // Joint placement state
     GameObject invisibleJointPrefab;
@@ -445,22 +447,37 @@ public class JointAssistWindow : EditorWindow
         // Axis checkboxes for Part A only
         if (slot == 1)
         {
-            // Position row
+            // Position row — mutually exclusive with scale per axis
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(68);
-            GUILayout.Label("Pos:", GUILayout.Width(28));
-            snapPosX = GUILayout.Toggle(snapPosX, "X", GUILayout.Width(26));
-            snapPosY = GUILayout.Toggle(snapPosY, "Y", GUILayout.Width(26));
-            snapPosZ = GUILayout.Toggle(snapPosZ, "Z", GUILayout.Width(26));
+            GUILayout.Label("Position:", GUILayout.Width(56));
+            bool newPosX = GUILayout.Toggle(snapPosX, "X", GUILayout.Width(26));
+            bool newPosY = GUILayout.Toggle(snapPosY, "Y", GUILayout.Width(26));
+            bool newPosZ = GUILayout.Toggle(snapPosZ, "Z", GUILayout.Width(26));
+            if (newPosX != snapPosX) { snapPosX = newPosX; if (newPosX) snapScaleX = false; }
+            if (newPosY != snapPosY) { snapPosY = newPosY; if (newPosY) snapScaleY = false; }
+            if (newPosZ != snapPosZ) { snapPosZ = newPosZ; if (newPosZ) snapScaleZ = false; }
             EditorGUILayout.EndHorizontal();
 
             // Rotation row
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(68);
-            GUILayout.Label("Rot:", GUILayout.Width(28));
+            GUILayout.Label("Rotation:", GUILayout.Width(56));
             snapRotX = GUILayout.Toggle(snapRotX, "X", GUILayout.Width(26));
             snapRotY = GUILayout.Toggle(snapRotY, "Y", GUILayout.Width(26));
             snapRotZ = GUILayout.Toggle(snapRotZ, "Z", GUILayout.Width(26));
+            EditorGUILayout.EndHorizontal();
+
+            // Scale row — mutually exclusive with position per axis
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(68);
+            GUILayout.Label("Scale:", GUILayout.Width(56));
+            bool newScaleX = GUILayout.Toggle(snapScaleX, "X", GUILayout.Width(26));
+            bool newScaleY = GUILayout.Toggle(snapScaleY, "Y", GUILayout.Width(26));
+            bool newScaleZ = GUILayout.Toggle(snapScaleZ, "Z", GUILayout.Width(26));
+            if (newScaleX != snapScaleX) { snapScaleX = newScaleX; if (newScaleX) snapPosX = false; }
+            if (newScaleY != snapScaleY) { snapScaleY = newScaleY; if (newScaleY) snapPosY = false; }
+            if (newScaleZ != snapScaleZ) { snapScaleZ = newScaleZ; if (newScaleZ) snapPosZ = false; }
             EditorGUILayout.EndHorizontal();
         }
     }
@@ -1534,16 +1551,75 @@ public class JointAssistWindow : EditorWindow
         Quaternion newRot = alignRot * moveRoot.rotation;
         Vector3 newPos    = ptA + alignRot * toRoot;
 
-        // Translation to match face points
-        Vector3 targetPos = ptB + fB.normal * overlap;
-        Vector3 delta     = targetPos - ptA;
-        if (!snapPosX) delta.x = 0;
-        if (!snapPosY) delta.y = 0;
-        if (!snapPosZ) delta.z = 0;
-        newPos += delta;
+        bool anyScale = snapScaleX || snapScaleY || snapScaleZ;
 
-        moveRoot.rotation = newRot;
-        moveRoot.position = newPos;
+        if (anyScale)
+        {
+            // Scale snap is measured BEFORE translation so the span reflects the object's
+            // current size, not the distance to face B.
+            // Apply rotation first so bounds are measured in the post-rotation orientation.
+            moveRoot.rotation = newRot;
+            moveRoot.position = newPos; // rotation pivot position only, no translation yet
+
+            Bounds rootBounds = GetBounds(moveRoot.gameObject);
+
+            // Face A normal in world space after rotation is applied.
+            Vector3 faceANormalWorld = fA.source.transform.localToWorldMatrix.MultiplyVector(fA.localNormal).normalized;
+
+            // Current extent of the object along the face normal.
+            float faceExtent   = ReachInDir(rootBounds, faceANormalWorld);
+            float faceCenter1D = Vector3.Dot(rootBounds.center, faceANormalWorld);
+            float currentFacePos = faceCenter1D + faceExtent; // face-A side world position
+            float backFacePos    = faceCenter1D - faceExtent; // opposite (stationary) side
+
+            // Where face A needs to end up.
+            float targetFacePos = Vector3.Dot(ptB + fB.normal * overlap, faceANormalWorld);
+
+            // Required span from back face to target face.
+            float currentSpan = currentFacePos - backFacePos;
+            float targetSpan  = targetFacePos  - backFacePos;
+
+            if (Mathf.Abs(currentSpan) > 1e-5f && Mathf.Abs(targetSpan) > 1e-5f)
+            {
+                float scaleFactor = targetSpan / currentSpan;
+
+                // Map the world face normal to local space to find which local axis to scale.
+                Vector3 localSnapDir = moveRoot.worldToLocalMatrix.MultiplyVector(faceANormalWorld).normalized;
+
+                Vector3 newScale = moveRoot.localScale;
+                bool scaledAny = false;
+                if (snapScaleX && Mathf.Abs(localSnapDir.x) > 0.5f) { newScale.x = moveRoot.localScale.x * scaleFactor; scaledAny = true; }
+                if (snapScaleY && Mathf.Abs(localSnapDir.y) > 0.5f) { newScale.y = moveRoot.localScale.y * scaleFactor; scaledAny = true; }
+                if (snapScaleZ && Mathf.Abs(localSnapDir.z) > 0.5f) { newScale.z = moveRoot.localScale.z * scaleFactor; scaledAny = true; }
+
+                if (scaledAny)
+                {
+                    moveRoot.localScale = newScale;
+
+                    // Unity scales around the transform pivot. The back face was at offset
+                    // (backFacePos - pivotPos1D) from the pivot; after scaling that offset
+                    // grows by scaleFactor. Correct position so the back face stays put.
+                    float pivotPos1D      = Vector3.Dot(moveRoot.position, faceANormalWorld);
+                    float backOffset      = backFacePos - pivotPos1D;
+                    float backAfterScale  = pivotPos1D + backOffset * scaleFactor;
+                    float correction1D    = backFacePos - backAfterScale;
+                    moveRoot.position    += faceANormalWorld * correction1D;
+                }
+            }
+        }
+        else
+        {
+            // Pure position/rotation snap — apply rotation then translate.
+            Vector3 targetPos = ptB + fB.normal * overlap;
+            Vector3 delta     = targetPos - ptA;
+            if (!snapPosX) delta.x = 0;
+            if (!snapPosY) delta.y = 0;
+            if (!snapPosZ) delta.z = 0;
+            newPos += delta;
+
+            moveRoot.rotation = newRot;
+            moveRoot.position = newPos;
+        }
 
         statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm {(overlap > 0 ? "gap" : overlap < 0 ? "overlap" : "flush")}).";
         statusType    = MessageType.Info;
