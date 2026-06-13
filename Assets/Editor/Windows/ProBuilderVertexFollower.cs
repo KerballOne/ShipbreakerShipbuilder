@@ -25,6 +25,7 @@ public class ProBuilderVertexFollower : EditorWindow
         public Vector3        targetPosAtAttach;
         public int[]          movedVertexIds;    // set after Move Vertices, cleared after Attach
         public Vector3[]      movedLocalPositions;
+        public int            previewVertCount = -1;  // set after Preview, -1 = not previewed
     }
 
     // ── Window state ──────────────────────────────────────────────────────────
@@ -103,7 +104,8 @@ public class ProBuilderVertexFollower : EditorWindow
             string label = entry.pbMesh == null ? "(missing)" :
                 entry.pbMesh.gameObject.name +
                 (entry.sharedVertexIds != null ? $"  [{entry.sharedVertexIds.Length} attached]" :
-                 entry.movedVertexIds  != null ? $"  [{entry.movedVertexIds.Length} moved]" : "");
+                 entry.movedVertexIds  != null ? $"  [{entry.movedVertexIds.Length} moved]" :
+                 entry.previewVertCount >= 0   ? $"  [{entry.previewVertCount} found]" : "");
             EditorGUILayout.LabelField(label, EditorStyles.helpBox);
             GUI.backgroundColor = prevBG;
             if (GUILayout.Button("✕", GUILayout.Width(28)))
@@ -127,7 +129,7 @@ public class ProBuilderVertexFollower : EditorWindow
                 if (EditorGUI.EndChangeCheck())
                     entry.subdivideApplied = false;
                 if (GUILayout.Button("Detect", GUILayout.Width(50)))
-                { entry.subdivideCount = ComputeSubdivisions(entry); entry.subdivideApplied = false; }
+                { _diagnoseText = ""; entry.subdivideCount = ComputeSubdivisions(entry, diagnose: true); entry.subdivideApplied = false; }
                 var prevBG2 = GUI.backgroundColor;
                 GUI.backgroundColor = entry.subdivideApplied
                     ? new Color(0.3f, 0.3f, 0.3f)
@@ -244,7 +246,7 @@ public class ProBuilderVertexFollower : EditorWindow
 
     // ── Subdivide closest face ────────────────────────────────────────────────
 
-    int ComputeSubdivisions(PBEntry entry)
+    int ComputeSubdivisions(PBEntry entry, bool diagnose = false)
     {
         if (_targetGO == null || entry.pbMesh == null) return 0;
 
@@ -255,12 +257,26 @@ public class ProBuilderVertexFollower : EditorWindow
         Vector2 pbFaceSize     = FaceSize(pbBounds, dir);
         Vector2 targetFaceSize = FaceSize(targetBounds, dir);
 
-        int subX = pbFaceSize.x > targetFaceSize.x && targetFaceSize.x > 0f
+        int subX = targetFaceSize.x > 0f && pbFaceSize.x > targetFaceSize.x * 1.05f
             ? Mathf.CeilToInt(pbFaceSize.x / targetFaceSize.x) : 0;
-        int subY = pbFaceSize.y > targetFaceSize.y && targetFaceSize.y > 0f
+        int subY = targetFaceSize.y > 0f && pbFaceSize.y > targetFaceSize.y * 1.05f
             ? Mathf.CeilToInt(pbFaceSize.y / targetFaceSize.y) : 0;
         int ratio = Mathf.Max(subX, subY);
-        return Mathf.Clamp(ratio > 1 ? Mathf.CeilToInt(Mathf.Log(ratio, 2f)) : ratio, 0, 8);
+        int result = Mathf.Clamp(ratio > 1 ? Mathf.CeilToInt(Mathf.Log(ratio, 2f)) : ratio, 0, 8);
+
+        if (diagnose)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"=== Detect: '{entry.pbMesh.gameObject.name}' ===");
+            sb.AppendLine($"  pbBounds  center:{pbBounds.center}  size:{pbBounds.size}");
+            sb.AppendLine($"  tgtBounds center:{targetBounds.center}  size:{targetBounds.size}");
+            sb.AppendLine($"  dir:{dir}");
+            sb.AppendLine($"  pbFaceSize:({pbFaceSize.x:F6},{pbFaceSize.y:F6})  targetFaceSize:({targetFaceSize.x:F6},{targetFaceSize.y:F6})");
+            sb.AppendLine($"  subX:{subX}  subY:{subY}  ratio:{ratio}  result:{result}");
+            _diagnoseText = sb.ToString();
+        }
+
+        return result;
     }
 
     void DoSubdivideFace(PBEntry entry)
@@ -419,6 +435,7 @@ public class ProBuilderVertexFollower : EditorWindow
         _ibvPreviewPoints     = new List<Vector3>();
         _ibvPreviewMovePoints = new List<Vector3>();
         _diagnoseText         = "";
+        foreach (var entry in _entries) entry.previewVertCount = -1;
 
         foreach (var entry in _entries)
         {
@@ -446,6 +463,7 @@ public class ProBuilderVertexFollower : EditorWindow
 
             // Collect verts that will be moved or attached — at their post-move positions
             float outerTol = 0.001f;
+            int countBefore = _ibvPreviewMovePoints.Count;
             foreach (int si in faceVertSIs)
             {
                 Vector3 pos = pb.positions[pb.sharedVertices[si][0]];
@@ -457,8 +475,10 @@ public class ProBuilderVertexFollower : EditorWindow
                 // axis2 outer edge is fixed if its value doesn't match rect2Min or rect2Max.
                 bool onAxis1Outer = Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol;
                 bool onAxis2Outer = Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol;
-                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= outerTol || Mathf.Abs(v1 - rect1Max) <= outerTol;
-                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= outerTol || Mathf.Abs(v2 - rect2Max) <= outerTol;
+                // Use a larger coincidence tolerance to handle bounds imprecision (~5cm)
+                float coincideTol = 0.05f;
+                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= coincideTol || Mathf.Abs(v1 - rect1Max) <= coincideTol;
+                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= coincideTol || Mathf.Abs(v2 - rect2Max) <= coincideTol;
                 bool isFixedAnchor = (onAxis1Outer && !axis1EdgeCoincides) || (onAxis2Outer && !axis2EdgeCoincides);
 
                 float new1 = isFixedAnchor ? v1 : Mathf.Clamp(v1, rect1Min, rect1Max);
@@ -477,6 +497,8 @@ public class ProBuilderVertexFollower : EditorWindow
                 }
                 _ibvPreviewMovePoints.Add(pbToWorld.MultiplyPoint3x4(displayPos));
             }
+            entry.previewVertCount = _ibvPreviewMovePoints.Count - countBefore;
+            _diagnoseText += $"'{pb.gameObject.name}': {entry.previewVertCount} found  rect1:[{rect1Min:F3},{rect1Max:F3}] rect2:[{rect2Min:F3},{rect2Max:F3}]  face1:[{face1Min:F3},{face1Max:F3}] face2:[{face2Min:F3},{face2Max:F3}]\n";
         }
 
         SceneView.RepaintAll();
@@ -523,8 +545,10 @@ public class ProBuilderVertexFollower : EditorWindow
                 // axis2 outer edge is fixed if its value doesn't match rect2Min or rect2Max.
                 bool onAxis1Outer = Mathf.Abs(v1 - face1Min) <= outerTol || Mathf.Abs(v1 - face1Max) <= outerTol;
                 bool onAxis2Outer = Mathf.Abs(v2 - face2Min) <= outerTol || Mathf.Abs(v2 - face2Max) <= outerTol;
-                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= outerTol || Mathf.Abs(v1 - rect1Max) <= outerTol;
-                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= outerTol || Mathf.Abs(v2 - rect2Max) <= outerTol;
+                // Use a larger coincidence tolerance to handle bounds imprecision (~5cm)
+                float coincideTol = 0.05f;
+                bool axis1EdgeCoincides = Mathf.Abs(v1 - rect1Min) <= coincideTol || Mathf.Abs(v1 - rect1Max) <= coincideTol;
+                bool axis2EdgeCoincides = Mathf.Abs(v2 - rect2Min) <= coincideTol || Mathf.Abs(v2 - rect2Max) <= coincideTol;
                 bool isFixedAnchor = (onAxis1Outer && !axis1EdgeCoincides) || (onAxis2Outer && !axis2EdgeCoincides);
 
                 float new1 = v1, new2 = v2;
@@ -823,6 +847,7 @@ public class ProBuilderVertexFollower : EditorWindow
             e.targetPosAtAttach   = Vector3.zero;
             e.movedVertexIds      = null;
             e.movedLocalPositions = null;
+            e.previewVertCount    = -1;
         }
         _ibvPreviewPoints     = null;
         _ibvPreviewMovePoints = null;
