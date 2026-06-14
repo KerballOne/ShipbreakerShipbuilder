@@ -389,7 +389,7 @@ public class ImportGamePartWizard : EditorWindow
             EditorGUILayout.HelpBox($"Regex: {m_RegexError}", MessageType.Error);
 
         if (!hasGameAssets)
-            EditorGUILayout.HelpBox("No game assets loaded. Run  Shipbreaker → Reload Assets  to include game library parts.", MessageType.Warning);
+            EditorGUILayout.HelpBox("No game assets loaded. Run  Shipbreaker → Actions → Update known assets  then  Reload Assets  to include game library parts.", MessageType.Warning);
 
         // Apply filter/mode changes immediately so they persist across the Layout/Repaint pass pair.
         // Mark m_FiltersDirty when any of them actually changed so the next Layout pass rebuilds.
@@ -876,19 +876,44 @@ public class ImportGamePartWizard : EditorWindow
         m_LastSearch = null;
     }
 
+    struct ParsedSearch
+    {
+        public string[] include;
+        public string[] exclude;
+        public bool     isEmpty => include.Length == 0 && exclude.Length == 0;
+    }
+
+    static ParsedSearch ParseSearchTerms(string raw)
+    {
+        var tokens  = raw.Trim().Split(new[] { ' ', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
+        var include = new List<string>();
+        var exclude = new List<string>();
+        foreach (var t in tokens)
+        {
+            if (t.StartsWith("-") && t.Length > 1)
+                exclude.Add(t.Substring(1));
+            else
+                include.Add(t);
+        }
+        return new ParsedSearch { include = include.ToArray(), exclude = exclude.ToArray() };
+    }
+
     void RebuildResults()
     {
         m_Results.Clear();
         m_RegexError = null;
-        var term = m_Search.Trim();
-        PushSearchHistory(term);
+        var raw = m_Search.Trim();
+        PushSearchHistory(raw);
 
         Regex regex = null;
-        if (m_UseRegex && !string.IsNullOrEmpty(term))
+        if (m_UseRegex && !string.IsNullOrEmpty(raw))
         {
-            try   { regex = new Regex(term, RegexOptions.IgnoreCase); }
+            try   { regex = new Regex(raw, RegexOptions.IgnoreCase); }
             catch (System.Exception e) { m_RegexError = e.Message; return; }
         }
+
+        var parsed = m_UseRegex ? new ParsedSearch { include = string.IsNullOrEmpty(raw) ? System.Array.Empty<string>() : new[] { raw }, exclude = System.Array.Empty<string>() }
+                                : ParseSearchTerms(raw);
 
         // ── Game addressables ─────────────────────────────────────────────────
         if (LoadGameAssets.knownAssetMap != null)
@@ -904,7 +929,7 @@ public class ImportGamePartWizard : EditorWindow
                 m_Enriched?.TryGetValue(kv.Key, out enriched);
                 var displayName = enriched?.DisplayName ?? "";
 
-                if (!MatchesTerm(term, regex, partName, displayName, path, kv.Key)) continue;
+                if (!MatchesTerm(parsed, regex, partName, displayName, path, kv.Key)) continue;
 
                 float[] d = enriched?.Dims;
                 if (m_Results.Count >= m_MaxResults) break;
@@ -931,7 +956,7 @@ public class ImportGamePartWizard : EditorWindow
             var path     = AssetDatabase.GUIDToAssetPath(g);
             var partName = Path.GetFileNameWithoutExtension(path);
 
-            if (!MatchesTerm(term, regex, partName, "", path)) continue;
+            if (!MatchesTerm(parsed, regex, partName, "", path)) continue;
 
             if (m_Results.Count >= m_MaxResults) break;
             var prefab    = AssetDatabase.LoadAssetAtPath<GameObject>(path);
@@ -949,9 +974,9 @@ public class ImportGamePartWizard : EditorWindow
         ApplySort();
     }
 
-    bool MatchesTerm(string term, Regex regex, string partName, string displayName, string path, string guid = "")
+    bool MatchesTerm(ParsedSearch parsed, Regex regex, string partName, string displayName, string path, string guid = "")
     {
-        if (string.IsNullOrEmpty(term)) return true;
+        if (parsed.isEmpty) return true;
         string target = m_SearchMode switch
         {
             SearchMode.Path        => path,
@@ -959,9 +984,13 @@ public class ImportGamePartWizard : EditorWindow
             SearchMode.GUID        => guid,
             _                      => partName,
         };
-        return regex != null
-            ? regex.IsMatch(target)
-            : target.IndexOf(term, System.StringComparison.OrdinalIgnoreCase) >= 0;
+        if (regex != null)
+            return regex.IsMatch(target);
+        foreach (var exc in parsed.exclude)
+            if (target.IndexOf(exc, System.StringComparison.OrdinalIgnoreCase) >= 0) return false;
+        foreach (var inc in parsed.include)
+            if (target.IndexOf(inc, System.StringComparison.OrdinalIgnoreCase) < 0) return false;
+        return true;
     }
 
     void ApplySort()
@@ -1039,16 +1068,28 @@ public class ImportGamePartWizard : EditorWindow
             return;
         }
 
-        Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(guidOrPath)).Completed += res =>
+        var locOp = Addressables.LoadResourceLocationsAsync(guidOrPath, typeof(GameObject));
+        locOp.Completed += locRes =>
         {
-            if (res.Status != AsyncOperationStatus.Succeeded || res.Result == null)
+            if (locRes.Status != AsyncOperationStatus.Succeeded || locRes.Result?.Count == 0)
             {
-                m_StatusLine = $"Failed to load addressable '{guidOrPath}'.";
-                Repaint();
+                m_StatusLine = $"Failed to locate addressable '{guidOrPath}'.";
+                m_NeedsRepaint = true;
                 return;
             }
-            CustomStage.go = res.Result;
-            UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+            var loadOp = Addressables.LoadAssetAsync<GameObject>(locRes.Result[0]);
+            loadOp.Completed += res =>
+            {
+                if (res.Status != AsyncOperationStatus.Succeeded || res.Result == null)
+                {
+                    m_StatusLine = $"Failed to load addressable '{guidOrPath}'.";
+                    m_NeedsRepaint = true;
+                    return;
+                }
+                m_StatusLine = "";
+                CustomStage.go = res.Result;
+                UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+            };
         };
     }
 
