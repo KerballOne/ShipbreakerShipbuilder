@@ -38,6 +38,23 @@ public class ImportGamePartWizard : EditorWindow
     string     m_OutputFolder = "Assets/_CustomShips/";
     string     m_StatusLine   = "";
 
+    static string DefaultOutputFolder()
+    {
+        // Walk scene roots to find a ship prefab instance (Assets/_CustomShips/<Name>/<Name>.prefab).
+        var scene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+        foreach (var root in scene.GetRootGameObjects())
+        {
+            var srcPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
+            if (string.IsNullOrEmpty(srcPath)) continue;
+            // Match Assets/_CustomShips/<ShipName>/<ShipName>.prefab
+            var dir = Path.GetDirectoryName(srcPath).Replace('\\', '/');
+            var shipName = Path.GetFileName(dir);
+            if (srcPath == $"{dir}/{shipName}.prefab" && AssetDatabase.IsValidFolder(dir))
+                return dir + "/";
+        }
+        return "Assets/_CustomShips/";
+    }
+
     SortColumn m_SortCol     = SortColumn.PartName;
     bool       m_SortAsc     = true;
     int        m_ChildDepth  = 2;
@@ -176,6 +193,10 @@ public class ImportGamePartWizard : EditorWindow
         wantsMouseEnterLeaveWindow = true;
         EditorApplication.update += OnEditorUpdate;
         if (m_Enriched == null) LoadEnrichedData();
+        var saved = EditorPrefs.GetString(PrefOutputFolder, "");
+        m_OutputFolder = (string.IsNullOrEmpty(saved) || saved == "Assets/_CustomShips/")
+            ? DefaultOutputFolder()
+            : saved;
     }
 
     void OnDisable()
@@ -204,7 +225,10 @@ public class ImportGamePartWizard : EditorWindow
     static void Open()
     {
         var w = GetWindow<ImportGamePartWizard>("Import Game Part");
-        w.m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+        var saved = EditorPrefs.GetString(PrefOutputFolder, "");
+        w.m_OutputFolder = (string.IsNullOrEmpty(saved) || saved == "Assets/_CustomShips/")
+            ? DefaultOutputFolder()
+            : saved;
         w.LoadEnrichedData();
     }
 

@@ -51,7 +51,24 @@ public class MeshCurveDeformer : EditorWindow
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const string SaveFolder = "Assets/_CustomShips/Meshes/CurvedMeshes";
+    string _saveFolder;
+
+    string SaveFolder => string.IsNullOrEmpty(_saveFolder) ? (_saveFolder = DefaultSaveFolder()) : _saveFolder;
+
+    static string DefaultSaveFolder()
+    {
+        var scene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+        foreach (var root in scene.GetRootGameObjects())
+        {
+            var srcPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
+            if (string.IsNullOrEmpty(srcPath)) continue;
+            var dir = Path.GetDirectoryName(srcPath).Replace('\\', '/');
+            var shipName = Path.GetFileName(dir);
+            if (srcPath == $"{dir}/{shipName}.prefab" && AssetDatabase.IsValidFolder(dir))
+                return dir + "/Meshes/CurvedMeshes";
+        }
+        return "Assets/_CustomShips/Meshes/CurvedMeshes";
+    }
 
     static readonly Color kSrcColor  = new Color(1f, 0.55f, 0f, 1f);  // orange
     static readonly Color kDstColor  = new Color(0.2f, 0.55f, 1f, 1f); // blue
@@ -173,6 +190,18 @@ public class MeshCurveDeformer : EditorWindow
             MessageType.None);
 
         EditorGUILayout.Space(8);
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label("Output:", EditorStyles.miniLabel, GUILayout.Width(46));
+        _saveFolder = EditorGUILayout.TextField(SaveFolder);
+        if (GUILayout.Button("Browse", GUILayout.Width(60)))
+        {
+            var picked = EditorUtility.OpenFolderPanel("Select Output Folder", Application.dataPath, "");
+            if (!string.IsNullOrEmpty(picked) && picked.StartsWith(Application.dataPath))
+                _saveFolder = "Assets" + picked.Substring(Application.dataPath.Length).Replace('\\', '/');
+        }
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.Space(4);
         bool canApply = validTarget && _srcFace.HasValue && _dstFace.HasValue &&
                         (straightMode || _preview.HasValue);
         using (new EditorGUI.DisabledScope(!canApply))
@@ -1107,11 +1136,12 @@ public class MeshCurveDeformer : EditorWindow
         AssetDatabase.CreateAsset(mesh, path);
     }
 
-    static void EnsureSaveFolder()
+    void EnsureSaveFolder()
     {
-        if (AssetDatabase.IsValidFolder(SaveFolder)) return;
-        EnsureFolder(Path.GetDirectoryName(SaveFolder).Replace('\\', '/'));
-        AssetDatabase.CreateFolder(Path.GetDirectoryName(SaveFolder).Replace('\\', '/'), Path.GetFileName(SaveFolder));
+        var folder = SaveFolder;
+        if (AssetDatabase.IsValidFolder(folder)) return;
+        EnsureFolder(Path.GetDirectoryName(folder).Replace('\\', '/'));
+        AssetDatabase.CreateFolder(Path.GetDirectoryName(folder).Replace('\\', '/'), Path.GetFileName(folder));
     }
 
     static void EnsureFolder(string folder)

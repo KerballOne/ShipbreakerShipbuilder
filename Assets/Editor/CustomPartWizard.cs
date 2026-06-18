@@ -88,16 +88,35 @@ public class CustomPartWizard : EditorWindow
 
     Vector2 m_Scroll;
 
+    static string DefaultOutputFolder()
+    {
+        var scene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+        foreach (var root in scene.GetRootGameObjects())
+        {
+            var srcPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
+            if (string.IsNullOrEmpty(srcPath)) continue;
+            var dir = System.IO.Path.GetDirectoryName(srcPath).Replace('\\', '/');
+            var shipName = System.IO.Path.GetFileName(dir);
+            if (srcPath == $"{dir}/{shipName}.prefab" && AssetDatabase.IsValidFolder(dir))
+                return dir + "/";
+        }
+        return "Assets/_CustomShips/";
+    }
+
     [MenuItem("Shipbreaker/Shipbuilder Tools/Create Custom Part Wizard", priority = -10)]
     static void Open()
     {
         var w = GetWindow<CustomPartWizard>("Custom Part Wizard");
-        w.m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+        var savedCPW = EditorPrefs.GetString(PrefOutputFolder, "");
+        w.m_OutputFolder = (string.IsNullOrEmpty(savedCPW) || savedCPW == "Assets/_CustomShips/")
+            ? DefaultOutputFolder() : savedCPW;
     }
 
     void OnEnable()
     {
-        m_OutputFolder = EditorPrefs.GetString(PrefOutputFolder, "Assets/_CustomShips/");
+        var saved = EditorPrefs.GetString(PrefOutputFolder, "");
+        m_OutputFolder = (string.IsNullOrEmpty(saved) || saved == "Assets/_CustomShips/")
+            ? DefaultOutputFolder() : saved;
         int id = EditorPrefs.GetInt(PrefSourceObjectID, 0);
         if (id != 0)
             m_SourceObject = EditorUtility.InstanceIDToObject(id) as GameObject;
