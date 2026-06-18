@@ -81,10 +81,16 @@ public class GameInspectorWindow : EditorWindow
 
         if (foundGuid != "" && LoadGameAssets.knownAssetMap[foundGuid].EndsWith(".prefab") && GUILayout.Button("Open prefab in preview scene (readonly)") && !string.IsNullOrWhiteSpace(searchTerm))
         {
-            Addressables.LoadAssetAsync<GameObject>(new AssetReferenceGameObject(foundGuid)).Completed += res =>
+            var locOp = Addressables.LoadResourceLocationsAsync(foundGuid, typeof(GameObject));
+            locOp.Completed += locRes =>
             {
-                CustomStage.go = res.Result;
-                UnityEditor.SceneManagement.StageUtility.GoToStage(new CustomStage(), true);
+                if (locRes.Status != UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationStatus.Succeeded || locRes.Result?.Count == 0) return;
+                Addressables.LoadAssetAsync<GameObject>(locRes.Result[0]).Completed += res =>
+                {
+                    if (res.Result == null) return;
+                    CustomStage.go = res.Result;
+                    UnityEditor.SceneManagement.StageUtility.GoToStage(ScriptableObject.CreateInstance<CustomStage>(), true);
+                };
             };
         }
     }

@@ -40,8 +40,8 @@ public class SelectAddressableParentEditor : Editor
             var raw = JsonConvert.DeserializeObject<Dictionary<string, RawEntry>>(File.ReadAllText(path));
             foreach (var kv in raw)
             {
-                if (string.IsNullOrEmpty(kv.Value?.partName)) continue;
-                s_ByName[kv.Value.partName] = new EnrichedEntry
+                if (kv.Value == null) continue;
+                var e = new EnrichedEntry
                 {
                     displayName = kv.Value.displayName,
                     partName    = kv.Value.partName,
@@ -49,6 +49,9 @@ public class SelectAddressableParentEditor : Editor
                     volume      = kv.Value.volume,
                     mass        = kv.Value.mass,
                 };
+                s_ByName[kv.Key] = e;
+                if (!string.IsNullOrEmpty(kv.Value.partName))
+                    s_ByName[kv.Value.partName] = e;
             }
         }
         catch { }
@@ -61,7 +64,8 @@ public class SelectAddressableParentEditor : Editor
         EditorGUILayout.LabelField("Part Info", EditorStyles.boldLabel);
 
         EnrichedEntry entry = null;
-        bool found = s_ByName != null && s_ByName.TryGetValue(go.name, out entry);
+        var lookupName = go.name.EndsWith("(Clone)") ? go.name.Substring(0, go.name.Length - 7).TrimEnd() : go.name;
+        bool found = s_ByName != null && s_ByName.TryGetValue(lookupName, out entry);
 
         if (found)
         {
