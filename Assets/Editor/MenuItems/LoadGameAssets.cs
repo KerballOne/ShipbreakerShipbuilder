@@ -27,7 +27,7 @@ public class LoadGameAssets
         EditorApplication.hierarchyChanged += OnHierarchyChanged;
     }
 
-    [MenuItem("Shipbuilder/Actions/Force View Refresh %&r", priority = 1)]
+    [MenuItem("Shipbuilder/Actions/Force View Refresh %&r", priority = 11)]
     static void ViewRefresh()
     {
         lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
@@ -35,7 +35,7 @@ public class LoadGameAssets
         AddressableRendering.UpdateViewList();
     }
 
-    [MenuItem("Shipbuilder/Actions/Clear Editor Cache", priority = 20)]
+    [MenuItem("Shipbuilder/Actions/Clear Editor Cache", priority = 30)]
     static void ClearAssetCache()
     {
         AssetDatabase.DeleteAssets(new string[] { "Assets/EditorCache" }, new List<string>());
@@ -44,16 +44,15 @@ public class LoadGameAssets
         AssetDatabase.Refresh();
     }
 
-    [MenuItem("Shipbuilder/Actions/Clear View", priority = 21)]
+    [MenuItem("Shipbuilder/Actions/Clear View", priority = 31)]
     static void ClearView()
     {
         AddressableRendering.ClearView();
     }
 
-    [MenuItem("Shipbuilder/Actions/Reload Assets", priority = 40)]
+    [MenuItem("Shipbuilder/Actions/Reload Assets", priority = 50)]
     public static void ReloadAssets()
     {
-        AssetBundle.UnloadAllAssetBundles(false);
         UnloadAssets();
 
         if(File.Exists(Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "com.unity.addressables", "aa", "Windows", "catalog.json"))))
@@ -94,7 +93,7 @@ public class LoadGameAssets
         }
     }
 
-    [MenuItem("Shipbuilder/Actions/Rebuild Addressables", priority = 41)]
+    [MenuItem("Shipbuilder/Actions/Rebuild Addressables", priority = 51)]
     public static void RebuildAddressables()
     {
         AddressableAssetSettings.BuildPlayerContent();
