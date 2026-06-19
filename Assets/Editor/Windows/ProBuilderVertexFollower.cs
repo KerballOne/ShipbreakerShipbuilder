@@ -56,7 +56,7 @@ public class ProBuilderVertexFollower : EditorWindow
 
     // ── Window ────────────────────────────────────────────────────────────────
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/PB Vertex Follower", priority = 25)]
+    [MenuItem("Shipbuilder/PB Vertex Follower", priority = 201)]
     static void Open() => GetWindow<ProBuilderVertexFollower>("PB Vertex Follower");
 
     void OnEnable()  => SceneView.duringSceneGui += OnSceneGUI;

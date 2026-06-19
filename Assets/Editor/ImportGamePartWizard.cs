@@ -221,7 +221,7 @@ public class ImportGamePartWizard : EditorWindow
         }
     }
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Import Game Part Wizard", priority = -20)]
+    [MenuItem("Shipbuilder/Import Game Part Wizard", priority = 100)]
     static void Open()
     {
         var w = GetWindow<ImportGamePartWizard>("Import Game Part");

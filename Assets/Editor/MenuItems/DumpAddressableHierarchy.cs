@@ -8,7 +8,7 @@ using System.Text;
 
 public static class DumpAddressableHierarchy
 {
-    [MenuItem("Shipbreaker/Dump Selected Components", priority = 200)]
+    [MenuItem("Shipbuilder/Actions/Dump Selected Components", priority = 80)]
     static void DumpSelectedComponents()
     {
         var go = Selection.activeGameObject;
@@ -20,7 +20,7 @@ public static class DumpAddressableHierarchy
         Debug.Log(sb.ToString());
     }
 
-    [MenuItem("Shipbreaker/Dump Addressable Components (live)", priority = 200)]
+    [MenuItem("Shipbuilder/Actions/Dump Addressable Components (live)", priority = 81)]
     static void DumpAddressableComponents()
     {
         var go = Selection.activeGameObject;

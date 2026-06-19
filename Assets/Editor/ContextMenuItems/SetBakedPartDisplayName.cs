@@ -41,12 +41,12 @@ public static class SetBakedPartDisplayName
 
     // ── Scene hierarchy (live GameObjects) ──────────────────────────────────
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Set Display Name on Selected…", true)]
+    [MenuItem("Shipbuilder/Set Display Name on Selected…", true)]
     static bool ValidateScene() => Selection.gameObjects.Length > 0 &&
         System.Array.Exists(Selection.gameObjects, go =>
             go.GetComponentsInChildren<StructurePart>(true).Length > 0);
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Set Display Name on Selected…", false, 100)]
+    [MenuItem("Shipbuilder/Set Display Name on Selected…", false, 161)]
     static void ExecuteScene()
     {
         // Collect all StructureParts under every selected GameObject

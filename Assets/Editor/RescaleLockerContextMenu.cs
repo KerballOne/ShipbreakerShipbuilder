@@ -8,10 +8,12 @@ using UnityEngine;
 /// </summary>
 public static class RescaleLockerContextMenu
 {
-    const string Path = "CONTEXT/Transform/Lock In Rescale";
+    const string TransformMenuPath = "CONTEXT/Transform/Lock In Rescale";
+    const string GOMenuPath        = "GameObject/Shipbreaker/Lock In Rescale";
+    const string ShipMenuPath      = "Shipbuilder/Lock In Rescale";
 
-    [MenuItem(Path, true)]
-    static bool Validate(MenuCommand command)
+    [MenuItem(TransformMenuPath, true)]
+    static bool ValidateTransform(MenuCommand command)
     {
         var t = command.context as Transform;
         return t != null
@@ -19,10 +21,30 @@ public static class RescaleLockerContextMenu
             && RescaleLocker.CountAffected(t) > 0;
     }
 
-    [MenuItem(Path, false)]
-    static void Execute(MenuCommand command)
+    [MenuItem(TransformMenuPath, false)]
+    static void ExecuteTransform(MenuCommand command)
     {
         var t = command.context as Transform;
+        if (t == null) return;
+        Run(t);
+    }
+
+    [MenuItem(GOMenuPath, true)]
+    [MenuItem(ShipMenuPath, true, priority = 143)]
+    static bool ValidateGO()
+    {
+        var go = Selection.activeGameObject;
+        if (go == null) return false;
+        var t = go.transform;
+        return RescaleLocker.IsNonUnitScale(t) && RescaleLocker.CountAffected(t) > 0;
+    }
+
+    [MenuItem(GOMenuPath, false)]
+    [MenuItem(ShipMenuPath, false, priority = 143)]
+    static void ExecuteGO() => Run(Selection.activeGameObject?.transform);
+
+    static void Run(Transform t)
+    {
         if (t == null) return;
 
         int affected = RescaleLocker.CountAffected(t);

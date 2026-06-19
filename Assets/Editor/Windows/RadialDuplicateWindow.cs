@@ -15,7 +15,7 @@ public class RadialDuplicateWindow : EditorWindow
     string _log = "";
     Vector2 _logScroll;
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Radial Duplicate", priority = 10)]
+    [MenuItem("Shipbuilder/Radial Duplicate", priority = 182)]
     static void Open() => GetWindow<RadialDuplicateWindow>("Radial Duplicate");
 
     void OnGUI()

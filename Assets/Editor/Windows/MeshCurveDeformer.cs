@@ -76,7 +76,7 @@ public class MeshCurveDeformer : EditorWindow
 
     // ── Window ────────────────────────────────────────────────────────────────
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Mesh Curve Deformer", priority = 20)]
+    [MenuItem("Shipbuilder/Mesh Curve Deformer", priority = 200)]
     static void Open() => GetWindow<MeshCurveDeformer>("Mesh Curve Deformer");
 
     void OnEnable()  => SceneView.duringSceneGui += OnSceneGUI;

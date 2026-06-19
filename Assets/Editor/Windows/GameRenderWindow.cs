@@ -24,13 +24,13 @@ public class GameRenderWindow : EditorWindow
 
     const string K = "GRW.";
 
-    [MenuItem("Shipbreaker/Show Render Controller", priority = 100)]
+    [MenuItem("Shipbuilder/Render Overlays", priority = 183)]
     public static void ShowRenderController()
     {
         EditorWindow.CreateInstance<GameRenderWindow>().Show();
     }
 
-    [MenuItem("Shipbreaker/Cancel Refresh %&c")]
+    [MenuItem("Shipbuilder/Actions/Cancel Refresh %&c", priority = 2)]
     public static void CancelRefresh()
     {
         AddressableRendering.ForceResetUpdateFlag();

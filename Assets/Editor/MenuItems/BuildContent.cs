@@ -16,7 +16,7 @@ public class BuildContent
 {
     public const int MANIFEST_VERSION = 1;
 
-    [MenuItem("Shipbreaker/Build", priority = 2)]
+    [MenuItem("Shipbuilder/⛭ Build", priority = 1)]
     public static bool RunBuild()
     {
         // Don't go through with lengthy build process if build settings are not in order
@@ -216,14 +216,14 @@ public class BuildContent
         File.WriteAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, "manifest.json"), JsonConvert.SerializeObject(manifest));
     }
 
-    [MenuItem("Shipbreaker/Build and run", priority = 3)]
+    [MenuItem("Shipbuilder/▶ Build and run", priority = 2)]
     static void BuildAndRun()
     {
         if(RunBuild())
             System.Diagnostics.Process.Start(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker.exe"));
     }
 
-    [MenuItem("Shipbreaker/Actions/Update game catalog", priority = 60)]
+    [MenuItem("Shipbuilder/Actions/Update game catalog", priority = 60)]
     static void UpdateGameCatalog()
     {
         var catalog = File.ReadAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker_Data", "StreamingAssets", "aa", "catalog.json"));
@@ -243,7 +243,7 @@ public class BuildContent
         Debug.Log($"Game catalog recreated and written to {path}");
     }
 
-    [MenuItem("Shipbreaker/Actions/Update known assets", priority = 61)]
+    [MenuItem("Shipbuilder/Actions/Update known assets", priority = 61)]
     static void UpdateKnownAssets()
     {
         List<string> output = new List<string>() { "{" };
@@ -280,7 +280,7 @@ public class BuildContent
         Debug.Log($"Known asset list recreated and written to {path}");
     }
 
-    [MenuItem("Shipbreaker/Actions/Reload Build Settings", priority = 62)]
+    [MenuItem("Shipbuilder/Actions/Reload Build Settings", priority = 62)]
     static void ReloadBuildSettings()
     {
         Settings.ReloadBuildSettings();

@@ -21,7 +21,7 @@ public class GameInspectorWindow : EditorWindow
     string foundGuid;
     bool inspectOnClick = true;
 
-    [MenuItem("Shipbreaker/Show Game Inspector", priority = 101)]
+    // Removed: functionality covered by Import Game Part Wizard
     public static void CreateRoomAsset()
     {
         EditorWindow.CreateInstance<GameInspectorWindow>().Show();

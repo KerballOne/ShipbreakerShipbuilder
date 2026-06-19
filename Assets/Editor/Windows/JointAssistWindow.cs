@@ -77,7 +77,7 @@ public class JointAssistWindow : EditorWindow
     const string PrefKey    = "JointAssist.InvisibleJointPrefabGUID";
     const string CutPrefKey = "JointAssist.CutPointPrefabGUID";
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Joint Assist", priority = 10)]
+    [MenuItem("Shipbuilder/Joint Assist", priority = 181)]
     static void Open() => GetWindow<JointAssistWindow>("Joint Assist");
 
     void OnEnable()

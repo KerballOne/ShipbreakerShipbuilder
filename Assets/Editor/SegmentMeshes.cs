@@ -9,7 +9,7 @@ public class SegmentMeshes : EditorWindow
 
     int WedgeCount => Mathf.Max(1, Mathf.RoundToInt(360f / m_SegmentAngle));
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Segment Meshes", priority = 10)]
+    [MenuItem("Shipbuilder/Segment Meshes", priority = 180)]
     static void Open()
     {
         var w = GetWindow<SegmentMeshes>("Segment Meshes");

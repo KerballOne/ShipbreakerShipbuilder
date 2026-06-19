@@ -27,7 +27,7 @@ public class LoadGameAssets
         EditorApplication.hierarchyChanged += OnHierarchyChanged;
     }
 
-    [MenuItem("Shipbreaker/Actions/Force View Refresh %&r", priority = 1)]
+    [MenuItem("Shipbuilder/Actions/Force View Refresh %&r", priority = 1)]
     static void ViewRefresh()
     {
         lastNumRoot = UnityEngine.SceneManagement.SceneManager.GetActiveScene().rootCount;
@@ -35,7 +35,7 @@ public class LoadGameAssets
         AddressableRendering.UpdateViewList();
     }
 
-    [MenuItem("Shipbreaker/Actions/Clear Editor Cache", priority = 20)]
+    [MenuItem("Shipbuilder/Actions/Clear Editor Cache", priority = 20)]
     static void ClearAssetCache()
     {
         AssetDatabase.DeleteAssets(new string[] { "Assets/EditorCache" }, new List<string>());
@@ -44,13 +44,13 @@ public class LoadGameAssets
         AssetDatabase.Refresh();
     }
 
-    [MenuItem("Shipbreaker/Actions/Clear View", priority = 21)]
+    [MenuItem("Shipbuilder/Actions/Clear View", priority = 21)]
     static void ClearView()
     {
         AddressableRendering.ClearView();
     }
 
-    [MenuItem("Shipbreaker/Actions/Reload Assets", priority = 40)]
+    [MenuItem("Shipbuilder/Actions/Reload Assets", priority = 40)]
     public static void ReloadAssets()
     {
         AssetBundle.UnloadAllAssetBundles(false);
@@ -94,7 +94,7 @@ public class LoadGameAssets
         }
     }
 
-    [MenuItem("Shipbreaker/Actions/Rebuild Addressables", priority = 41)]
+    [MenuItem("Shipbuilder/Actions/Rebuild Addressables", priority = 41)]
     public static void RebuildAddressables()
     {
         AddressableAssetSettings.BuildPlayerContent();

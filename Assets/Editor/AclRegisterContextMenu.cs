@@ -11,34 +11,66 @@ using BBI.Unity.Game;
 /// </summary>
 public static class AclRegisterContextMenu
 {
-    const string MenuPath = "GameObject/Register Components in Parent ACL";
+    const string GOMenuPath   = "GameObject/Shipbreaker/Register Components in Parent ACL";
+    const string ShipMenuPath = "Shipbuilder/Register Components in Parent ACL";
 
-    [MenuItem(MenuPath, true)]
-    static bool Validate()
+    static bool ValidateSelection()
     {
-        var go = Selection.activeGameObject;
-        if (go == null) return false;
-        return FindAncestorAcl(go.transform) != null && CollectTargetComponents(go.transform).Count > 0;
+        if (Selection.gameObjects.Length == 0) return false;
+        AddressableComponentLoader acl = null;
+        foreach (var go in Selection.gameObjects)
+        {
+            var found = FindAncestorAcl(go.transform);
+            if (found == null) return false;
+            if (acl == null) acl = found;
+            else if (acl != found) return false; // different ACLs
+        }
+        return acl != null;
     }
 
-    [MenuItem(MenuPath, false)]
+    [MenuItem(GOMenuPath, true)]
+    static bool ValidateGO() => ValidateSelection();
+
+    [MenuItem(GOMenuPath, false)]
+    static void ExecuteGO() => Execute();
+
+    [MenuItem(ShipMenuPath, true, priority = 120)]
+    static bool ValidateShip() => ValidateSelection();
+
+    [MenuItem(ShipMenuPath, false, priority = 120)]
+    static void ExecuteShip() => Execute();
+
     static void Execute()
     {
-        var go = Selection.activeGameObject;
-        if (go == null) return;
-        var t = go.transform;
+        var selected = Selection.gameObjects;
+        if (selected.Length == 0) return;
 
-        var acl = FindAncestorAcl(t);
-        if (acl == null)
+        // Resolve ACL — validate all selections share the same one
+        AddressableComponentLoader acl = null;
+        foreach (var go in selected)
         {
-            EditorUtility.DisplayDialog("Register in ACL", "No AddressableComponentLoader found in any ancestor.", "OK");
-            return;
+            var found = FindAncestorAcl(go.transform);
+            if (found == null)
+            {
+                EditorUtility.DisplayDialog("Register in ACL", $"'{go.name}' has no AddressableComponentLoader ancestor.", "OK");
+                return;
+            }
+            if (acl == null) acl = found;
+            else if (acl != found)
+            {
+                EditorUtility.DisplayDialog("Register in ACL", "Selected objects belong to different ACLs. Select objects under the same ACL.", "OK");
+                return;
+            }
         }
 
-        var targets = CollectTargetComponents(t);
+        // Collect targets across all selected objects
+        var targets = new List<(Component comp, string field)>();
+        foreach (var go in selected)
+            targets.AddRange(CollectTargetComponents(go.transform));
+
         if (targets.Count == 0)
         {
-            EditorUtility.DisplayDialog("Register in ACL", "No StructurePart or EntityBlueprintComponent found under the selected object.", "OK");
+            EditorUtility.DisplayDialog("Register in ACL", "No StructurePart or EntityBlueprintComponent found under the selected objects.", "OK");
             return;
         }
 
@@ -53,28 +85,43 @@ public static class AclRegisterContextMenu
         }
 
         // Validate we have addresses for all target types
-        var missing = new List<string>();
-        foreach (var (comp, field) in targets)
-        {
+        var missingTypes = new HashSet<string>();
+        foreach (var (comp, _) in targets)
             if (!addressByType.ContainsKey(comp.GetType()))
-                missing.Add(comp.GetType().Name);
-        }
-        if (missing.Count > 0)
+                missingTypes.Add(comp.GetType().Name);
+        if (missingTypes.Count > 0)
         {
             EditorUtility.DisplayDialog("Register in ACL",
-                $"Cannot infer address for: {string.Join(", ", missing)}\n\nThe parent ACL has no existing entries of that type to copy the address from.",
+                $"Cannot infer address for: {string.Join(", ", missingTypes)}\n\nThe parent ACL has no existing entries of that type to copy the address from.",
                 "OK");
             return;
         }
 
+        var existingComponents = new HashSet<Component>();
+        foreach (var cv in acl.componentValues)
+            if (cv.component != null) existingComponents.Add(cv.component);
+
+        var toAdd = new List<(Component comp, string field)>();
+        foreach (var (comp, field) in targets)
+            if (!existingComponents.Contains(comp))
+                toAdd.Add((comp, field));
+
+        if (toAdd.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Register in ACL", "All components are already registered in the ACL.", "OK");
+            return;
+        }
+
+        string selectionLabel = selected.Length == 1 ? $"'{selected[0].name}'" : $"{selected.Length} objects";
         if (!EditorUtility.DisplayDialog("Register in ACL",
-                $"Add {targets.Count} ACL entry(s) to '{acl.gameObject.name}' for components under '{t.name}'?",
+                $"Add {toAdd.Count} ACL entry(s) to '{acl.gameObject.name}' for components under {selectionLabel}?" +
+                (toAdd.Count < targets.Count ? $"\n({targets.Count - toAdd.Count} already registered, skipped)" : ""),
                 "Add", "Cancel"))
             return;
 
         Undo.RecordObject(acl, "Register Components in Parent ACL");
 
-        foreach (var (comp, field) in targets)
+        foreach (var (comp, field) in toAdd)
         {
             acl.componentValues.Add(new AddressableComponentValue
             {
@@ -85,7 +132,7 @@ public static class AclRegisterContextMenu
         }
 
         EditorUtility.SetDirty(acl);
-        Debug.Log($"[AclRegister] Added {targets.Count} entries to ACL on '{acl.gameObject.name}' for '{t.name}'.");
+        Debug.Log($"[AclRegister] Added {toAdd.Count} entries to ACL on '{acl.gameObject.name}' for {selectionLabel}.");
     }
 
     static AddressableComponentLoader FindAncestorAcl(Transform t)
@@ -109,5 +156,70 @@ public static class AclRegisterContextMenu
         foreach (var ebc in t.GetComponentsInChildren<EntityBlueprintComponent>(true))
             result.Add((ebc, "m_BlueprintAsset"));
         return result;
+    }
+}
+
+public static class AclCleanContextMenu
+{
+    const string GOMenuPath   = "GameObject/Shipbreaker/Clean ACL (Remove Missing + Deduplicate)";
+    const string ShipMenuPath = "Shipbuilder/Clean ACL (Remove Missing + Deduplicate)";
+
+    static AddressableComponentLoader SelectedAcl()
+    {
+        var go = Selection.activeGameObject;
+        return go != null ? go.GetComponent<AddressableComponentLoader>() : null;
+    }
+
+    [MenuItem(GOMenuPath, true)]
+    static bool ValidateGO() => SelectedAcl() != null;
+
+    [MenuItem(GOMenuPath, false)]
+    static void ExecuteGO() => Run(SelectedAcl());
+
+    [MenuItem(ShipMenuPath, true, priority = 121)]
+    static bool ValidateShip() => SelectedAcl() != null;
+
+    [MenuItem(ShipMenuPath, false, priority = 121)]
+    static void ExecuteShip() => Run(SelectedAcl());
+
+    static void Run(AddressableComponentLoader acl)
+    {
+        if (acl == null) return;
+
+        var original = acl.componentValues;
+        int removedMissing = 0;
+        int removedDupes   = 0;
+
+        var seen    = new HashSet<Component>();
+        var cleaned = new List<AddressableComponentValue>();
+
+        foreach (var cv in original)
+        {
+            if (cv.component == null) { removedMissing++; continue; }
+            if (!seen.Add(cv.component)) { removedDupes++; continue; }
+            cleaned.Add(cv);
+        }
+
+        if (removedMissing == 0 && removedDupes == 0)
+        {
+            EditorUtility.DisplayDialog("Clean ACL", "Nothing to clean — no missing or duplicate entries.", "OK");
+            return;
+        }
+
+        var parts = new List<string>();
+        if (removedMissing > 0) parts.Add($"{removedMissing} missing");
+        if (removedDupes   > 0) parts.Add($"{removedDupes} duplicate");
+
+        if (!EditorUtility.DisplayDialog("Clean ACL",
+                $"Remove {string.Join(" and ", parts)} entr{(removedMissing + removedDupes == 1 ? "y" : "ies")} from '{acl.gameObject.name}'?",
+                "Clean", "Cancel"))
+            return;
+
+        Undo.RecordObject(acl, "Clean ACL");
+        acl.componentValues.Clear();
+        acl.componentValues.AddRange(cleaned);
+        EditorUtility.SetDirty(acl);
+
+        Debug.Log($"[AclClean] '{acl.gameObject.name}': removed {removedMissing} missing, {removedDupes} duplicate. {cleaned.Count} entries remain.");
     }
 }

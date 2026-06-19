@@ -103,7 +103,7 @@ public class CustomPartWizard : EditorWindow
         return "Assets/_CustomShips/";
     }
 
-    [MenuItem("Shipbreaker/Shipbuilder Tools/Create Custom Part Wizard", priority = -10)]
+    [MenuItem("Shipbuilder/Create Custom Part Wizard", priority = 101)]
     static void Open()
     {
         var w = GetWindow<CustomPartWizard>("Custom Part Wizard");
