@@ -16,6 +16,7 @@ public class ImportGamePartWizard : EditorWindow
     const string PrefOutputFolder  = "ImportGamePartWizard.OutputFolder";
     const string PrefImportedOnce  = "ImportGamePartWizard.ImportedOnce";
     int          m_MaxResults      = 250;
+    bool         m_BundleCacheStale = false;
 
     enum SearchMode { PartName, DisplayName, Path, GUID }
     enum SortColumn { DisplayName, PartName, DimX, DimY, DimZ, Volume, Mass }
@@ -344,11 +345,49 @@ public class ImportGamePartWizard : EditorWindow
         }
     }
 
+    void DrawStateWarnings()
+    {
+        var modCatalogPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "modded_catalog.json"));
+        bool catalogFileExists = File.Exists(modCatalogPath);
+        bool mapLoaded         = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
+        bool handleValid       = LoadGameAssets.CheckHandlesValid();
+
+        if (!catalogFileExists)
+        {
+            EditorGUILayout.HelpBox(
+                "modded_catalog.json not found -- run Shipbuilder -> Actions -> Build Catalog to generate it.",
+                MessageType.Error);
+            return;
+        }
+
+        if (!mapLoaded || !handleValid)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.HelpBox(
+                "Game assets not loaded -- search and bake will not work.",
+                MessageType.Warning);
+            if (GUILayout.Button("Reload Assets", GUILayout.Width(110), GUILayout.Height(38)))
+                LoadGameAssets.ReloadAssets();
+            EditorGUILayout.EndHorizontal();
+            return;
+        }
+
+        if (m_BundleCacheStale)
+        {
+            EditorGUILayout.HelpBox(
+                "Bake failed: game asset bundles could not be loaded. This happens after Build or Build and Run. Restart Unity to restore baking.",
+                MessageType.Error);
+        }
+    }
+
     void OnGUI()
     {
         EnsureStyles();
 
         bool hasGameAssets = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
+
+        // ── State warnings ────────────────────────────────────────────────────
+        DrawStateWarnings();
 
         // ── Search ───────────────────────────────────────────────────────────
         GUILayout.Label("Search Game Library", EditorStyles.boldLabel);
@@ -1273,7 +1312,7 @@ public class ImportGamePartWizard : EditorWindow
             try { source = await AddressableBaker.LoadAddressableAsync(job.guid, job.childPath); }
             catch (System.Exception ex) { Debug.LogError($"[ImportGamePartWizard] Bake load failed for {job.partName}: {ex.Message}"); failed++; continue; }
 
-            if (source == null) { Debug.LogError($"[ImportGamePartWizard] Could not load addressable {job.guid} ({job.partName})"); failed++; continue; }
+            if (source == null) { Debug.LogError($"[ImportGamePartWizard] Could not load addressable {job.guid} ({job.partName})"); m_BundleCacheStale = true; failed++; continue; }
 
             // Baked prefab uses a distinct "_Baked" name so it never clobbers the addressable-loader
             // prefab of the same part (which may already be placed in the scene).

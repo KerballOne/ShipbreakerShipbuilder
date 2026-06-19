@@ -68,7 +68,6 @@ public class BuildContent
         }
 
         Debug.Log("Starting to build player content...");
-        AddressableAssetSettings.CleanPlayerContent(AddressableAssetSettingsDefaultObject.Settings.ActivePlayerDataBuilder);
         AddressableAssetSettings.BuildPlayerContent(out AddressablesPlayerBuildResult result);
         bool success = string.IsNullOrEmpty(result.Error);
 
@@ -223,7 +222,7 @@ public class BuildContent
             System.Diagnostics.Process.Start(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker.exe"));
     }
 
-    [MenuItem("Shipbuilder/Actions/Update game catalog", priority = 60)]
+    [MenuItem("Shipbuilder/Actions/Update game catalog", priority = 70)]
     static void UpdateGameCatalog()
     {
         var catalog = File.ReadAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, "Shipbreaker_Data", "StreamingAssets", "aa", "catalog.json"));
@@ -243,7 +242,7 @@ public class BuildContent
         Debug.Log($"Game catalog recreated and written to {path}");
     }
 
-    [MenuItem("Shipbuilder/Actions/Update known assets", priority = 61)]
+    [MenuItem("Shipbuilder/Actions/Update known assets", priority = 71)]
     static void UpdateKnownAssets()
     {
         List<string> output = new List<string>() { "{" };
@@ -280,7 +279,7 @@ public class BuildContent
         Debug.Log($"Known asset list recreated and written to {path}");
     }
 
-    [MenuItem("Shipbuilder/Actions/Reload Build Settings", priority = 62)]
+    [MenuItem("Shipbuilder/Actions/Reload Build Settings", priority = 72)]
     static void ReloadBuildSettings()
     {
         Settings.ReloadBuildSettings();
