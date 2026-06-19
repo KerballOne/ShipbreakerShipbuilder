@@ -443,14 +443,14 @@ public class CustomPartWizard : EditorWindow
                 root.transform.localRotation = m_SourceObject.transform.localRotation;
                 root.transform.localScale    = m_SourceObject.transform.localScale;
 
-                // Ensure mesh components exist on root (some templates omit them).
-                var rootMF = root.GetComponent<MeshFilter>()  ?? root.AddComponent<MeshFilter>();
-                var rootMC = root.GetComponent<MeshCollider>() ?? root.AddComponent<MeshCollider>();
-                var rootMR = root.GetComponent<MeshRenderer>() ?? root.AddComponent<MeshRenderer>();
-
                 var srcMF = m_SourceObject.GetComponent<MeshFilter>();
                 if (srcMF != null && srcMF.sharedMesh != null)
                 {
+                    // Root has geometry — ensure mesh components exist (some templates omit them).
+                    var rootMF = root.GetComponent<MeshFilter>()   ?? root.AddComponent<MeshFilter>();
+                    var rootMC = root.GetComponent<MeshCollider>()  ?? root.AddComponent<MeshCollider>();
+                    var rootMR = root.GetComponent<MeshRenderer>()  ?? root.AddComponent<MeshRenderer>();
+
                     var rootMesh = srcMF.sharedMesh;
                     if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(rootMesh)))
                     {
@@ -469,9 +469,13 @@ public class CustomPartWizard : EditorWindow
                 }
                 else
                 {
-                    rootMF.sharedMesh = null;
-                    rootMC.sharedMesh = null;
-                    rootMR.enabled    = false;
+                    // Root is a pure container (no mesh) — remove any stale mesh components from the template.
+                    var staleMF = root.GetComponent<MeshFilter>();
+                    var staleMR = root.GetComponent<MeshRenderer>();
+                    var staleMC = root.GetComponent<MeshCollider>();
+                    if (staleMF != null) DestroyImmediate(staleMF);
+                    if (staleMR != null) DestroyImmediate(staleMR);
+                    if (staleMC != null) DestroyImmediate(staleMC);
                 }
 
                 // Mirror only the children (and their descendants) — preserving depth.
