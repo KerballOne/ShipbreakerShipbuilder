@@ -74,27 +74,24 @@ public static class AclRegisterContextMenu
             return;
         }
 
-        // Build address lookup from existing ACL entries: component type → address
-        var addressByType = new Dictionary<System.Type, string>();
+        // Build address options per component type from existing ACL entries
+        // Store (address, exampleGoName) so the picker can show a meaningful label
+        var addressOptionsByType = new Dictionary<System.Type, List<(string address, string label)>>();
         foreach (var cv in acl.componentValues)
         {
-            if (cv.component == null) continue;
+            if (cv.component == null || string.IsNullOrEmpty(cv.address)) continue;
             var type = cv.component.GetType();
-            if (!addressByType.ContainsKey(type) && !string.IsNullOrEmpty(cv.address))
-                addressByType[type] = cv.address;
-        }
-
-        // Validate we have addresses for all target types
-        var missingTypes = new HashSet<string>();
-        foreach (var (comp, _) in targets)
-            if (!addressByType.ContainsKey(comp.GetType()))
-                missingTypes.Add(comp.GetType().Name);
-        if (missingTypes.Count > 0)
-        {
-            EditorUtility.DisplayDialog("Register in ACL",
-                $"Cannot infer address for: {string.Join(", ", missingTypes)}\n\nThe parent ACL has no existing entries of that type to copy the address from.",
-                "OK");
-            return;
+            if (!addressOptionsByType.ContainsKey(type))
+                addressOptionsByType[type] = new List<(string, string)>();
+            if (!addressOptionsByType[type].Exists(e => e.address == cv.address))
+            {
+                string goName = ((Component)cv.component).gameObject.name;
+                // Derive a short label: last segment of address path or GO name
+                string addrLabel = cv.address.Contains("/")
+                    ? System.IO.Path.GetFileNameWithoutExtension(cv.address)
+                    : goName;
+                addressOptionsByType[type].Add((cv.address, $"{addrLabel}  [{goName}]"));
+            }
         }
 
         var existingComponents = new HashSet<Component>();
@@ -110,6 +107,39 @@ public static class AclRegisterContextMenu
         {
             EditorUtility.DisplayDialog("Register in ACL", "All components are already registered in the ACL.", "OK");
             return;
+        }
+
+        // For each component type that needs registering, ask the user which address to use
+        var addressByType = new Dictionary<System.Type, string>();
+        var typesNeeded = new HashSet<System.Type>();
+        foreach (var (comp, _) in toAdd)
+            typesNeeded.Add(comp.GetType());
+
+        foreach (var type in typesNeeded)
+        {
+            List<(string address, string label)> options;
+            if (!addressOptionsByType.TryGetValue(type, out options) || options.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Register in ACL",
+                    $"Cannot find any existing address for type '{type.Name}' in the parent ACL.\n\nAdd at least one entry of this type manually first.",
+                    "OK");
+                return;
+            }
+
+            if (options.Count == 1)
+            {
+                int choice = EditorUtility.DisplayDialogComplex("Register in ACL",
+                    $"Use this address for all {type.Name} components?\n\n{options[0].label}",
+                    "Use", "Cancel", "");
+                if (choice != 0) return;
+                addressByType[type] = options[0].address;
+            }
+            else
+            {
+                var picked = AddressPickerWindow.Show(type.Name, options);
+                if (picked == null) return;
+                addressByType[type] = picked;
+            }
         }
 
         string selectionLabel = selected.Length == 1 ? $"'{selected[0].name}'" : $"{selected.Length} objects";
@@ -221,5 +251,55 @@ public static class AclCleanContextMenu
         EditorUtility.SetDirty(acl);
 
         Debug.Log($"[AclClean] '{acl.gameObject.name}': removed {removedMissing} missing, {removedDupes} duplicate. {cleaned.Count} entries remain.");
+    }
+}
+
+public class AddressPickerWindow : EditorWindow
+{
+    string _typeName;
+    List<(string address, string label)> _options;
+    string _picked;
+    bool _done;
+    int _selectedIndex;
+
+    public static string Show(string typeName, List<(string address, string label)> options)
+    {
+        var win = CreateInstance<AddressPickerWindow>();
+        win._typeName = typeName;
+        win._options = options;
+        win._selectedIndex = 0;
+        win.titleContent = new GUIContent($"Pick address for {typeName}");
+        win.minSize = new Vector2(620, 160 + options.Count * 22);
+        win.maxSize = new Vector2(900, 160 + options.Count * 22);
+        win.ShowModalUtility();
+        return win._done ? win._picked : null;
+    }
+
+    void OnGUI()
+    {
+        EditorGUILayout.LabelField($"Select address to use for all {_typeName} components:", EditorStyles.wordWrappedLabel);
+        EditorGUILayout.Space(6);
+
+        for (int i = 0; i < _options.Count; i++)
+        {
+            bool newSelected = EditorGUILayout.ToggleLeft(_options[i].label, _selectedIndex == i);
+            if (newSelected) _selectedIndex = i;
+        }
+
+        EditorGUILayout.Space(8);
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("Use", GUILayout.Width(80)))
+        {
+            _picked = _options[_selectedIndex].address;
+            _done = true;
+            Close();
+        }
+        if (GUILayout.Button("Cancel", GUILayout.Width(80)))
+        {
+            _done = false;
+            Close();
+        }
+        EditorGUILayout.EndHorizontal();
     }
 }
