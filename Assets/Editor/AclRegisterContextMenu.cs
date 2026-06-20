@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using BBI.Unity.Game;
@@ -6,8 +7,9 @@ using BBI.Unity.Game;
 /// <summary>
 /// Right-click a GameObject in the hierarchy → "Register Components in Parent ACL"
 /// Finds the nearest ancestor AddressableComponentLoader, then appends one entry per
-/// StructurePart and EntityBlueprintComponent found in the selected GO's descendants,
-/// reusing addresses already present in that ACL for the same component types.
+/// StructurePart and EntityBlueprintComponent found in the selected GO's descendants.
+/// Resolves addresses by: (1) name-matching against all prefab ACLs on disc,
+/// (2) existing entries in the parent ACL, (3) manual picker as fallback.
 /// </summary>
 public static class AclRegisterContextMenu
 {
@@ -23,7 +25,7 @@ public static class AclRegisterContextMenu
             var found = FindAncestorAcl(go.transform);
             if (found == null) return false;
             if (acl == null) acl = found;
-            else if (acl != found) return false; // different ACLs
+            else if (acl != found) return false;
         }
         return acl != null;
     }
@@ -45,7 +47,6 @@ public static class AclRegisterContextMenu
         var selected = Selection.gameObjects;
         if (selected.Length == 0) return;
 
-        // Resolve ACL — validate all selections share the same one
         AddressableComponentLoader acl = null;
         foreach (var go in selected)
         {
@@ -58,12 +59,11 @@ public static class AclRegisterContextMenu
             if (acl == null) acl = found;
             else if (acl != found)
             {
-                EditorUtility.DisplayDialog("Register in ACL", "Selected objects belong to different ACLs. Select objects under the same ACL.", "OK");
+                EditorUtility.DisplayDialog("Register in ACL", "Selected objects belong to different ACLs.", "OK");
                 return;
             }
         }
 
-        // Collect targets across all selected objects
         var targets = new List<(Component comp, string field)>();
         foreach (var go in selected)
             targets.AddRange(CollectTargetComponents(go.transform));
@@ -72,26 +72,6 @@ public static class AclRegisterContextMenu
         {
             EditorUtility.DisplayDialog("Register in ACL", "No StructurePart or EntityBlueprintComponent found under the selected objects.", "OK");
             return;
-        }
-
-        // Build address options per component type from existing ACL entries
-        // Store (address, exampleGoName) so the picker can show a meaningful label
-        var addressOptionsByType = new Dictionary<System.Type, List<(string address, string label)>>();
-        foreach (var cv in acl.componentValues)
-        {
-            if (cv.component == null || string.IsNullOrEmpty(cv.address)) continue;
-            var type = cv.component.GetType();
-            if (!addressOptionsByType.ContainsKey(type))
-                addressOptionsByType[type] = new List<(string, string)>();
-            if (!addressOptionsByType[type].Exists(e => e.address == cv.address))
-            {
-                string goName = ((Component)cv.component).gameObject.name;
-                // Derive a short label: last segment of address path or GO name
-                string addrLabel = cv.address.Contains("/")
-                    ? System.IO.Path.GetFileNameWithoutExtension(cv.address)
-                    : goName;
-                addressOptionsByType[type].Add((cv.address, $"{addrLabel}  [{goName}]"));
-            }
         }
 
         var existingComponents = new HashSet<Component>();
@@ -109,37 +89,75 @@ public static class AclRegisterContextMenu
             return;
         }
 
-        // For each component type that needs registering, ask the user which address to use
-        var addressByType = new Dictionary<System.Type, string>();
-        var typesNeeded = new HashSet<System.Type>();
-        foreach (var (comp, _) in toAdd)
-            typesNeeded.Add(comp.GetType());
+        // Build needed key set for early-exit prefab search
+        var neededKeys = new HashSet<(System.Type, string, string)>();
+        foreach (var (comp, field) in toAdd)
+            neededKeys.Add((comp.GetType(), field, StripCopySuffix(comp.gameObject.name)));
 
-        foreach (var type in typesNeeded)
+        // Tier 1: name-matched entries in the parent ACL itself
+        var aclNameLookup = BuildAclNameLookup(acl);
+
+        // Tier 2: name-matched entries in other ACLs in the scene
+        var sceneLookup = BuildSceneAclLookup(acl);
+
+        // Tier 3 (lazy): project prefab assets — only search for keys still unresolved
+        Dictionary<(System.Type, string, string), List<(string address, string label)>> prefabLookup = null;
+
+        // Resolve address per component
+        var addressByComp = new Dictionary<Component, string>();
+        foreach (var (comp, field) in toAdd)
         {
-            List<(string address, string label)> options;
-            if (!addressOptionsByType.TryGetValue(type, out options) || options.Count == 0)
+            string goName = comp.gameObject.name;
+            string strippedName = StripCopySuffix(goName);
+            var type = comp.GetType();
+            var key = (type, field, strippedName);
+
+            // Collect matches in tier order, stopping as soon as we have an exact name hit
+            var matches = new List<(string address, string label)>();
+
+            aclNameLookup.TryGetValue(key, out var tier1);
+            if (tier1 != null) AddUnique(matches, tier1);
+
+            if (matches.Count == 0)
+            {
+                sceneLookup.TryGetValue(key, out var tier2);
+                if (tier2 != null) AddUnique(matches, tier2);
+            }
+
+            if (matches.Count == 0)
+            {
+                // Lazy-load project prefab search for remaining keys
+                if (prefabLookup == null)
+                    prefabLookup = BuildPrefabAddressLookup(neededKeys);
+                prefabLookup.TryGetValue(key, out var tier3);
+                if (tier3 != null) AddUnique(matches, tier3);
+            }
+
+            if (matches.Count == 0)
             {
                 EditorUtility.DisplayDialog("Register in ACL",
-                    $"Cannot find any existing address for type '{type.Name}' in the parent ACL.\n\nAdd at least one entry of this type manually first.",
+                    $"No address found for {type.Name} on '{goName}'.\n\nNo name match in ACL, scene, or project prefabs.",
                     "OK");
                 return;
             }
 
-            if (options.Count == 1)
+            string picked;
+            if (matches.Count == 1)
             {
                 int choice = EditorUtility.DisplayDialogComplex("Register in ACL",
-                    $"Use this address for all {type.Name} components?\n\n{options[0].label}",
-                    "Use", "Cancel", "");
-                if (choice != 0) return;
-                addressByType[type] = options[0].address;
+                    $"Use this address for {type.Name} on '{goName}'?\n\n{matches[0].label}",
+                    "Use", "Cancel", "Show All");
+                if (choice == 1) return;
+                picked = choice == 0 ? matches[0].address : AddressPickerWindow.Show($"{type.Name} on '{goName}'", matches);
+                if (picked == null) return;
             }
             else
             {
-                var picked = AddressPickerWindow.Show(type.Name, options);
+                picked = AddressPickerWindow.Show($"{type.Name} on '{goName}'", matches);
                 if (picked == null) return;
-                addressByType[type] = picked;
             }
+
+            addressByComp[comp] = picked;
         }
 
         string selectionLabel = selected.Length == 1 ? $"'{selected[0].name}'" : $"{selected.Length} objects";
@@ -157,12 +175,125 @@ public static class AclRegisterContextMenu
             {
                 component = comp,
                 field     = field,
-                address   = addressByType[comp.GetType()],
+                address   = addressByComp[comp],
             });
         }
 
         EditorUtility.SetDirty(acl);
         Debug.Log($"[AclRegister] Added {toAdd.Count} entries to ACL on '{acl.gameObject.name}' for {selectionLabel}.");
+    }
+
+    static void AddUnique(List<(string address, string label)> list, List<(string address, string label)> items)
+    {
+        foreach (var item in items)
+            if (!list.Exists(e => e.address == item.address))
+                list.Add(item);
+    }
+
+    // Tier 1: name-matched entries within the same ACL
+    static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildAclNameLookup(
+        AddressableComponentLoader acl)
+    {
+        var result = new Dictionary<(System.Type, string, string), List<(string address, string label)>>();
+        foreach (var cv in acl.componentValues)
+        {
+            if (cv.component == null || string.IsNullOrEmpty(cv.address)) continue;
+            AddToLookup(result, cv, "parent ACL");
+        }
+        return result;
+    }
+
+    // Tier 2: name-matched entries from all other ACLs in the scene
+    static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildSceneAclLookup(
+        AddressableComponentLoader exclude)
+    {
+        var result = new Dictionary<(System.Type, string, string), List<(string address, string label)>>();
+        foreach (var loader in Object.FindObjectsOfType<AddressableComponentLoader>())
+        {
+            if (loader == exclude) continue;
+            string sourceName = loader.gameObject.name;
+            foreach (var cv in loader.componentValues)
+            {
+                if (cv.component == null || string.IsNullOrEmpty(cv.address)) continue;
+                AddToLookup(result, cv, $"scene: {sourceName}");
+            }
+        }
+        return result;
+    }
+
+    static void AddToLookup(
+        Dictionary<(System.Type, string, string), List<(string address, string label)>> lookup,
+        AddressableComponentValue cv, string source)
+    {
+        var type = cv.component.GetType();
+        string goName = StripCopySuffix(cv.component.gameObject.name);
+        var key = (type, cv.field, goName);
+        string addrLabel = cv.address.Contains("/")
+            ? System.IO.Path.GetFileNameWithoutExtension(cv.address)
+            : cv.component.gameObject.name;
+        string label = $"{addrLabel}  [{cv.component.gameObject.name} — {source}]";
+        if (!lookup.ContainsKey(key))
+            lookup[key] = new List<(string, string)>();
+        if (!lookup[key].Exists(e => e.address == cv.address))
+            lookup[key].Add((cv.address, label));
+    }
+
+    // Strips Unity copy suffixes: " - 1", " (1)", " 1" at end of name
+    static string StripCopySuffix(string name)
+    {
+        name = name.Trim();
+        // " - N"
+        var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)\s+-\s+\d+$");
+        if (m.Success) return m.Groups[1].Value.Trim();
+        // " (N)"
+        m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)\s+\(\d+\)$");
+        if (m.Success) return m.Groups[1].Value.Trim();
+        return name;
+    }
+
+    // Searches prefab assets for ACL entries matching the needed keys, stopping early once all are found.
+    static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildPrefabAddressLookup(
+        HashSet<(System.Type type, string field, string strippedName)> needed)
+    {
+        var result = new Dictionary<(System.Type, string, string), List<(string address, string label)>>();
+        var remaining = new HashSet<(System.Type, string, string)>(needed);
+
+        var guids = AssetDatabase.FindAssets("t:Prefab");
+        foreach (var guid in guids)
+        {
+            if (remaining.Count == 0) break;
+
+            var path = AssetDatabase.GUIDToAssetPath(guid);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (prefab == null) continue;
+
+            foreach (var loader in prefab.GetComponentsInChildren<AddressableComponentLoader>(true))
+            {
+                foreach (var cv in loader.componentValues)
+                {
+                    if (cv.component == null || string.IsNullOrEmpty(cv.address)) continue;
+                    var type = cv.component.GetType();
+                    string goName = StripCopySuffix(cv.component.gameObject.name);
+                    var key = (type, cv.field, goName);
+                    if (!remaining.Contains(key)) continue;
+
+                    string prefabName = System.IO.Path.GetFileNameWithoutExtension(path);
+                    string addrLabel = cv.address.Contains("/")
+                        ? System.IO.Path.GetFileNameWithoutExtension(cv.address)
+                        : cv.component.gameObject.name;
+                    string label = $"{addrLabel}  [{cv.component.gameObject.name} in {prefabName}]";
+
+                    if (!result.ContainsKey(key))
+                        result[key] = new List<(string, string)>();
+                    if (!result[key].Exists(e => e.address == cv.address))
+                        result[key].Add((cv.address, label));
+
+                    remaining.Remove(key);
+                }
+            }
+        }
+
+        return result;
     }
 
     static AddressableComponentLoader FindAncestorAcl(Transform t)
@@ -177,7 +308,6 @@ public static class AclRegisterContextMenu
         return null;
     }
 
-    // Returns (component, fieldName) pairs for StructurePart and EntityBlueprintComponent
     static List<(Component comp, string field)> CollectTargetComponents(Transform t)
     {
         var result = new List<(Component, string)>();
@@ -216,14 +346,12 @@ public static class AclCleanContextMenu
     {
         if (acl == null) return;
 
-        var original = acl.componentValues;
         int removedMissing = 0;
         int removedDupes   = 0;
-
         var seen    = new HashSet<Component>();
         var cleaned = new List<AddressableComponentValue>();
 
-        foreach (var cv in original)
+        foreach (var cv in acl.componentValues)
         {
             if (cv.component == null) { removedMissing++; continue; }
             if (!seen.Add(cv.component)) { removedDupes++; continue; }
@@ -277,7 +405,7 @@ public class AddressPickerWindow : EditorWindow
 
     void OnGUI()
     {
-        EditorGUILayout.LabelField($"Select address to use for all {_typeName} components:", EditorStyles.wordWrappedLabel);
+        EditorGUILayout.LabelField($"Select address to use for {_typeName}:", EditorStyles.wordWrappedLabel);
         EditorGUILayout.Space(6);
 
         for (int i = 0; i < _options.Count; i++)
