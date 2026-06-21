@@ -226,7 +226,7 @@ public class ComponentCopyWindow : EditorWindow
                 srcComp   = src, dstComp = dst,
                 label     = label,
                 different = diff,
-                selected  = diff && !driven,
+                selected  = false,
                 aclDriven = driven,
             });
         }
@@ -248,21 +248,35 @@ public class ComponentCopyWindow : EditorWindow
         var dstAcl = FindAncestorAcl(_compDst.transform);
         if (srcAcl != null && dstAcl != null)
         {
-            string srcName = StripCopySuffix(_compSrc.name);
-            // Entries in src ACL that belong to _compSrc
+            // Prefer exact GO identity; fall back to name-match only if none found (e.g. source is a copy)
             var srcEntries = srcAcl.componentValues
-                .Where(cv => cv.component != null && StripCopySuffix(cv.component.gameObject.name) == srcName)
+                .Where(cv => cv.component != null && cv.component.gameObject == _compSrc)
                 .ToList();
+            if (srcEntries.Count == 0)
+            {
+                string srcName = StripCopySuffix(_compSrc.name);
+                srcEntries = srcAcl.componentValues
+                    .Where(cv => cv.component != null && StripCopySuffix(cv.component.gameObject.name) == srcName)
+                    .ToList();
+            }
 
             foreach (var sv in srcEntries)
             {
-                // Find matching entry in dst ACL by GO name + field
-                string dstName = StripCopySuffix(_compDst.name);
+                // Find matching entry in dst ACL — prefer exact GO identity, fall back to name
                 var dv = dstAcl.componentValues.FirstOrDefault(cv =>
                     cv.component != null &&
-                    StripCopySuffix(cv.component.gameObject.name) == dstName &&
+                    cv.component.gameObject == _compDst &&
                     cv.field == sv.field &&
                     cv.component.GetType() == sv.component.GetType());
+                if (dv == null)
+                {
+                    string dstName = StripCopySuffix(_compDst.name);
+                    dv = dstAcl.componentValues.FirstOrDefault(cv =>
+                        cv.component != null &&
+                        StripCopySuffix(cv.component.gameObject.name) == dstName &&
+                        cv.field == sv.field &&
+                        cv.component.GetType() == sv.component.GetType());
+                }
 
                 bool same = dv != null && dv.address == sv.address;
                 if (same) continue;
@@ -273,7 +287,7 @@ public class ComponentCopyWindow : EditorWindow
                 string fieldLabel = AbbrevField(sv.field);
                 string prefix = fieldLabel == typeLabel ? typeLabel : $"{typeLabel}.{fieldLabel}";
 
-                _aclEntries.Add(new AclEntry { srcVal = sv, dstVal = dv, label = prefix, srcAddr = srcAddr, dstAddr = dstAddr, selected = true });
+                _aclEntries.Add(new AclEntry { srcVal = sv, dstVal = dv, label = prefix, srcAddr = srcAddr, dstAddr = dstAddr, selected = false });
             }
         }
     }
