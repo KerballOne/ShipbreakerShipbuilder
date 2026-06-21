@@ -30,7 +30,7 @@ public class GameRenderWindow : EditorWindow
         EditorWindow.CreateInstance<GameRenderWindow>().Show();
     }
 
-    [MenuItem("Shipbuilder/Actions/Cancel Refresh %&c", priority = 2)]
+    [MenuItem("Shipbuilder/Actions/Cancel Refresh %&c", priority = 12)]
     public static void CancelRefresh()
     {
         AddressableRendering.ForceResetUpdateFlag();
