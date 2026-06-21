@@ -5,7 +5,7 @@ using UnityEngine;
 
 public static class BakeProBuilderChildren
 {
-    const string GOMenuPath   = "GameObject/Shipbreaker/Bake ProBuilder Children";
+    const string GOMenuPath   = "GameObject/Shipbuilder/Bake ProBuilder Children";
     const string ShipMenuPath = "Shipbuilder/Bake ProBuilder Children";
 
     [MenuItem(GOMenuPath, true)]

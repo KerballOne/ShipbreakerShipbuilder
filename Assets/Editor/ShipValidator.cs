@@ -114,6 +114,32 @@ public static class ShipValidator
         }
     }
 
+    /// <summary>
+    /// Returns all scene Transforms with non-unit scale that have a StructurePart somewhere
+    /// in their subtree — the same set that generates scale warnings during Validate().
+    /// Operates on the live scene, not addressable prefab assets.
+    /// </summary>
+    public static List<Transform> FindScaleViolations()
+    {
+        var found = new List<Transform>();
+        var scene = UnityEditor.SceneManagement.EditorSceneManager.GetActiveScene();
+        foreach (var root in scene.GetRootGameObjects())
+        {
+            foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+            {
+                var s = t.localScale;
+                bool nonUnit = !Mathf.Approximately(s.x, 1f)
+                            || !Mathf.Approximately(s.y, 1f)
+                            || !Mathf.Approximately(s.z, 1f);
+                if (!nonUnit) continue;
+                bool hasSP = t.GetComponent<StructurePart>() != null
+                          || t.GetComponentInChildren<StructurePart>(true) != null;
+                if (hasSP) found.Add(t);
+            }
+        }
+        return found;
+    }
+
     static string GetPath(Transform t)
     {
         var sb = new StringBuilder(t.name);

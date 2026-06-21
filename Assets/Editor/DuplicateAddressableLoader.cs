@@ -8,7 +8,7 @@ public static class DuplicateAddressableLoader
 {
     const string KnownAssetsPath = "known_assets_enriched.json";
 
-    const string GOMenuPath   = "GameObject/Shipbreaker/Duplicate AddressableLoader";
+    const string GOMenuPath   = "GameObject/Shipbuilder/Duplicate AddressableLoader";
     const string ShipMenuPath = "Shipbuilder/Duplicate AddressableLoader";
 
     [MenuItem(GOMenuPath, false, 47)]
@@ -91,7 +91,7 @@ public static class DuplicateAddressableLoader
     }
 
     [MenuItem(GOMenuPath, true)]
-    [MenuItem(ShipMenuPath, true, priority = 140)]
+    [MenuItem(ShipMenuPath, true, priority = 142)]
     static bool Validate()
     {
         var go = Selection.activeGameObject;
@@ -100,7 +100,7 @@ public static class DuplicateAddressableLoader
         return FindNearestLoader(go) != null;
     }
 
-    [MenuItem(ShipMenuPath, false, priority = 140)]
+    [MenuItem(ShipMenuPath, false, priority = 142)]
     static void ExecuteShip() => Execute(new MenuCommand(Selection.activeGameObject));
 
     static BBI.Unity.Game.AddressableLoader FindNearestLoader(GameObject go)

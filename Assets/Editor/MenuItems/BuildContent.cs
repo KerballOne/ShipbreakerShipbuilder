@@ -34,16 +34,50 @@ public class BuildContent
         if (validation.Warnings.Count > 0)
         {
             var msg = string.Join("\n\n", validation.Warnings);
-            bool proceed = EditorUtility.DisplayDialog(
-                "Build Warnings",
-                $"Validation produced {validation.Warnings.Count} warning(s):\n\n{msg}\n\nProceed with build anyway?",
-                "Proceed",
-                "Cancel"
-            );
-            if (!proceed)
+
+            // Check if any warnings are scale violations — offer auto-fix if so
+            bool hasScaleWarnings = validation.Warnings.Any(w => w.Contains("non-unit scale"));
+            int choice;
+            if (hasScaleWarnings)
+            {
+                choice = EditorUtility.DisplayDialogComplex(
+                    "Build Warnings",
+                    $"Validation produced {validation.Warnings.Count} warning(s):\n\n{msg}\n\n" +
+                    "Auto-Fix will run Lock In Rescale on all violating objects before building.",
+                    "Proceed Anyway",
+                    "Cancel",
+                    "Auto-Fix & Build"
+                );
+            }
+            else
+            {
+                choice = EditorUtility.DisplayDialogComplex(
+                    "Build Warnings",
+                    $"Validation produced {validation.Warnings.Count} warning(s):\n\n{msg}\n\nProceed with build anyway?",
+                    "Proceed",
+                    "Cancel",
+                    ""
+                );
+            }
+
+            // 0 = left (Proceed), 1 = Cancel, 2 = right (Auto-Fix)
+            if (choice == 1)
             {
                 Debug.Log("Build cancelled by user after warnings.");
                 return false;
+            }
+            if (choice == 2)
+            {
+                var rescaled = ShipValidator.FindScaleViolations();
+                Debug.Log($"[Build] Locking in rescale on {rescaled.Count} object(s) before build.");
+                RescaleLockerContextMenu.LockAll(rescaled);
+                // Re-validate to confirm all clear
+                validation = ShipValidator.Validate();
+                if (validation.Warnings.Any(w => w.Contains("non-unit scale")))
+                {
+                    Debug.LogError("Rescaled objects remain after auto-fix — aborting build.");
+                    return false;
+                }
             }
         }
 

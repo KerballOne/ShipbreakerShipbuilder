@@ -53,6 +53,13 @@ public class LoadGameAssets
     [MenuItem("Shipbuilder/Actions/Reload Assets", priority = 50)]
     public static void ReloadAssets()
     {
+        // Unload all AssetBundles before reloading catalogs. Without this, a second
+        // LoadFromFileAsync on an already-loaded bundle returns null, which
+        // AssetBundleProvider misreports as "Invalid path in AssetBundleProvider".
+        // unload=false keeps already-loaded assets alive in memory.
+        // Post-Build: safe because the new custom ship bundle has a new filename hash,
+        // so it is never the "same file" as any currently-loaded bundle.
+        AssetBundle.UnloadAllAssetBundles(false);
         UnloadAssets();
 
         if(File.Exists(Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "com.unity.addressables", "aa", "Windows", "catalog.json"))))

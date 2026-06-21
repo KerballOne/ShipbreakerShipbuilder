@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -8,9 +10,9 @@ using UnityEngine;
 /// </summary>
 public static class RescaleLockerContextMenu
 {
-    const string TransformMenuPath = "CONTEXT/Transform/Lock In Rescale";
-    const string GOMenuPath        = "GameObject/Shipbreaker/Lock In Rescale";
-    const string ShipMenuPath      = "Shipbuilder/Lock In Rescale";
+    const string TransformMenuPath = "CONTEXT/Transform/Lock In Rescale — Selected";
+    const string GOMenuPath        = "GameObject/Shipbuilder/Lock In Rescale — Selected";
+    const string ShipMenuPath      = "Shipbuilder/Lock In Rescale — Selected";
 
     [MenuItem(TransformMenuPath, true)]
     static bool ValidateTransform(MenuCommand command)
@@ -30,7 +32,7 @@ public static class RescaleLockerContextMenu
     }
 
     [MenuItem(GOMenuPath, true)]
-    [MenuItem(ShipMenuPath, true, priority = 143)]
+    [MenuItem(ShipMenuPath, true, priority = 155)]
     static bool ValidateGO()
     {
         var go = Selection.activeGameObject;
@@ -40,8 +42,49 @@ public static class RescaleLockerContextMenu
     }
 
     [MenuItem(GOMenuPath, false)]
-    [MenuItem(ShipMenuPath, false, priority = 143)]
+    [MenuItem(ShipMenuPath, false, priority = 155)]
     static void ExecuteGO() => Run(Selection.activeGameObject?.transform);
+
+    [MenuItem("Shipbuilder/Lock In Rescale — All Rescaled", priority = 156)]
+    static void RunAll()
+    {
+        var rescaled = ShipValidator.FindScaleViolations();
+        if (rescaled.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Lock In Rescale — All",
+                "No rescaled objects with StructureParts found in the scene.", "OK");
+            return;
+        }
+
+        var list = string.Join("\n", rescaled.Select(t =>
+        {
+            var s = t.localScale;
+            string scaleStr = RescaleLocker.IsUniformScale(t)
+                ? $"{s.x:F3}" : $"({s.x:F3}, {s.y:F3}, {s.z:F3})";
+            return $"• {t.name}  [{scaleStr}]";
+        }));
+
+        if (!EditorUtility.DisplayDialog("Lock In Rescale — All Rescaled",
+                $"Found {rescaled.Count} rescaled object(s):\n\n{list}\n\n" +
+                "Lock all into mesh geometry and reset transforms to (1,1,1)?",
+                "Lock All", "Cancel"))
+            return;
+
+        LockAll(rescaled);
+    }
+
+    /// <summary>Shared by the menu item and BuildContent's auto-fix path.</summary>
+    public static void LockAll(List<UnityEngine.Transform> rescaled)
+    {
+        int total = 0;
+        foreach (var t in rescaled)
+        {
+            if (t == null) continue;
+            total += RescaleLocker.LockRescale(t.gameObject);
+        }
+        EditorUtility.DisplayDialog("Rescale Locked",
+            $"Locked rescale into {total} mesh(es) across {rescaled.Count} object(s).", "OK");
+    }
 
     static void Run(Transform t)
     {

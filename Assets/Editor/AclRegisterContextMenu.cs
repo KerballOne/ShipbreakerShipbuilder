@@ -13,7 +13,7 @@ using BBI.Unity.Game;
 /// </summary>
 public static class AclRegisterContextMenu
 {
-    const string GOMenuPath   = "GameObject/Shipbreaker/Register Components in Parent ACL";
+    const string GOMenuPath   = "GameObject/Shipbuilder/Register Components in Parent ACL";
     const string ShipMenuPath = "Shipbuilder/Register Components in Parent ACL";
 
     static bool ValidateSelection()
@@ -321,7 +321,7 @@ public static class AclRegisterContextMenu
 
 public static class AclCleanContextMenu
 {
-    const string GOMenuPath   = "GameObject/Shipbreaker/Clean ACL (Remove Missing + Deduplicate)";
+    const string GOMenuPath   = "GameObject/Shipbuilder/Clean ACL (Remove Missing + Deduplicate)";
     const string ShipMenuPath = "Shipbuilder/Clean ACL (Remove Missing + Deduplicate)";
 
     static AddressableComponentLoader SelectedAcl()
