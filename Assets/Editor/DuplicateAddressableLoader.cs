@@ -91,7 +91,7 @@ public static class DuplicateAddressableLoader
     }
 
     [MenuItem(GOMenuPath, true)]
-    [MenuItem(ShipMenuPath, true, priority = 142)]
+    [MenuItem(ShipMenuPath, true, priority = 143)]
     static bool Validate()
     {
         var go = Selection.activeGameObject;
@@ -100,7 +100,7 @@ public static class DuplicateAddressableLoader
         return FindNearestLoader(go) != null;
     }
 
-    [MenuItem(ShipMenuPath, false, priority = 142)]
+    [MenuItem(ShipMenuPath, false, priority = 143)]
     static void ExecuteShip() => Execute(new MenuCommand(Selection.activeGameObject));
 
     static BBI.Unity.Game.AddressableLoader FindNearestLoader(GameObject go)

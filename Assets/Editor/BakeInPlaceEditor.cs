@@ -16,7 +16,7 @@ public static class BakeInPlaceEditor
 
     // ── Menu entries ──────────────────────────────────────────────────────────
 
-    [MenuItem("Shipbuilder/Bake Addressable In Place", priority = 143)]
+    [MenuItem("Shipbuilder/Bake Addressable In Place", priority = 142)]
     static void MenuBake() => BakeSelection();
 
     [MenuItem("Shipbuilder/Bake Addressable In Place", validate = true)]

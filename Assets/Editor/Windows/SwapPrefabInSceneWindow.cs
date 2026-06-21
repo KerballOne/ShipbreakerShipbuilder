@@ -13,7 +13,7 @@ public class SwapPrefabInSceneWindow : EditorWindow
     string m_Status = "";
     MessageType m_StatusType = MessageType.None;
 
-    [MenuItem("Shipbuilder/Swap Prefab In Scene", priority = 141)]
+    [MenuItem("Shipbuilder/Swap Prefab In Scene", priority = 102)]
     static void Open() => GetWindow<SwapPrefabInSceneWindow>("Swap Prefab In Scene");
 
     void OnGUI()

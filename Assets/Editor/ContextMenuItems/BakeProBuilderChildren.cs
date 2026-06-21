@@ -9,11 +9,11 @@ public static class BakeProBuilderChildren
     const string ShipMenuPath = "Shipbuilder/Bake ProBuilder Children";
 
     [MenuItem(GOMenuPath, true)]
-    [MenuItem(ShipMenuPath, true, priority = 142)]
+    [MenuItem(ShipMenuPath, true, priority = 141)]
     static bool Validate() => Selection.gameObjects.Length > 0;
 
     [MenuItem(GOMenuPath, false, 49)]
-    [MenuItem(ShipMenuPath, false, priority = 142)]
+    [MenuItem(ShipMenuPath, false, priority = 141)]
     static void Execute()
     {
         var selected = Selection.gameObjects;

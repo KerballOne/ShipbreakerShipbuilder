@@ -79,6 +79,25 @@ public class RadialDuplicateWindow : EditorWindow
         }
     }
 
+    static GameObject[] GetSelectionRoots(GameObject[] selection)
+    {
+        var set = new HashSet<GameObject>(selection);
+        var roots = new List<GameObject>();
+        foreach (var go in selection)
+        {
+            bool hasAncestorInSet = false;
+            var t = go.transform.parent;
+            while (t != null)
+            {
+                if (set.Contains(t.gameObject)) { hasAncestorInSet = true; break; }
+                t = t.parent;
+            }
+            if (!hasAncestorInSet)
+                roots.Add(go);
+        }
+        return roots.ToArray();
+    }
+
     void Execute()
     {
         Vector3 axisVec;
@@ -93,7 +112,8 @@ public class RadialDuplicateWindow : EditorWindow
         Undo.SetCurrentGroupName("Radial Duplicate");
         int group = Undo.GetCurrentGroup();
 
-        foreach (var src in Selection.gameObjects)
+        var roots = GetSelectionRoots(Selection.gameObjects);
+        foreach (var src in roots)
         {
             Transform refT = ResolveRefTransform(src);
 
