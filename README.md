@@ -18,24 +18,23 @@ It will be a much better source of information moving forward
   * Add your username as the author, eg: "Piepieonline" 
 * Open the ShipbreakerShipbuilder project in unity
 * Accept the popup to upgrade APIs
-* Run `Shipbreaker/Update game catalog`
-![Shipbreaker menu](Docs/ShipbreakerMenu.png?raw=true)
+* Run `Shipbuilder / Actions / Update game catalog`
 * Restart unity
-* Run `Shipbreaker/Update known assets`
+* Run `Shipbuilder / Actions / Update known assets`
 * Restart unity
-* Run `Shipbreaker/Build and run`, and ensure that the freeplay menu has update - the Wombat should appear first, and the developer ships should appear at the end
+* Run `Shipbuilder / ▶ Build and run`, and ensure that the freeplay menu has updated - the Wombat should appear first, and the developer ships should appear at the end
 
 ## First steps
 * Open "Scenes/SampleScene"
 * Navigate to "_CustomShips/ExampleBox"
 * Drag "ExampleBox.prefab" into the scene hierarchy (This will take a while on first attempt, as it is caching all used game assets - takes about a minute on my midrange machine)
- * If this doesn't look right, when the Editor has finished loading, `Shipbreaker/Force View Refresh`
+ * If this doesn't look right, when the Editor has finished loading, `Shipbuilder / Actions / Force View Refresh`
 * Move and rotate the atmospheric regulator into the box (Hint: Hold ctrl to snap to the grid)
-* Save and build - `Shipbreaker/Build`
+* Save and build - `Shipbuilder / ⛭ Build`
 * Run the game, open the freeplay menu, and find "Example Box" at the end of the list
 * Close the game
 * In the hierarchy, disable "East", "CutPointER" and "CutPointEB"
-* Enable "AirlockHardpoint", then run `Shipbreaker/Force View Refresh` (twice)
+* Enable "AirlockHardpoint", then run `Shipbuilder / Actions / Force View Refresh` (twice)
 * Move the airlock such that the inner wall sits inline with the open space, but not touching any walls
 ![Airlock position](Docs/AirlockPlacement.jpg?raw=true)
 * Clone "CutPointEB", enable it, and move it so that it just touches the floor and the airlock inner wall (It'll need to be rotated 180 degrees)
