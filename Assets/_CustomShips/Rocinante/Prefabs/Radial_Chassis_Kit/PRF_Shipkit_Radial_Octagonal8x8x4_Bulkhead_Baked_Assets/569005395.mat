@@ -10,7 +10,8 @@ Material:
   m_Name: 569005395
   m_Shader: {fileID: 4800000, guid: 61dbaea3826b0344794f35dbff252404, type: 3}
   m_ShaderKeywords: _DISABLE_DECALS _DISABLE_SSR _DISPLACEMENT_LOCK_TILING_SCALE
-    _HEIGHTMAP _MASKMAP _NORMALMAP _NORMALMAP_TANGENT_SPACE _PIXEL_DISPLACEMENT _PIXEL_DISPLACEMENT_LOCK_OBJECT_SCALE
+    _EMISSIVE_COLOR_MAP _HEIGHTMAP _MASKMAP _NORMALMAP _NORMALMAP_TANGENT_SPACE _PIXEL_DISPLACEMENT
+    _PIXEL_DISPLACEMENT_LOCK_OBJECT_SCALE _SKIN_PLANAR_MAPPING
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
@@ -63,7 +64,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _EmissiveColorMap:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: 441ce2710c6c9e942abb57e3c1e857dc, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _HeightMap:
@@ -127,6 +128,11 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Floats:
+    - Vector1_61A67BCE: 1
+    - Vector1_870C85C6: 0.549
+    - Vector1_D76856E4: 0.947
+    - Vector1_DE9506E0: 0.1
+    - Vector1_F0CEC3C6: 0.1
     - _AORemapMax: 1
     - _AORemapMin: 0
     - _ATDistance: 1
@@ -145,8 +151,8 @@ Material:
     - _CoatMask: 0
     - _CullMode: 2
     - _CullModeForward: 2
-    - _CutIntensity: 1
-    - _CutWidth: 0.1
+    - _CutIntensity: 0.603
+    - _CutWidth: 0.8
     - _Cutoff: 0.5
     - _DamageDarkenAmount: 0
     - _DamageFlashValue: 0
@@ -213,7 +219,8 @@ Material:
     - _IridescenceMask: 1
     - _IridescenceThickness: 1
     - _LinkDetailsWithBase: 1
-    - _LynxShaderType: 0
+    - _LynxShaderType: 2
+    - _MacroTextureScale: 1
     - _MaterialID: 1
     - _Metallic: 0.8
     - _MetallicRemapMax: 1
@@ -224,8 +231,8 @@ Material:
     - _NoiseScale: 1
     - _NormalMapSpace: 0
     - _NormalScale: 1
-    - _PPDLodThreshold: 5
-    - _PPDMaxSamples: 15
+    - _PPDLodThreshold: 5.55
+    - _PPDMaxSamples: 28.5
     - _PPDMinSamples: 5
     - _PPDPrimitiveLength: 1
     - _PPDPrimitiveWidth: 1
@@ -292,11 +299,11 @@ Material:
     - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissiveColor: {r: 0, g: 0, b: 0, a: 1}
     - _EmissiveColorLDR: {r: 0, g: 0, b: 0, a: 1}
-    - _FadeDetailParams: {r: 2, g: 24, b: 0.3, a: 1}
+    - _FadeDetailParams: {r: 2, g: 24, b: 1, a: 2}
     - _GlowIntensity: {r: 1, g: 1, b: 1, a: 0}
     - _InvPrimScale: {r: 1, g: 1, b: 0, a: 0}
     - _IridescenceThicknessRemap: {r: 0, g: 1, b: 0, a: 0}
-    - _MainColor: {r: 1, g: 1, b: 1, a: 1}
+    - _MainColor: {r: 0.2924528, g: 0.04552332, b: 0.04552332, a: 1}
     - _PivotPos: {r: 0, g: 0, b: 0, a: 0}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
     - _TexTransform: {r: 1, g: 1, b: 0, a: 0}
@@ -306,4 +313,5 @@ Material:
     - _UVMappingMask: {r: 1, g: 0, b: 0, a: 0}
     - _UVMappingMaskEmissive: {r: 1, g: 0, b: 0, a: 0}
     - _WorldPosition: {r: 0, g: 0, b: 0, a: 0}
+    - _WorldRotation: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
