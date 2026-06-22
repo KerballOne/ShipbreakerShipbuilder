@@ -277,6 +277,12 @@ public class BuildContent
 
         var path = System.IO.Path.GetFullPath(Path.Combine(Application.dataPath, "..", "modded_catalog.json"));
 
+        // Give the game catalog a unique locator ID so it doesn't collide with the custom
+        // asset catalog (both default to "AddressablesMainContentCatalog"); whichever loads
+        // second would otherwise silently replace the first, making one set of assets unloadable.
+        catalog = catalog.Replace("\"m_LocatorId\":\"AddressablesMainContentCatalog\"",
+                                  "\"m_LocatorId\":\"GameContentCatalog\"");
+
         File.WriteAllText(path, catalog);
         Debug.Log($"Game catalog recreated and written to {path}");
     }
