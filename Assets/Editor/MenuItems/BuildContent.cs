@@ -154,10 +154,13 @@ public class BuildContent
             }
             Debug.Log("Moving ship bundles completed");
 
-            // Delay reload so the catalog file is fully flushed before we load it.
+            // Domain reload reinitializes Addressables from scratch, which is necessary
+            // after a build — manual ReloadAssets leaves the AssetBundleProvider in a
+            // broken state that prevents preview loading until the Editor restarts.
+            // [InitializeOnLoad] on LoadGameAssets will call ReloadAssets() automatically.
             EditorApplication.delayCall += () => {
-                LoadGameAssets.ReloadAssets();
                 AddressableRendering.UpdateViewList();
+                EditorUtility.RequestScriptReload();
             };
             Debug.Log("Build Complete");
             return true;
