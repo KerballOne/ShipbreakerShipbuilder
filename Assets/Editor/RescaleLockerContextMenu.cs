@@ -73,8 +73,16 @@ public static class RescaleLockerContextMenu
         LockAll(rescaled);
     }
 
-    /// <summary>Shared by the menu item and BuildContent's auto-fix path.</summary>
+    /// <summary>Locks all with a confirmation dialog — used by the menu item.</summary>
     public static void LockAll(List<UnityEngine.Transform> rescaled)
+    {
+        int total = LockAllSilent(rescaled);
+        EditorUtility.DisplayDialog("Rescale Locked",
+            $"Locked rescale into {total} mesh(es) across {rescaled.Count} object(s).", "OK");
+    }
+
+    /// <summary>Locks all without any dialog — used by the auto-fix build path.</summary>
+    public static int LockAllSilent(List<UnityEngine.Transform> rescaled)
     {
         int total = 0;
         foreach (var t in rescaled)
@@ -82,8 +90,7 @@ public static class RescaleLockerContextMenu
             if (t == null) continue;
             total += RescaleLocker.LockRescale(t.gameObject);
         }
-        EditorUtility.DisplayDialog("Rescale Locked",
-            $"Locked rescale into {total} mesh(es) across {rescaled.Count} object(s).", "OK");
+        return total;
     }
 
     static void Run(Transform t)

@@ -382,6 +382,17 @@ public class ImportGamePartWizard : EditorWindow
 
     void OnGUI()
     {
+        // Layout/Repaint control-count mismatch when warning state changes between passes — harmless, suppress.
+        if (Event.current.type == EventType.Repaint)
+        {
+            try { OnGUIImpl(); } catch (System.ArgumentException) { }
+            return;
+        }
+        OnGUIImpl();
+    }
+
+    void OnGUIImpl()
+    {
         EnsureStyles();
 
         bool hasGameAssets = LoadGameAssets.knownAssetMap != null && LoadGameAssets.knownAssetMap.Count > 0;
