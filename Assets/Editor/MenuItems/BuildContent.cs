@@ -72,13 +72,10 @@ public class BuildContent
                 Debug.Log($"[Build] Locking in rescale on {rescaled.Count} object(s) before build.");
                 RescaleLockerContextMenu.LockAll(rescaled);
                 AssetDatabase.SaveAssets();
-                // Re-validate to confirm all clear
-                validation = ShipValidator.Validate();
-                if (validation.Warnings.Any(w => w.Contains("non-unit scale")))
-                {
-                    Debug.LogError("Rescaled objects remain after auto-fix — aborting build.");
-                    return false;
-                }
+                AssetDatabase.Refresh();
+                // Defer the build until after the asset database refresh has settled.
+                EditorApplication.delayCall += ContinueBuildAfterAutoFix;
+                return true;
             }
         }
 
@@ -248,6 +245,13 @@ public class BuildContent
 
         Debug.Log($"{shipName} - Writing manifest");
         File.WriteAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, "manifest.json"), JsonConvert.SerializeObject(manifest));
+    }
+
+    static void ContinueBuildAfterAutoFix()
+    {
+        // Re-entry after auto-fix: assets are saved and the import has settled.
+        // RunBuild will re-validate; if scale warnings are gone it proceeds to build.
+        RunBuild();
     }
 
     [MenuItem("Shipbuilder/▶ Build and run", priority = 2)]
