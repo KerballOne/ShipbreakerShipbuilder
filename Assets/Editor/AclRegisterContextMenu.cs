@@ -10,6 +10,7 @@ using BBI.Unity.Game;
 /// StructurePart and EntityBlueprintComponent found in the selected GO's descendants.
 /// Resolves addresses by: (1) name-matching against all prefab ACLs on disc,
 /// (2) existing entries in the parent ACL, (3) manual picker as fallback.
+/// All confirmations and address selections are shown in a single window.
 /// </summary>
 public static class AclRegisterContextMenu
 {
@@ -97,14 +98,16 @@ public static class AclRegisterContextMenu
         // Tier 1: name-matched entries in the parent ACL itself
         var aclNameLookup = BuildAclNameLookup(acl);
 
-        // Tier 2: name-matched entries in other ACLs in the scene
+        // Tier 2: name-matched entries from other ACLs in the scene
         var sceneLookup = BuildSceneAclLookup(acl);
 
-        // Tier 3 (lazy): project prefab assets — only search for keys still unresolved
+        // Tier 3 (lazy): project prefab assets
         Dictionary<(System.Type, string, string), List<(string address, string label)>> prefabLookup = null;
 
-        // Resolve address per component
-        var addressByComp = new Dictionary<Component, string>();
+        // Resolve candidates per component
+        var candidatesByComp = new Dictionary<Component, List<(string address, string label)>>();
+        var unresolved = new List<Component>();
+
         foreach (var (comp, field) in toAdd)
         {
             string goName = comp.gameObject.name;
@@ -112,7 +115,6 @@ public static class AclRegisterContextMenu
             var type = comp.GetType();
             var key = (type, field, strippedName);
 
-            // Collect matches in tier order, stopping as soon as we have an exact name hit
             var matches = new List<(string address, string label)>();
 
             aclNameLookup.TryGetValue(key, out var tier1);
@@ -126,7 +128,6 @@ public static class AclRegisterContextMenu
 
             if (matches.Count == 0)
             {
-                // Lazy-load project prefab search for remaining keys
                 if (prefabLookup == null)
                     prefabLookup = BuildPrefabAddressLookup(neededKeys);
                 prefabLookup.TryGetValue(key, out var tier3);
@@ -134,53 +135,23 @@ public static class AclRegisterContextMenu
             }
 
             if (matches.Count == 0)
-            {
-                EditorUtility.DisplayDialog("Register in ACL",
-                    $"No address found for {type.Name} on '{goName}'.\n\nNo name match in ACL, scene, or project prefabs.",
-                    "OK");
-                return;
-            }
-
-            string picked;
-            if (matches.Count == 1)
-            {
-                int choice = EditorUtility.DisplayDialogComplex("Register in ACL",
-                    $"Use this address for {type.Name} on '{goName}'?\n\n{matches[0].label}",
-                    "Use", "Cancel", "Show All");
-                if (choice == 1) return;
-                picked = choice == 0 ? matches[0].address : AddressPickerWindow.Show($"{type.Name} on '{goName}'", matches);
-                if (picked == null) return;
-            }
+                unresolved.Add(comp);
             else
-            {
-                picked = AddressPickerWindow.Show($"{type.Name} on '{goName}'", matches);
-                if (picked == null) return;
-            }
-
-            addressByComp[comp] = picked;
+                candidatesByComp[comp] = matches;
         }
 
-        string selectionLabel = selected.Length == 1 ? $"'{selected[0].name}'" : $"{selected.Length} objects";
-        if (!EditorUtility.DisplayDialog("Register in ACL",
-                $"Add {toAdd.Count} ACL entry(s) to '{acl.gameObject.name}' for components under {selectionLabel}?" +
-                (toAdd.Count < targets.Count ? $"\n({targets.Count - toAdd.Count} already registered, skipped)" : ""),
-                "Add", "Cancel"))
-            return;
-
-        Undo.RecordObject(acl, "Register Components in Parent ACL");
-
+        // Build row list: resolved entries get their best-match pre-selected; unresolved flagged
+        var rows = new List<AclRegisterRow>();
         foreach (var (comp, field) in toAdd)
         {
-            acl.componentValues.Add(new AddressableComponentValue
-            {
-                component = comp,
-                field     = field,
-                address   = addressByComp[comp],
-            });
+            if (candidatesByComp.TryGetValue(comp, out var candidates))
+                rows.Add(new AclRegisterRow(comp, field, candidates));
+            else
+                rows.Add(new AclRegisterRow(comp, field, null)); // unresolved
         }
 
-        EditorUtility.SetDirty(acl);
-        Debug.Log($"[AclRegister] Added {toAdd.Count} entries to ACL on '{acl.gameObject.name}' for {selectionLabel}.");
+        int alreadyRegistered = targets.Count - toAdd.Count;
+        AclRegisterWindow.Show(acl, rows, alreadyRegistered);
     }
 
     static void AddUnique(List<(string address, string label)> list, List<(string address, string label)> items)
@@ -190,7 +161,6 @@ public static class AclRegisterContextMenu
                 list.Add(item);
     }
 
-    // Tier 1: name-matched entries within the same ACL
     static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildAclNameLookup(
         AddressableComponentLoader acl)
     {
@@ -203,7 +173,6 @@ public static class AclRegisterContextMenu
         return result;
     }
 
-    // Tier 2: name-matched entries from all other ACLs in the scene
     static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildSceneAclLookup(
         AddressableComponentLoader exclude)
     {
@@ -238,20 +207,16 @@ public static class AclRegisterContextMenu
             lookup[key].Add((cv.address, label));
     }
 
-    // Strips Unity copy suffixes: " - 1", " (1)", " 1" at end of name
     static string StripCopySuffix(string name)
     {
         name = name.Trim();
-        // " - N"
         var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)\s+-\s+\d+$");
         if (m.Success) return m.Groups[1].Value.Trim();
-        // " (N)"
         m = System.Text.RegularExpressions.Regex.Match(name, @"^(.*?)\s+\(\d+\)$");
         if (m.Success) return m.Groups[1].Value.Trim();
         return name;
     }
 
-    // Searches prefab assets for ACL entries matching the needed keys, stopping early once all are found.
     static Dictionary<(System.Type, string, string), List<(string address, string label)>> BuildPrefabAddressLookup(
         HashSet<(System.Type type, string field, string strippedName)> needed)
     {
@@ -317,7 +282,239 @@ public static class AclRegisterContextMenu
             result.Add((ebc, "m_BlueprintAsset"));
         return result;
     }
+
+    // Called by BuildValidationWindow to resolve address candidates for a single component.
+    public static List<(string address, string label)> ResolveAddressCandidates(
+        Component comp, string field, AddressableComponentLoader acl)
+    {
+        string strippedName = StripCopySuffix(comp.gameObject.name);
+        var key = (comp.GetType(), field, strippedName);
+        var needed = new HashSet<(System.Type, string, string)> { key };
+
+        var matches = new List<(string address, string label)>();
+
+        var tier1 = BuildAclNameLookup(acl);
+        if (tier1.TryGetValue(key, out var t1)) AddUnique(matches, t1);
+
+        if (matches.Count == 0)
+        {
+            var tier2 = BuildSceneAclLookup(acl);
+            if (tier2.TryGetValue(key, out var t2)) AddUnique(matches, t2);
+        }
+
+        if (matches.Count == 0)
+        {
+            var tier3 = BuildPrefabAddressLookup(needed);
+            if (tier3.TryGetValue(key, out var t3)) AddUnique(matches, t3);
+        }
+
+        return matches;
+    }
+
+    // Called by AclRegisterWindow once the user clicks Register
+    public static void CommitRows(AddressableComponentLoader acl, List<AclRegisterRow> rows)
+    {
+        var toCommit = rows.Where(r => r.Include && r.SelectedAddress != null).ToList();
+        if (toCommit.Count == 0) return;
+
+        Undo.RecordObject(acl, "Register Components in Parent ACL");
+        foreach (var row in toCommit)
+        {
+            acl.componentValues.Add(new AddressableComponentValue
+            {
+                component = row.Comp,
+                field     = row.Field,
+                address   = row.SelectedAddress,
+            });
+        }
+        EditorUtility.SetDirty(acl);
+        Debug.Log($"[AclRegister] Added {toCommit.Count} entries to ACL on '{acl.gameObject.name}'.");
+    }
 }
+
+// Data for a single row in the confirmation window
+public class AclRegisterRow
+{
+    public Component Comp;
+    public string Field;
+    public List<(string address, string label)> Candidates; // null = unresolved
+    public int SelectedIndex;
+    public bool Include = true;
+
+    public string SelectedAddress =>
+        Candidates != null && SelectedIndex < Candidates.Count ? Candidates[SelectedIndex].address : null;
+
+    public AclRegisterRow(Component comp, string field, List<(string address, string label)> candidates)
+    {
+        Comp = comp;
+        Field = field;
+        Candidates = candidates;
+        SelectedIndex = 0;
+    }
+}
+
+public class AclRegisterWindow : EditorWindow
+{
+    AddressableComponentLoader _acl;
+    List<AclRegisterRow> _rows;
+    int _alreadyRegistered;
+    Vector2 _scroll;
+
+    static readonly Color UnresolvedColor  = new Color(1f, 0.55f, 0.3f);
+    static readonly Color MultiMatchColor  = new Color(1f, 0.95f, 0.5f);
+    static readonly Color ResolvedColor    = new Color(0.7f, 1f, 0.7f);
+    static readonly Color SkippedColor     = new Color(0.55f, 0.55f, 0.55f);
+
+    public static void Show(AddressableComponentLoader acl, List<AclRegisterRow> rows, int alreadyRegistered)
+    {
+        var win = CreateInstance<AclRegisterWindow>();
+        win._acl = acl;
+        win._rows = rows;
+        win._alreadyRegistered = alreadyRegistered;
+        win.titleContent = new GUIContent($"Register in ACL — {acl.gameObject.name}");
+        win.minSize = new Vector2(700, 360);
+        win.ShowModalUtility();
+    }
+
+    void OnGUI()
+    {
+        DrawHeader();
+        DrawLegend();
+        EditorGUILayout.Space(4);
+        DrawTable();
+        EditorGUILayout.Space(6);
+        DrawFooter();
+    }
+
+    void DrawHeader()
+    {
+        EditorGUILayout.Space(6);
+        string subtitle = $"ACL: {_acl.gameObject.name}  |  {_rows.Count} new component(s)";
+        if (_alreadyRegistered > 0)
+            subtitle += $"  |  {_alreadyRegistered} already registered (skipped)";
+        EditorGUILayout.LabelField(subtitle, EditorStyles.boldLabel);
+        EditorGUILayout.Space(2);
+    }
+
+    void DrawLegend()
+    {
+        EditorGUILayout.BeginHorizontal();
+        DrawColorSwatch(ResolvedColor);   EditorGUILayout.LabelField("1 match", GUILayout.Width(60));
+        DrawColorSwatch(MultiMatchColor); EditorGUILayout.LabelField("multiple matches", GUILayout.Width(120));
+        DrawColorSwatch(UnresolvedColor); EditorGUILayout.LabelField("unresolved", GUILayout.Width(80));
+        DrawColorSwatch(SkippedColor);    EditorGUILayout.LabelField("skipped", GUILayout.Width(60));
+        EditorGUILayout.EndHorizontal();
+    }
+
+    static void DrawColorSwatch(Color c)
+    {
+        var prev = GUI.color;
+        GUI.color = c;
+        GUILayout.Label(GUIContent.none, GUI.skin.box, GUILayout.Width(14), GUILayout.Height(14));
+        GUI.color = prev;
+    }
+
+    void DrawTable()
+    {
+        // Column header
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Space(22);                                          // checkbox width
+        EditorGUILayout.LabelField("GameObject",  EditorStyles.miniLabel, GUILayout.Width(160));
+        EditorGUILayout.LabelField("Type",        EditorStyles.miniLabel, GUILayout.Width(90));
+        EditorGUILayout.LabelField("Address",     EditorStyles.miniLabel, GUILayout.MinWidth(200));
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.Space(2);
+
+        _scroll = EditorGUILayout.BeginScrollView(_scroll);
+
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            var row = _rows[i];
+            bool unresolved = row.Candidates == null || row.Candidates.Count == 0;
+            bool multi      = !unresolved && row.Candidates.Count > 1;
+
+            Color rowColor = !row.Include ? SkippedColor
+                           : unresolved   ? UnresolvedColor
+                           : multi        ? MultiMatchColor
+                           :                ResolvedColor;
+
+            var prevBg = GUI.backgroundColor;
+            GUI.backgroundColor = rowColor;
+            EditorGUILayout.BeginHorizontal(GUI.skin.box);
+            GUI.backgroundColor = prevBg;
+
+            // Include checkbox
+            bool newInclude = EditorGUILayout.Toggle(row.Include, GUILayout.Width(18));
+            if (newInclude != row.Include) row.Include = newInclude;
+
+            // GameObject name
+            EditorGUILayout.LabelField(row.Comp.gameObject.name, GUILayout.Width(160));
+
+            // Component type (abbreviated)
+            string typeName = row.Comp.GetType().Name == "EntityBlueprintComponent" ? "EBC" : "SP";
+            EditorGUILayout.LabelField(typeName, GUILayout.Width(90));
+
+            // Address picker / status
+            if (unresolved)
+            {
+                EditorGUILayout.LabelField("— no match found —", EditorStyles.miniLabel);
+            }
+            else if (!row.Include)
+            {
+                EditorGUILayout.LabelField(row.Candidates[row.SelectedIndex].label, EditorStyles.miniLabel);
+            }
+            else if (row.Candidates.Count == 1)
+            {
+                EditorGUILayout.LabelField(row.Candidates[0].label, EditorStyles.miniLabel);
+            }
+            else
+            {
+                // Dropdown for multiple candidates
+                var labels = row.Candidates.Select(c => c.label).ToArray();
+                row.SelectedIndex = EditorGUILayout.Popup(row.SelectedIndex, labels);
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        EditorGUILayout.EndScrollView();
+    }
+
+    void DrawFooter()
+    {
+        int registerable = _rows.Count(r => r.Include && r.SelectedAddress != null);
+        int skipped      = _rows.Count(r => !r.Include);
+        int unresolved   = _rows.Count(r => r.Include && r.SelectedAddress == null);
+
+        string summary = $"{registerable} will be registered";
+        if (skipped > 0)    summary += $", {skipped} skipped";
+        if (unresolved > 0) summary += $", {unresolved} unresolved (will not be added)";
+
+        EditorGUILayout.LabelField(summary, EditorStyles.miniLabel);
+        EditorGUILayout.Space(4);
+
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+
+        using (new EditorGUI.DisabledScope(registerable == 0))
+        {
+            if (GUILayout.Button($"Register ({registerable})", GUILayout.Width(130)))
+            {
+                AclRegisterContextMenu.CommitRows(_acl, _rows);
+                Close();
+            }
+        }
+
+        if (GUILayout.Button("Cancel", GUILayout.Width(80)))
+            Close();
+
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.Space(4);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 public static class AclCleanContextMenu
 {
@@ -379,55 +576,5 @@ public static class AclCleanContextMenu
         EditorUtility.SetDirty(acl);
 
         Debug.Log($"[AclClean] '{acl.gameObject.name}': removed {removedMissing} missing, {removedDupes} duplicate. {cleaned.Count} entries remain.");
-    }
-}
-
-public class AddressPickerWindow : EditorWindow
-{
-    string _typeName;
-    List<(string address, string label)> _options;
-    string _picked;
-    bool _done;
-    int _selectedIndex;
-
-    public static string Show(string typeName, List<(string address, string label)> options)
-    {
-        var win = CreateInstance<AddressPickerWindow>();
-        win._typeName = typeName;
-        win._options = options;
-        win._selectedIndex = 0;
-        win.titleContent = new GUIContent($"Pick address for {typeName}");
-        win.minSize = new Vector2(620, 160 + options.Count * 22);
-        win.maxSize = new Vector2(900, 160 + options.Count * 22);
-        win.ShowModalUtility();
-        return win._done ? win._picked : null;
-    }
-
-    void OnGUI()
-    {
-        EditorGUILayout.LabelField($"Select address to use for {_typeName}:", EditorStyles.wordWrappedLabel);
-        EditorGUILayout.Space(6);
-
-        for (int i = 0; i < _options.Count; i++)
-        {
-            bool newSelected = EditorGUILayout.ToggleLeft(_options[i].label, _selectedIndex == i);
-            if (newSelected) _selectedIndex = i;
-        }
-
-        EditorGUILayout.Space(8);
-        EditorGUILayout.BeginHorizontal();
-        GUILayout.FlexibleSpace();
-        if (GUILayout.Button("Use", GUILayout.Width(80)))
-        {
-            _picked = _options[_selectedIndex].address;
-            _done = true;
-            Close();
-        }
-        if (GUILayout.Button("Cancel", GUILayout.Width(80)))
-        {
-            _done = false;
-            Close();
-        }
-        EditorGUILayout.EndHorizontal();
     }
 }

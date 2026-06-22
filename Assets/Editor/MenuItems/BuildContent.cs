@@ -28,7 +28,7 @@ public class BuildContent
         var validation = ShipValidator.Validate();
         if (validation.HasErrors)
         {
-            Debug.LogError("Build aborted: fix validation errors above before building.");
+            BuildValidationWindow.Show(validation.Issues);
             return false;
         }
         if (validation.Warnings.Count > 0)
@@ -70,10 +70,10 @@ public class BuildContent
             {
                 var rescaled = ShipValidator.FindScaleViolations();
                 Debug.Log($"[Build] Locking in rescale on {rescaled.Count} object(s) before build.");
-                RescaleLockerContextMenu.LockAll(rescaled);
+                RescaleLockerContextMenu.LockAllSilent(rescaled);
                 AssetDatabase.SaveAssets();
-                AssetDatabase.Refresh();
-                // Defer the build until after the asset database refresh has settled.
+                UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes();
+                // Defer the build until after the save has settled.
                 EditorApplication.delayCall += ContinueBuildAfterAutoFix;
                 return true;
             }
