@@ -71,6 +71,7 @@ public class BuildContent
                 var rescaled = ShipValidator.FindScaleViolations();
                 Debug.Log($"[Build] Locking in rescale on {rescaled.Count} object(s) before build.");
                 RescaleLockerContextMenu.LockAll(rescaled);
+                AssetDatabase.SaveAssets();
                 // Re-validate to confirm all clear
                 validation = ShipValidator.Validate();
                 if (validation.Warnings.Any(w => w.Contains("non-unit scale")))

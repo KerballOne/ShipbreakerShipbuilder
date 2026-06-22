@@ -79,7 +79,7 @@ The validator runs automatically before every build. It scans all addressable pr
 | Severity | Condition | Effect |
 |---|---|---|
 | **Error** | `AddressableComponentLoader` has null/missing component entries | Blocks the build |
-| **Warning** | GO with `StructurePart` in subtree has non-unit `localScale` | Non-blocking — but ships may have wrong mass/joints |
+| **Warning** | GO with `StructurePart` in subtree has non-unit `localScale` | Non-blocking — use **Auto-Fix & Build** in the warning dialog to lock in rescale and save automatically, or cancel and fix manually |
 
 **Common error scenario:** You bake a panel, delete the baked GO, add an addressable replacement — the original ACL entries become null but remain in the list. Delete the dead entries using the `−` button in the Inspector, or use the **Component Copy Window** to diff and clean.
 
@@ -266,7 +266,7 @@ Bakes the current non-unit transform scale into the mesh geometry and resets the
 
 #### `Shipbuilder / Lock In Rescale — All Rescaled`
 
-Same as above but operates on every GO in the scene that has a `StructurePart` component and a non-unit `localScale`. Use this as a bulk fix before building if the validator reports multiple scale warnings.
+Same as above but operates on every GO in the scene that has a `StructurePart` component and a non-unit `localScale`. Use this as a bulk fix when the validator reports multiple scale warnings. The **Auto-Fix & Build** button in the warning dialog runs this automatically and saves assets before proceeding to the build step.
 
 ---
 
@@ -577,7 +577,7 @@ The pre-build validator catches remaining null ACL entries as an **error** and b
 
 Before running `Shipbuilder / ⛭ Build`, confirm:
 
-- [ ] All rescaled parts have had **Lock In Rescale** applied (transform reads `(1,1,1)`)
+- [ ] All rescaled parts have had **Lock In Rescale** applied (transform reads `(1,1,1)`) — or use **Auto-Fix & Build** in the warning dialog to handle this automatically
 - [ ] All deleted parts have had their **ACL entries removed** from the parent loader
 - [ ] All duplicated or new parts have been **registered in the parent ACL**
 - [ ] The validator reports no errors and no scale warnings
