@@ -31,6 +31,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
    - [DummyPlugRoom Workflow](#42-adding-a-room-dummyplugroom-workflow)
    - [Room Type GUIDs](#43-room-type-guids)
    - [Pressurisation State](#44-pressurisation-state)
+   - [Custom Room Data Assets](#45-custom-room-data-assets)
 5. [Joints](#5-joints)
    - [How Auto-Jointing Works](#51-how-auto-jointing-works)
    - [MandatoryJointContainer](#52-mandatoryjointcontainer)
@@ -685,6 +686,61 @@ Each `DynamicRoomContainerAsset` holds a weighted list of `RoomDataAsset` entrie
 The only built-in way to guarantee a room starts unpressurised is `ThrusterRoomAlwaysUnpressurized` (`c3916206ca44e364eae1bad0e4fa602c`).
 
 Note: pressurisation logic overrides all probabilities to 0 when loading from a save file (`wasLoadedFromFile = true`).
+
+---
+
+### 4.5 Custom Room Data Assets
+
+If you want to control pressurisation probability, dust levels, or room name for a room — rather than accepting the game's built-in weighted random — you can create your own `DynamicRoomContainerAsset` and point your room's `AddressableSOLoader` at it instead of one of the GUIDs in [Section 4.3](#43-room-type-guids).
+
+#### Asset types
+
+Three ScriptableObject types are involved:
+
+| Asset | Purpose |
+|---|---|
+| `RoomTypeAsset` | Declares the room type (e.g. Corridor, Cockpit). References one of the game's built-in room type assets. |
+| `RoomDataAsset` | One concrete room variant: sets the `RoomTypeAsset`, `PressurizationProbability`, `DustLevelMin`, `DustLevelMax`, and localization IDs for the room name. |
+| `DynamicRoomContainerAsset` | The top-level asset your `AddressableSOLoader` points to. Holds a weighted list of `RoomDataAsset` entries (with per-entry restrictions) and a fallback Default Room Data. |
+
+#### Creating the assets
+
+All three types can be created via `Assets > Create > Scriptable Objects`:
+
+- `Assets > Create > Scriptable Objects > RoomTypeAsset`
+- `Assets > Create > Scriptable Objects > RoomDataAsset`
+- `Assets > Create > Scriptable Objects > DynamicRoomContainerAsset`
+
+Create them in a logical folder (e.g. `Assets/_CustomShips/<ShipName>/RoomData/`).
+
+#### Workflow
+
+1. **Create a `RoomDataAsset`** — set the fields:
+   - `Room Type`: reference one of the game's `RoomTypeAsset`s (load via Game Inspector using a GUID from [Section 4.3](#43-room-type-guids), inspect which `RoomTypeAsset` it references internally, then use that)
+   - `Pressurization Probability`: `1.0` = always pressurised, `0.0` = always unpressurised, `0.5` = 50% chance
+   - `Dust Level Min` / `Dust Level Max`: floats controlling random dust particle amount in the room
+   - `Room Name` / `Short Room Name`: localization database IDs (e.g. `"Crawlspace"`, `"CRWL"`) — these must match strings in the game's localization database; you cannot invent new ones without a localization mod
+2. **Create a `DynamicRoomContainerAsset`** — add your `RoomDataAsset` to the `Weighed Room Datas` list with `Weight = 1` and no `Restrictions`. Set it as the `Default Room Data` too.
+3. **Make the asset addressable**: in the Addressables Groups window, add your `DynamicRoomContainerAsset` to your ship's addressable group. Copy its address (or its GUID via `Assets / Copy GUID`).
+4. **Wire it up**: in your room prefab's `AddressableSOLoader`, set `Refs → Element 0` to the GUID of your `DynamicRoomContainerAsset`.
+
+#### DynamicRoomContainerAsset fields
+
+| Field | Type | Description |
+|---|---|---|
+| Weighed Room Datas | List\<WeightedRoomData\> | Each entry has a `Value` (RoomDataAsset), a `Weight` (relative probability when multiple entries are eligible), and `Restrictions` (Ship Properties required for this entry to be chosen — if any listed property is absent from the ship, the entry is skipped) |
+| Default Room Data | RoomDataAsset | Fallback used if no weighted entry is eligible |
+
+#### RoomDataAsset fields
+
+| Field | Type | Description |
+|---|---|---|
+| Room Name | localized string | Localization DB ID for the full room name (e.g. `"Crawlspace"`) |
+| Short Room Name | localized string | Localization DB ID for the scan-mode label (e.g. `"CRWL"`) |
+| Room Type | RoomTypeAsset | Reference to the Room Type asset |
+| Pressurization Probability | float | Chance (0–1) the room spawns pressurised |
+| Dust Level Min | float | Minimum random dust particle amount |
+| Dust Level Max | float | Maximum random dust particle amount |
 
 ---
 

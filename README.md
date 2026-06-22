@@ -77,76 +77,8 @@ It will be a much better source of information moving forward
 
 ## Rooms
 
-### Components
-* **RoomContainerDefinition**: Defines how the room behaves. Set the room type via the `Dynamic Room Container Asset` field using the GUIDs below.
-* **RoomSubVolumeDefinition** (green boxes): Defines the pressurised volume. At least one `Include` mode volume required. `Exclude` mode volumes carve out space from include volumes. The `Center` field is a world-space offset applied after the parent Transform — edit it in the Inspector.
-* **RoomOpeningDefinition** (red boxes): Defines how volumes connect.
-  * Type 0 = Block (wall, no air flow)
-  * Type 1 = Portal (door opening — game hatch prefabs already include their own portal, so you don't need to add one manually)
-  * Type 2 = Overlap (required wherever two different rooms' SubVolume boxes intersect in 3D space)
-  * Flow axis (red arrows) defines which direction air flows when breached
-* Room overlaps need to be carefully managed — extra or misplaced overlaps will cause instant breaching when loading
+See [Section 4 of the User Guide](Docs/USER_GUIDE.md#4-rooms) for the full rooms reference: components, DummyPlugRoom workflow, room type GUIDs, pressurisation state, and how to create custom room data assets.
 
-### Adding a room to your ship (DummyPlugRoom workflow)
-
-Rooms must live inside an **addressable prefab with a ModuleDefinition** component — a plain GameObject in the ship hierarchy will not have its `AddressableSOLoader` fired at runtime and the room type will not load. The `DummyPlugRoom` prefab (`Assets/_CustomShips/FirstShip/Components/DummyPlug/DummyPlugRoom.prefab`) is a ready-made container for this purpose.
-
-**Each room needs its own separate prefab asset.** You cannot reuse the same DummyPlugRoom prefab for multiple rooms — all instances share the same prefab data, so editing one in context edits all of them. For each room, duplicate the DummyPlugRoom prefab file in the Project window (right-click → Duplicate, or Ctrl+D) and rename it before placing it in the ship.
-
-**To add a new room:**
-1. In the Project window, duplicate `DummyPlugRoom.prefab` and give it a descriptive name (e.g. `AftSectionRoom.prefab`).
-2. Make sure the new prefab is in the Addressables group for your ship (open the Addressables Groups window, drag the prefab in, or use the Addressable checkbox in the Inspector).
-3. Place the new prefab instance in your ship hierarchy where the room should be.
-4. To edit room volumes with the ship visible for context: click the **arrow** on the prefab instance to enter **Prefab Mode In Context** (not isolation — the ship mesh stays visible).
-5. If you need to add a new SubVolume child: **copy** (`Ctrl+C` or right-click → Copy) the existing `Volume` object while in the outer scene context first, then enter prefab mode in context and **paste**. Dragging across prefab boundaries is not supported by Unity.
-6. Edit `Center` and `Size` on each `RoomSubVolumeDefinition` in the Inspector. Run `Shipbreaker/Force View Refresh` to update the green/red box gizmos.
-7. Save the prefab (Ctrl+S while in prefab mode, or click the back arrow to exit and save).
-
-**Do not unpack the room prefab instance** into the ship hierarchy — the Room's `AddressableSOLoader` will no longer fire at runtime.
-
-### Room type GUIDs
-
-Set the GUID in the `AddressableSOLoader` component on the `Room` object (the `Refs → Element 0` field) to change the room type:
-
-The GUID goes in the `AddressableSOLoader` on the `Room` object (`Refs → Element 0`). Each asset internally picks from a weighted list of `RoomDataAsset` entries — the default pressurisation state shown below is the typical in-game behaviour for that room type on a standard ship.
-
-| Room Type | GUID | Default pressurisation |
-|---|---|---|
-| Airlock | `1e2fc202254a9b142821666f0de99c43` | Mixed |
-| Bathroom | `1618146055ee06241a21a0a070fcb285` | Mixed |
-| Bulkhead | `27f96a65f1a36ce42879c5c6b295e9cf` | Mixed |
-| BulkheadStructure | `be0601d7017703647a188f1690c9a487` | Mixed |
-| Cabin | `1890b7b43c4fe394fade0ed5247ce74f` | Pressurised |
-| CargoBay | `944e7dc3b121bc842a1d206109d5ed3f` | Mixed |
-| Cockpit | `c69f6c1382018f447bd3ab232bf02176` | Pressurised |
-| Corridor | `f960f0730be516340995562ac0b6e597` | Mixed |
-| Crawlspace | `4360c7aed7fee3e42b466b34f1cf2270` | Mixed |
-| CrewQuarters | `f7ff5f8c1aed42041b653e9eaa54287b` | Pressurised |
-| CrewStorage | `1b66cb083eeef6149b41005abdd173ae` | Mixed |
-| Default | `f743858ced3468449a6fbceca8d0dc44` | Mixed |
-| ECU | `2ec54053428070f41b789f5af1760d81` | Mixed |
-| Engineering | `47ed34b58fc05a642aaad2a75f79d2a5` | Mixed |
-| EngineRoom | `c6e8af5db4e6a2f428c077a1ba360950` | Mixed |
-| Habitation | `76dc4093ec68f644a89b4c100e58fd55` | Pressurised |
-| Laboratory | `978d6afb37c141345b77309092d24f3a` | Mixed |
-| MainCompartment | `d5772889c0d17d041a06c56a8a28f286` | Mixed |
-| Operations | `30202ba5349db6246948ee8ebbe281f2` | Mixed |
-| PassengerStorage | `501cc60840df1f745860c9496b9913f3` | Mixed |
-| Reactor | `57308ca44db6e7444939c1c682b40add` | Mixed |
-| SalvageBay | `92745bbdc73bbe2468d61f192647841c` | Mixed |
-| ThrusterRoom | `35255e7fddb53ec4b84d410aa0947566` | Mixed |
-| ThrusterRoom (always unpressurised) | `c3916206ca44e364eae1bad0e4fa602c` | **Always unpressurised** |
-| Workshop | `f1d1b2120f26b4e4ba3386ff70936917` | Mixed |
-
-*Mixed = random chance each run. Exact probabilities are defined inside each asset and not directly editable from the prefab.*
-
-### Pressurisation state
-
-Each `DynamicRoomContainerAsset` internally holds a weighted list of `RoomDataAsset` entries. Each `RoomDataAsset` carries a `PressurizationProbability` — this is what determines whether a room starts pressurised. There is no way to select a specific pressurisation variant by swapping a GUID in the `AddressableSOLoader`; the asset itself controls the weighted random selection at runtime.
-
-The GUIDs in the table above are the default asset for each room type, which typically uses `MixedPressurization` (random chance). The only built-in way to guarantee a room starts unpressurised is `ThrusterRoomAlwaysUnpressurized` (`c3916206ca44e364eae1bad0e4fa602c`).
-
-Note: the game's pressurisation logic overrides all probabilities to 0 when loading from a save file (`wasLoadedFromFile = true`).
 ## Texturing custom models
 We can add custom models to the game, and set them so that they get the triplaner texture applied
 An example of the process can be found in "Assets/_CustomShips/FirstShip/Components/Shell/ShellConnector.prefab"
