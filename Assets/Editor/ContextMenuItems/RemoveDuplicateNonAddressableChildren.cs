@@ -100,9 +100,11 @@ public static class RemoveDuplicateNonAddressableChildren
 
     static void CollectPrefabRoots(Transform t, List<PrefabRecord> records)
     {
-        // Walk the subtree; when we find an outermost prefab instance root, record it and stop recursing
+        // Walk the subtree; when we find the nearest prefab instance root, record it and stop recursing.
+        // Use GetNearestPrefabInstanceRoot (not Outermost) so nested prefabs inside a ship root are
+        // unpacked individually rather than unlinking the entire ship prefab.
         if (PrefabUtility.IsPartOfPrefabInstance(t.gameObject) &&
-            PrefabUtility.GetOutermostPrefabInstanceRoot(t.gameObject) == t.gameObject)
+            PrefabUtility.GetNearestPrefabInstanceRoot(t.gameObject) == t.gameObject)
         {
             records.Add(new PrefabRecord
             {

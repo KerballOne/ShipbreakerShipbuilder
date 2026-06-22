@@ -73,9 +73,10 @@ public static class BakeInPlaceEditor
 
             string partName = original.name.Replace("(Clone)", "").Trim();
             string subFolder = ResolveSubFolder(guid, partName);
+            string safeName = SanitizeFolderName(partName);
             string partFolder = $"{prefabsRoot}/{subFolder}";
-            string assetFolder = $"{partFolder}/{subFolder}_Assets";
-            string prefabPath = $"{partFolder}/{subFolder}_Baked.prefab";
+            string assetFolder = $"{partFolder}/{safeName}_Assets";
+            string prefabPath = $"{partFolder}/{safeName}_Baked.prefab";
 
             AddressableBaker.EnsureFolder(partFolder);
             AddressableBaker.EnsureFolder(assetFolder);
@@ -103,7 +104,7 @@ public static class BakeInPlaceEditor
             if (File.Exists(Path.GetFullPath(prefabPath)))
                 AssetDatabase.DeleteAsset(prefabPath);
 
-            var root = new GameObject(subFolder + "_Baked");
+            var root = new GameObject(safeName + "_Baked");
             try
             {
                 var spMatRefs = new List<(Component component, string field, string guid)>();
@@ -141,22 +142,13 @@ public static class BakeInPlaceEditor
                 continue;
             }
 
-            // Instantiate at original world transform, under the same parent
+            // Instantiate at original world transform, under the same parent.
+            // The original addressable GO is left in place — remove it manually once satisfied.
             var parent     = original.transform.parent;
             var worldPos   = original.transform.position;
             var worldRot   = original.transform.rotation;
             var worldScale = original.transform.lossyScale;
             int siblingIndex = original.transform.GetSiblingIndex();
-
-            // Cannot destroy a GO that is part of a prefab instance — unpack to scene object first.
-            // Must pass the outermost prefab instance root, not a nested one.
-            if (PrefabUtility.IsPartOfPrefabInstance(original))
-                PrefabUtility.UnpackPrefabInstance(
-                    PrefabUtility.GetOutermostPrefabInstanceRoot(original),
-                    PrefabUnpackMode.OutermostRoot,
-                    InteractionMode.UserAction);
-
-            Undo.DestroyObjectImmediate(original);
 
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, parent);
             instance.transform.position = worldPos;
@@ -174,13 +166,13 @@ public static class BakeInPlaceEditor
             {
                 instance.transform.localScale = worldScale;
             }
-            instance.transform.SetSiblingIndex(siblingIndex);
+            instance.transform.SetSiblingIndex(siblingIndex + 1);
             Undo.RegisterCreatedObjectUndo(instance, "Bake Addressable In Place");
 
             EditorGUIUtility.PingObject(instance);
-            lines.AppendLine($"✓ {partName}\n  → {prefabPath}");
+            lines.AppendLine($"✓ {partName}\n  → {prefabPath}\n  Original left in place — delete manually.");
             succeeded++;
-            Debug.Log($"[BakeInPlace] '{partName}' baked and replaced → '{prefabPath}'.");
+            Debug.Log($"[BakeInPlace] '{partName}' baked → '{prefabPath}'. Original addressable left in place.");
         }
 
         AssetDatabase.SaveAssets();
