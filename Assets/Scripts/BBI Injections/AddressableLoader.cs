@@ -18,6 +18,12 @@ namespace BBI.Unity.Game
 
         public List<string> disabledChildren = new List<string>();
 
+        // Optional: GUID of a RoomType ModulePropertyAsset to pass to DynamicLight.SetSpawnData
+        // when this addressable contains light fixtures. Leave empty to use the default (Cockpit).
+        public string lightRoomTypeGUID = "";
+        // Optional: GUID of a LightLevel ModulePropertyAsset. Leave empty to use the default (Normal).
+        public string lightLevelGUID = "";
+
         // TODO: Not working right now
         [HideInInspector]
         public List<Component> componentsOnChildren = new List<Component>();

@@ -677,6 +677,55 @@ Set the GUID in the `AddressableSOLoader` on the `Room` object (`Refs → Elemen
 
 *Mixed = random chance each run, defined by internal weighting in each asset.*
 
+> **Note:** The GUIDs above are `DynamicRoomContainerAsset` GUIDs used by `AddressableSOLoader` to configure rooms. They are **not** the same as `RoomType_ModulePropertyAsset` GUIDs used by light fixtures (see Section 4.3.1 below).
+
+---
+
+### 4.3.1 Light Fixture Room Type GUIDs
+
+Addressable light fixtures (e.g. `PRF_Light_LowSodium_*`, `PRF_Prop_LightBank_*`) receive their color from `DynamicLight.SetSpawnData`. Set `Light Room Type GUID` on the `AddressableLoader` component of the stub GO to control which color palette the game picks from. If left empty, the fallback is `RoomType_Cockpit`.
+
+These are `RoomType_ModulePropertyAsset` GUIDs — a different asset type from the room GUIDs above.
+
+| Room Type | GUID |
+|---|---|
+| Cabin | `f0a77774d6b016c47b20edaf131513eb` |
+| Cockpit | `90f3deeb4b0f55d49ad310f31a88ac48` |
+| CrawlSpace | `2f3bc468c54fe4b40957bba0c4a30554` |
+| Crew | `333310621e1631b4ca424782f0249391` |
+| Exterior | `e3ee9f9259c6b9642a83d64db6854c21` |
+| Hallway | `3128a1a8f55929d4499b54bf22ba4977` |
+| Laboratory | `9013ed4567b0fb342ae050e67e5c5676` |
+| Reactor | `a6cf17f810c6ce040a55c09aa4724347` |
+| Thruster | `9d740d2b85c06344c98176c5538b5b2b` |
+
+**Light Level GUID** controls flicker/off state. Leave empty for normal (on, no flicker).
+
+| Light Level | GUID | Effect |
+|---|---|---|
+| Normal | `4552721616e343a49942a82dc2621911` | On, no flicker (default) |
+| Damaged | `151c4eb20e561704aab34008b01f3567` | Flickering |
+| NoLight | `554231253ce67fa468bf3a7071a21d62` | Off |
+
+#### Color palette per DynamicLightColorAsset × RoomType
+
+The actual light color depends on which `DynamicLightColorAsset` the fixture prefab uses (set in the prefab's `DynamicLight` component — not author-configurable per stub). The table below shows the resulting light color (linear HDR) for each combination. Values confirmed at runtime via asset load.
+
+`—` = RoomType not in that asset's ColorMap; falls back to asset's `DefaultColor`.
+
+| RoomType | Industrial | Commercial | Cool | Science | Warm | GhostShip |
+|---|---|---|---|---|---|---|
+| Crew | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.95, 0.97, 0.72)` or `(1.00, 0.77, 0.32)` | `(0.45, 0.86, 1.00)` blue | — | `(0.10, 0.43, 0.90)` dim blue |
+| Hallway | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.69, 0.95, 0.92)` or `(0.49, 0.92, 1.00)` | `(0.45, 0.86, 1.00)` blue | `(1.00, 0.93, 0.29)`, `(0.40, 1.00, 0.76)`, or `(0.91, 0.56, 1.00)` | black |
+| Cabin | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.95, 0.97, 0.72)` or `(1.00, 0.77, 0.32)` | `(0.45, 0.86, 1.00)` blue | — | black |
+| Cockpit | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue (dim) | `(0.59, 0.97, 0.83)` teal | `(0.45, 0.86, 1.00)` blue | — | `(0.10, 0.43, 0.90)` dim blue |
+| Reactor | `(1.00, 0.76, 0.51)` orange | `(0.00, 0.38, 1.00)` deep blue | `(0.00, 0.38, 1.00)` deep blue | `(0.00, 0.38, 1.00)` deep blue | — | `(0.10, 0.43, 0.90)` dim blue |
+| Thruster | `(1.00, 0.76, 0.51)` orange | `(1.00, 0.00, 0.00)` red | `(1.00, 0.76, 0.51)` orange (w=0) | `(1.00, 0.76, 0.51)` orange | — | `(0.10, 0.43, 0.90)` dim blue |
+| CrawlSpace | `(1.00, 0.76, 0.51)` orange | `(0.55, 0.38, 0.27)` tan | `(0.55, 0.38, 0.27)` or `(0.67, 0.40, 0.00)` | `(0.55, 0.38, 0.27)` tan | — | `(0.10, 0.43, 0.90)` dim blue |
+| Exterior | — | — | `(0.70, 0.90, 0.92)` blue-grey | — | — | — |
+
+*DefaultColor for all assets except Warm is purple `(0.995, 0.363, 1.000)` — this appears when RoomType is unset or not in the map. Warm's default is yellow-green. Hazard has no ColorMap entries; its default is red. GhostShip_Hazard has no ColorMap entries; its default is blue `(0.285, 0.726, 0.991)`.*
+
 ---
 
 ### 4.4 Pressurisation State
