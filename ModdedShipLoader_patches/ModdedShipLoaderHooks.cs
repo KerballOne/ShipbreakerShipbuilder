@@ -603,8 +603,7 @@ namespace ModdedShipLoader
 
                 if (lightsByLoader.Count == 0) return;
 
-                ModdedShipLoader.LoggerInstance.LogInfo(
-                    $"[SpawnDataPatch] '{moduleObject.name}': found {lightsByLoader.Count} addressable loader(s) with DynamicLight children");
+                Log($"[SpawnDataPatch] '{moduleObject.name}': found {lightsByLoader.Count} addressable loader(s) with DynamicLight children", true);
 
                 var seedHash = new SeedHash(shipPreview.Seed) + 1;
                 int globalIndex = 0;
@@ -621,8 +620,7 @@ namespace ModdedShipLoader
                     if (string.IsNullOrEmpty(roomTypeGuid)) roomTypeGuid = kDefaultRoomTypeGuid;
                     string lightLevelGuid = PickLightLevelGuid(damagedChance, brokenChance, seedHash + globalIndex);
 
-                    ModdedShipLoader.LoggerInstance.LogInfo(
-                        $"[SpawnDataPatch]   loader '{loader.gameObject.name}': RoomType={roomTypeGuid} LightLevel={lightLevelGuid} ({loaderLights.Count} light(s))");
+                    Log($"[SpawnDataPatch]   loader '{loader.gameObject.name}': RoomType={roomTypeGuid} LightLevel={lightLevelGuid} ({loaderLights.Count} light(s))", true);
 
                     var props = new PropertyContainer();
                     props.AssignPropertyReference(PropertyContainer.Property.RoomType,
@@ -631,8 +629,7 @@ namespace ModdedShipLoader
                         new AssetReferenceT<ModulePropertyAsset>(lightLevelGuid));
                     await props.LoadAssetsAsync();
 
-                    ModdedShipLoader.LoggerInstance.LogInfo(
-                        $"[SpawnDataPatch]     -> RoomType='{props.GetPropertyAsset(PropertyContainer.Property.RoomType)?.name}' LightLevel='{props.GetPropertyAsset(PropertyContainer.Property.LightLevel)?.name}'");
+                    Log($"[SpawnDataPatch]     -> RoomType='{props.GetPropertyAsset(PropertyContainer.Property.RoomType)?.name}' LightLevel='{props.GetPropertyAsset(PropertyContainer.Property.LightLevel)?.name}'", true);
 
                     var spawnData = new ShipRandomizationHelper.ModuleSpawnData(
                         shipPreview, props, moduleToSpawn.ShipMemberID, manifest);
@@ -646,15 +643,14 @@ namespace ModdedShipLoader
                         }
                         catch (Exception ex)
                         {
-                            ModdedShipLoader.LoggerInstance.LogError(
-                                $"[SpawnDataPatch]     SetSpawnData FAILED on '{((Component)dl).gameObject.name}': {ex.GetType().Name}: {ex.Message}");
+                            Log($"[SpawnDataPatch]     SetSpawnData FAILED on '{((Component)dl).gameObject.name}': {ex.GetType().Name}: {ex.Message}", true);
                         }
                     }
 
                     props.UnloadAssets();
                 }
 
-                ModdedShipLoader.LoggerInstance.LogInfo($"[SpawnDataPatch] Done.");
+                Log($"[SpawnDataPatch] Done.", true);
             }
         }
 
