@@ -238,6 +238,10 @@ public static class AddressableBaker
         // Preserve MandatoryJointContainer marker so island/joint splitting still works at runtime.
         if (inT.TryGetComponent<MandatoryJointContainer>(out var mjc))
             EditorUtility.CopySerialized(mjc, node.AddComponent<MandatoryJointContainer>());
+
+        // Preserve Light components (e.g. Area Light children in fixture assets).
+        if (inT.TryGetComponent<Light>(out var srcLight))
+            EditorUtility.CopySerialized(srcLight, node.AddComponent<Light>());
     }
 
     // ── SP material reflection (m_StructurePartAsset is private SerializeField) ─────────────────
