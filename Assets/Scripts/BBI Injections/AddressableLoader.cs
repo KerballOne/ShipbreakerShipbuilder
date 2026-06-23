@@ -18,11 +18,15 @@ namespace BBI.Unity.Game
 
         public List<string> disabledChildren = new List<string>();
 
-        // Optional: GUID of a RoomType ModulePropertyAsset to pass to DynamicLight.SetSpawnData
-        // when this addressable contains light fixtures. Leave empty to use the default (Cockpit).
+        // Optional: GUID of a RoomType ModulePropertyAsset for DynamicLight.SetSpawnData.
+        // Leave empty to use the default (Cockpit).
         public string lightRoomTypeGUID = "";
-        // Optional: GUID of a LightLevel ModulePropertyAsset. Leave empty to use the default (Normal).
-        public string lightLevelGUID = "";
+
+        // Chance (0–1) that this fixture spawns damaged (flickering). 0 = never.
+        public float lightDamagedChance = 0.2f;
+        // Chance (0–1) that this fixture spawns broken (off). 0 = never.
+        // damagedChance + brokenChance should be <= 1. Normal fills the remainder.
+        public float lightBrokenChance = 0.1f;
 
         // TODO: Not working right now
         [HideInInspector]

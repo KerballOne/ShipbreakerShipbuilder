@@ -94,7 +94,8 @@ public static class ModdedShipLoaderPreloadPatcher_AssemblyCSharp
         newType.Fields.Add(new FieldDefinition("disabledChildren", FieldAttributes.Public, module.ImportReference(typeof(List<>)).MakeGenericInstanceType(module.TypeSystem.String)));
 
         newType.Fields.Add(new FieldDefinition("lightRoomTypeGUID", FieldAttributes.Public, module.ImportReference(typeof(string))));
-        newType.Fields.Add(new FieldDefinition("lightLevelGUID", FieldAttributes.Public, module.ImportReference(typeof(string))));
+        newType.Fields.Add(new FieldDefinition("lightDamagedChance", FieldAttributes.Public, module.ImportReference(typeof(float))));
+        newType.Fields.Add(new FieldDefinition("lightBrokenChance", FieldAttributes.Public, module.ImportReference(typeof(float))));
 
         newType.Fields.Add(new FieldDefinition("componentsOnChildren", FieldAttributes.Public, module.ImportReference(typeof(List<>)).MakeGenericInstanceType(componentTypeReference)));
         newType.Fields.Add(new FieldDefinition("componentsOnChildrenPaths", FieldAttributes.Public, module.ImportReference(typeof(List<>)).MakeGenericInstanceType(module.TypeSystem.String)));

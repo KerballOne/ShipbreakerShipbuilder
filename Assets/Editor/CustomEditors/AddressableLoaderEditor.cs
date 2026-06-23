@@ -9,7 +9,7 @@ using UnityEditor.IMGUI.Controls;
 [CustomEditor(typeof(AddressableLoader))]
 public class AddressableLoaderEditor : Editor
 {
-    // SerializeField is used to ensure the view state is written to the window 
+    // SerializeField is used to ensure the view state is written to the window
     // layout file. This means that the state survives restarting Unity as long as the window
     // is not closed. If the attribute is omitted then the state is still serialized/deserialized.
     [SerializeField] TreeViewState m_TreeViewState;
@@ -22,6 +22,22 @@ public class AddressableLoaderEditor : Editor
     string paintedAddress = "";
 
     private bool isDefaultOpen = false;
+
+    // ── Room type quick-set ──────────────────────────────────────────────────
+
+    private static readonly string[] kRoomTypeNames = new[]
+    {
+        "— select to set —", "Random (clear)", "Cabin", "Cockpit", "CrawlSpace",
+        "Crew", "Exterior", "Hallway", "Laboratory", "Reactor", "Thruster"
+    };
+    private static readonly string[] kRoomTypeGuids = new[]
+    {
+        null, "", "f0a77774d6b016c47b20edaf131513eb", "90f3deeb4b0f55d49ad310f31a88ac48",
+        "2f3bc468c54fe4b40957bba0c4a30554", "333310621e1631b4ca424782f0249391",
+        "e3ee9f9259c6b9642a83d64db6854c21", "3128a1a8f55929d4499b54bf22ba4977",
+        "9013ed4567b0fb342ae050e67e5c5676", "a6cf17f810c6ce040a55c09aa4724347",
+        "9d740d2b85c06344c98176c5538b5b2b"
+    };
 
     void OnEnable ()
     {
@@ -87,7 +103,18 @@ public class AddressableLoaderEditor : Editor
         }
 
         bool wasChanged = base.DrawDefaultInspector();
-        
+
+        // Quick room-type setter — writes into lightRoomTypeGUID without replacing the raw field.
+        EditorGUILayout.Space(2);
+        int picked = EditorGUILayout.Popup("Set Room Type", 0, kRoomTypeNames);
+        if (picked > 0)
+        {
+            var prop = serializedObject.FindProperty("lightRoomTypeGUID");
+            prop.stringValue = kRoomTypeGuids[picked] ?? prop.stringValue;
+            serializedObject.ApplyModifiedProperties();
+            wasChanged = true;
+        }
+
         // Apply changes to the serializedProperty - always do this in the end of OnInspectorGUI.
         serializedObject.ApplyModifiedProperties();
 

@@ -531,9 +531,20 @@ namespace ModdedShipLoader
         [HarmonyPatch(typeof(ShipRandomizationHelper), "OnModuleInstantiateAsyncComplete")]
         public class ShipRandomizationHelper_OnModuleInstantiateAsyncComplete
         {
-            // Fallback GUIDs (RoomType_Cockpit + Light_Normal) from known_assets.json.
-            private const string kDefaultRoomTypeGuid = "90f3deeb4b0f55d49ad310f31a88ac48";
-            private const string kDefaultLightLevelGuid = "4552721616e343a49942a82dc2621911";
+            // Fallback GUIDs from known_assets.json.
+            private const string kDefaultRoomTypeGuid   = "90f3deeb4b0f55d49ad310f31a88ac48"; // RoomType_Cockpit
+            private const string kLightLevelNormalGuid  = "4552721616e343a49942a82dc2621911"; // Light_Normal
+            private const string kLightLevelDamagedGuid = "151c4eb20e561704aab34008b01f3567"; // Light_Damaged
+            private const string kLightLevelOffGuid     = "554231253ce67fa468bf3a7071a21d62"; // Light_NoLight
+
+            // Pick a light level GUID using authored chances. Normal fills the remainder.
+            private static string PickLightLevelGuid(float damagedChance, float brokenChance, SeedHash seed)
+            {
+                float roll = (float)seed.GenerateRandom().NextDouble();
+                if (roll < brokenChance) return kLightLevelOffGuid;
+                if (roll < brokenChance + damagedChance) return kLightLevelDamagedGuid;
+                return kLightLevelNormalGuid;
+            }
 
             public static void Postfix(
                 ref Task __result,
@@ -604,10 +615,11 @@ namespace ModdedShipLoader
                     var loaderLights = kv.Value;
 
                     // Read authored GUIDs from AddressableLoader fields; fall back to defaults.
-                    string roomTypeGuid  = (string)addressableType.GetField("lightRoomTypeGUID")?.GetValue(loader);
-                    string lightLevelGuid = (string)addressableType.GetField("lightLevelGUID")?.GetValue(loader);
-                    if (string.IsNullOrEmpty(roomTypeGuid))  roomTypeGuid  = kDefaultRoomTypeGuid;
-                    if (string.IsNullOrEmpty(lightLevelGuid)) lightLevelGuid = kDefaultLightLevelGuid;
+                    string roomTypeGuid    = (string)addressableType.GetField("lightRoomTypeGUID")?.GetValue(loader);
+                    float  damagedChance   = (float)(addressableType.GetField("lightDamagedChance")?.GetValue(loader) ?? 0.2f);
+                    float  brokenChance    = (float)(addressableType.GetField("lightBrokenChance")?.GetValue(loader)  ?? 0.1f);
+                    if (string.IsNullOrEmpty(roomTypeGuid)) roomTypeGuid = kDefaultRoomTypeGuid;
+                    string lightLevelGuid = PickLightLevelGuid(damagedChance, brokenChance, seedHash + globalIndex);
 
                     ModdedShipLoader.LoggerInstance.LogInfo(
                         $"[SpawnDataPatch]   loader '{loader.gameObject.name}': RoomType={roomTypeGuid} LightLevel={lightLevelGuid} ({loaderLights.Count} light(s))");
