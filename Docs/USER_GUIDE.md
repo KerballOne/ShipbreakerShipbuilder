@@ -643,88 +643,48 @@ The game's `RoomProbeInitializeSystem` assigns each `RoomProbe` to a room at run
 
 ---
 
-### 4.3 Room Type GUIDs
+### 4.3 Room Type
 
-Set the GUID in the `AddressableSOLoader` on the `Room` object (`Refs → Element 0`) to set the room type.
+The room type controls pressurisation state and how the game categorises a room for salvage scoring. It is set on the `AddressableSOLoader` component of the `Room` child object.
 
-| Room Type | GUID | Default pressurisation |
-|---|---|---|
-| Airlock | `1e2fc202254a9b142821666f0de99c43` | Mixed |
-| Bathroom | `1618146055ee06241a21a0a070fcb285` | Mixed |
-| Bulkhead | `27f96a65f1a36ce42879c5c6b295e9cf` | Mixed |
-| BulkheadStructure | `be0601d7017703647a188f1690c9a487` | Mixed |
-| Cabin | `1890b7b43c4fe394fade0ed5247ce74f` | Pressurised |
-| CargoBay | `944e7dc3b121bc842a1d206109d5ed3f` | Mixed |
-| Cockpit | `c69f6c1382018f447bd3ab232bf02176` | Pressurised |
-| Corridor | `f960f0730be516340995562ac0b6e597` | Mixed |
-| Crawlspace | `4360c7aed7fee3e42b466b34f1cf2270` | Mixed |
-| CrewQuarters | `f7ff5f8c1aed42041b653e9eaa54287b` | Pressurised |
-| CrewStorage | `1b66cb083eeef6149b41005abdd173ae` | Mixed |
-| Default | `f743858ced3468449a6fbceca8d0dc44` | Mixed |
-| ECU | `2ec54053428070f41b789f5af1760d81` | Mixed |
-| Engineering | `47ed34b58fc05a642aaad2a75f79d2a5` | Mixed |
-| EngineRoom | `c6e8af5db4e6a2f428c077a1ba360950` | Mixed |
-| Habitation | `76dc4093ec68f644a89b4c100e58fd55` | Pressurised |
-| Laboratory | `978d6afb37c141345b77309092d24f3a` | Mixed |
-| MainCompartment | `d5772889c0d17d041a06c56a8a28f286` | Mixed |
-| Operations | `30202ba5349db6246948ee8ebbe281f2` | Mixed |
-| PassengerStorage | `501cc60840df1f745860c9496b9913f3` | Mixed |
-| Reactor | `57308ca44db6e7444939c1c682b40add` | Mixed |
-| SalvageBay | `92745bbdc73bbe2468d61f192647841c` | Mixed |
-| ThrusterRoom | `35255e7fddb53ec4b84d410aa0947566` | Mixed |
-| ThrusterRoom (always unpressurised) | `c3916206ca44e364eae1bad0e4fa602c` | Always unpressurised |
-| Workshop | `f1d1b2120f26b4e4ba3386ff70936917` | Mixed |
+**To set the room type:** right-click the `Addressable SO Loader (Script)` component header → `Set Room Type` → choose from the submenu. The GUID is written into `Refs → Element 0` automatically. No manual GUID entry required.
 
-*Mixed = random chance each run, defined by internal weighting in each asset.*
+Pressurisation behaviour by type:
 
-> **Note:** The GUIDs above are `DynamicRoomContainerAsset` GUIDs used by `AddressableSOLoader` to configure rooms. They are **not** the same as `RoomType_ModulePropertyAsset` GUIDs used by light fixtures (see Section 4.3.1 below).
+| Pressurisation | Room Types |
+|---|---|
+| Pressurised | Cabin, Cockpit, CrewQuarters, Habitation |
+| Always unpressurised | ThrusterRoom (unpressurised variant) |
+| Mixed (random each run) | All others |
 
 ---
 
-### 4.3.1 Light Fixture Room Type GUIDs
+### 4.3.1 Light Fixture Configuration
 
-Addressable light fixtures (e.g. `PRF_Light_LowSodium_*`, `PRF_Prop_LightBank_*`) receive their color from `DynamicLight.SetSpawnData`. Set `Light Room Type GUID` on the `AddressableLoader` component of the stub GO to control which color palette the game picks from. If left empty, the fallback is `RoomType_Cockpit`.
+Addressable light fixtures (e.g. `PRF_Light_LowSodium_*`, `PRF_Prop_LightBank_*`) are colored at runtime by MSL based on properties set on their `AddressableLoader` stub GO. Without these, lights default to purple.
 
-These are `RoomType_ModulePropertyAsset` GUIDs — a different asset type from the room GUIDs above.
+**To configure lights:** open `Shipbuilder / Addressable Light Config`. Select one or more fixture stub GOs in the Hierarchy — the window lists all `AddressableLoader` components found. Use the batch controls to set all at once, or configure each fixture individually.
 
-| Room Type | GUID |
-|---|---|
-| Cabin | `f0a77774d6b016c47b20edaf131513eb` |
-| Cockpit | `90f3deeb4b0f55d49ad310f31a88ac48` |
-| CrawlSpace | `2f3bc468c54fe4b40957bba0c4a30554` |
-| Crew | `333310621e1631b4ca424782f0249391` |
-| Exterior | `e3ee9f9259c6b9642a83d64db6854c21` |
-| Hallway | `3128a1a8f55929d4499b54bf22ba4977` |
-| Laboratory | `9013ed4567b0fb342ae050e67e5c5676` |
-| Reactor | `a6cf17f810c6ce040a55c09aa4724347` |
-| Thruster | `9d740d2b85c06344c98176c5538b5b2b` |
+#### Room Type
 
-**Light Level GUID** controls flicker/off state. Leave empty for normal (on, no flicker).
+Sets the color palette the fixture draws from. Each fixture prefab has a built-in `DynamicLightColorAsset` (e.g. Industrial = warm orange, Commercial = blue, Science = cool blue) — the room type selects which entry in that palette to use. The window shows a color preview swatch for each fixture based on the room type you select.
 
-| Light Level | GUID | Effect |
+- **Random** (default when left empty) — MSL falls back to Cockpit palette color
+- Any named room type — fixture uses that palette entry; the window previews the resulting color
+
+The `AddressableLoader` inspector also has a **Set Room Type** dropdown for quick single-component edits.
+
+#### Light Level Chances
+
+Controls the probability of each fixture's state on ship spawn. These are randomised per-fixture using the ship seed, so results are consistent for a given ship but vary between ships.
+
+| Field | Default | Effect |
 |---|---|---|
-| Normal | `4552721616e343a49942a82dc2621911` | On, no flicker (default) |
-| Damaged | `151c4eb20e561704aab34008b01f3567` | Flickering |
-| NoLight | `554231253ce67fa468bf3a7071a21d62` | Off |
+| `Damaged Chance` | 0.2 (20%) | Fixture spawns flickering |
+| `Broken Chance` | 0.1 (10%) | Fixture spawns off |
+| Normal (implied) | remainder | Fixture spawns on, steady |
 
-#### Color palette per DynamicLightColorAsset × RoomType
-
-The actual light color depends on which `DynamicLightColorAsset` the fixture prefab uses (set in the prefab's `DynamicLight` component — not author-configurable per stub). The table below shows the resulting light color (linear HDR) for each combination. Values confirmed at runtime via asset load.
-
-`—` = RoomType not in that asset's ColorMap; falls back to asset's `DefaultColor`.
-
-| RoomType | Industrial | Commercial | Cool | Science | Warm | GhostShip |
-|---|---|---|---|---|---|---|
-| Crew | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.95, 0.97, 0.72)` or `(1.00, 0.77, 0.32)` | `(0.45, 0.86, 1.00)` blue | — | `(0.10, 0.43, 0.90)` dim blue |
-| Hallway | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.69, 0.95, 0.92)` or `(0.49, 0.92, 1.00)` | `(0.45, 0.86, 1.00)` blue | `(1.00, 0.93, 0.29)`, `(0.40, 1.00, 0.76)`, or `(0.91, 0.56, 1.00)` | black |
-| Cabin | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue | `(0.95, 0.97, 0.72)` or `(1.00, 0.77, 0.32)` | `(0.45, 0.86, 1.00)` blue | — | black |
-| Cockpit | `(1.00, 0.76, 0.51)` orange | `(0.53, 0.67, 1.00)` blue (dim) | `(0.59, 0.97, 0.83)` teal | `(0.45, 0.86, 1.00)` blue | — | `(0.10, 0.43, 0.90)` dim blue |
-| Reactor | `(1.00, 0.76, 0.51)` orange | `(0.00, 0.38, 1.00)` deep blue | `(0.00, 0.38, 1.00)` deep blue | `(0.00, 0.38, 1.00)` deep blue | — | `(0.10, 0.43, 0.90)` dim blue |
-| Thruster | `(1.00, 0.76, 0.51)` orange | `(1.00, 0.00, 0.00)` red | `(1.00, 0.76, 0.51)` orange (w=0) | `(1.00, 0.76, 0.51)` orange | — | `(0.10, 0.43, 0.90)` dim blue |
-| CrawlSpace | `(1.00, 0.76, 0.51)` orange | `(0.55, 0.38, 0.27)` tan | `(0.55, 0.38, 0.27)` or `(0.67, 0.40, 0.00)` | `(0.55, 0.38, 0.27)` tan | — | `(0.10, 0.43, 0.90)` dim blue |
-| Exterior | — | — | `(0.70, 0.90, 0.92)` blue-grey | — | — | — |
-
-*DefaultColor for all assets except Warm is purple `(0.995, 0.363, 1.000)` — this appears when RoomType is unset or not in the map. Warm's default is yellow-green. Hazard has no ColorMap entries; its default is red. GhostShip_Hazard has no ColorMap entries; its default is blue `(0.285, 0.726, 0.991)`.*
+Set both to 0 to force fixtures always on. The sliders clamp automatically so the total never exceeds 100%.
 
 ---
 
