@@ -114,6 +114,7 @@ public class JointAssistWindow : EditorWindow
     {
         enrichedJsaMap    = null;
         enrichedJsaByName = null;
+        spMatJsaMap       = null;
         EnsureEnrichedData();
         Repaint();
     }
@@ -494,6 +495,7 @@ public class JointAssistWindow : EditorWindow
         showJointPolygons = false;
         // Re-read data files each check so in-game updates are picked up without reopening the window
         enrichedJsaMap = null;
+        spMatJsaMap    = null;
         jsaCompatTable = null;
         knownAssetsMap = null;
 
@@ -603,6 +605,31 @@ public class JointAssistWindow : EditorWindow
             if (jsa != null) { Debug.Log(log); return jsa; }
         }
 
+        // Path 1.5: baked parts — look up this GO's StructurePart in the ancestor ACL,
+        // which stores the SP_Mat address regardless of GO name.
+        if (go.GetComponent<BBI.Unity.Game.StructurePart>() != null ||
+            go.GetComponent<FakeStructurePart>() != null)
+        {
+            BBI.Unity.Game.AddressableComponentLoader acl = null;
+            for (var t = go.transform.parent; t != null; t = t.parent)
+                if (t.TryGetComponent<BBI.Unity.Game.AddressableComponentLoader>(out acl)) break;
+            if (acl != null)
+            {
+                string goName = System.Text.RegularExpressions.Regex.Replace(go.name.Trim(), @"\s*\(\d+\)$", "").Trim();
+                goName = System.Text.RegularExpressions.Regex.Replace(goName, @"\s*-\s*\d+$", "").Trim();
+                foreach (var cv in acl.componentValues)
+                {
+                    if (cv.component == null) continue;
+                    string cvName = System.Text.RegularExpressions.Regex.Replace(cv.component.gameObject.name.Trim(), @"\s*\(\d+\)$", "").Trim();
+                    cvName = System.Text.RegularExpressions.Regex.Replace(cvName, @"\s*-\s*\d+$", "").Trim();
+                    if (cv.component.gameObject != go && cvName != goName) continue;
+                    var jsa = EnrichedJsaName(cv.address);
+                    log += $"\n  P1.5: ACL entry on '{cv.component.gameObject.name}' addr={cv.address} → {jsa ?? "miss"}";
+                    if (jsa != null) { Debug.Log(log); return jsa; }
+                }
+            }
+        }
+
         // Path 2: game addressable parts — walk up to find AddressableLoader
         for (var t = go.transform; t != null; t = t.parent)
         {
@@ -681,14 +708,43 @@ public class JointAssistWindow : EditorWindow
     }
 
     // enriched JSON lookups: guid → jsaName, partName → jsaName
-    Dictionary<string, string> enrichedJsaMap;     // guid → jsaName
-    Dictionary<string, string> enrichedJsaByName;  // partName (lowercase) → jsaName
+    Dictionary<string, string> enrichedJsaMap;     // prefab guid → jsaName
+    Dictionary<string, string> enrichedJsaByName;  // partName → jsaName
+    Dictionary<string, string> spMatJsaMap;         // SP_Mat asset guid → jsaName
 
     void EnsureEnrichedData()
     {
         if (enrichedJsaMap != null) return;
         enrichedJsaMap    = new Dictionary<string, string>();
         enrichedJsaByName = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+        spMatJsaMap       = new Dictionary<string, string>();
+
+        // Build SP_Mat GUID → jsaName from known_assets.json + jsa_compat key names
+        try
+        {
+            var kaPath = Path.Combine(Application.dataPath, "..", "known_assets.json");
+            var jcPath = Path.Combine(Application.dataPath, "..", "jsa_compat.json");
+            if (File.Exists(kaPath) && File.Exists(jcPath))
+            {
+                var ka    = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(kaPath));
+                var jcRaw = JsonConvert.DeserializeObject<Dictionary<string, bool>>(File.ReadAllText(jcPath));
+                var jsaKeys = new HashSet<string>();
+                if (jcRaw != null)
+                    foreach (var k in jcRaw.Keys)
+                        foreach (var part in k.Split('|'))
+                            jsaKeys.Add(part);
+                if (ka != null)
+                    foreach (var kv in ka)
+                    {
+                        var fileName = Path.GetFileNameWithoutExtension(kv.Value);
+                        if (!fileName.StartsWith("SP_Mat_")) continue;
+                        var candidate = "JOINT_" + fileName.Substring("SP_Mat_".Length);
+                        if (jsaKeys.Contains(candidate))
+                            spMatJsaMap[kv.Key] = candidate;
+                    }
+            }
+        }
+        catch { }
         var path = Path.Combine(Application.dataPath, "..", "known_assets_enriched.json");
         if (!File.Exists(path)) return;
         try
@@ -715,8 +771,9 @@ public class JointAssistWindow : EditorWindow
     string EnrichedJsaName(string guid)
     {
         if (enrichedJsaMap == null) return null;
-        enrichedJsaMap.TryGetValue(guid, out var name);
-        return name;
+        if (enrichedJsaMap.TryGetValue(guid, out var name)) return name;
+        if (spMatJsaMap != null && spMatJsaMap.TryGetValue(guid, out name)) return name;
+        return null;
     }
 
     void EnsureJsaCompatTable()
@@ -791,12 +848,10 @@ public class JointAssistWindow : EditorWindow
     void CollectJointPolys(List<MeshFilter> listA, List<MeshFilter> listB,
         List<Vector3[]> polys, List<Vector2> polyBuf, List<Vector2> ptsA2D, List<Vector2> ptsB2D)
     {
-        const int kMaxVerts = 300; // game's jointable mesh vertex cap
         foreach (var mfA in listA)
         {
             if (mfA.sharedMesh == null) continue;
             var meshA  = mfA.sharedMesh;
-            if (meshA.vertexCount > kMaxVerts) continue;
             var vertsA = meshA.vertices;
             var normsA = meshA.normals;
             var mA     = mfA.transform.localToWorldMatrix;
@@ -814,7 +869,6 @@ public class JointAssistWindow : EditorWindow
             {
                 if (mfB.sharedMesh == null) continue;
                 var meshB  = mfB.sharedMesh;
-                if (meshB.vertexCount > kMaxVerts) continue;
                 var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, meshB.bounds);
                 // Quick reject — if bounds don't overlap (with coplanar threshold margin) skip
                 var expandedA = new Bounds(boundsA.center, boundsA.size + Vector3.one * compatCoplanarThreshold * 2f);
@@ -1036,20 +1090,12 @@ public class JointAssistWindow : EditorWindow
     // MeshFilters so GetJsaName can walk the correct scene hierarchy for GUID lookup.
     static List<(MeshFilter mf, GameObject owner)> CollectSPMeshFilters(GameObject go)
     {
-        var result = new List<(MeshFilter, GameObject)>();
-        foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
-        {
-            var mf = sp.GetComponent<MeshFilter>();
-            if (mf != null && mf.sharedMesh != null)
-                result.Add((mf, mf.gameObject));
-        }
-        foreach (var fsp in go.GetComponentsInChildren<FakeStructurePart>(true))
-        {
-            var mf = fsp.GetComponent<MeshFilter>();
-            if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
-                result.Add((mf, mf.gameObject));
-        }
-        // Also check fake hierarchy (AddressableLoader children)
+        var result  = new List<(MeshFilter, GameObject)>();
+        var claimed = new HashSet<MeshFilter>();
+
+        // Fake hierarchy first so loader-owned MFs get the correct owner (AddressableLoader GO).
+        // The direct StructurePart scan below would otherwise claim them with mf.gameObject,
+        // causing GetJsaName to miss the AddressableLoader walk-up (Path 2).
         var loaders = new List<Transform>();
         CollectTopLevelLoaders(go.transform, loaders);
         foreach (var loader in loaders)
@@ -1061,17 +1107,32 @@ public class JointAssistWindow : EditorWindow
                 foreach (var sp in ch.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
                 {
                     var mf = sp.GetComponent<MeshFilter>();
-                    if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
+                    if (mf != null && mf.sharedMesh != null && claimed.Add(mf))
                         result.Add((mf, loader.gameObject));
                 }
                 foreach (var fsp in ch.GetComponentsInChildren<FakeStructurePart>(true))
                 {
                     var mf = fsp.GetComponent<MeshFilter>();
-                    if (mf != null && mf.sharedMesh != null && !result.Any(x => x.Item1 == mf))
+                    if (mf != null && mf.sharedMesh != null && claimed.Add(mf))
                         result.Add((mf, loader.gameObject));
                 }
             }
         }
+
+        // Direct (non-loader-owned) StructureParts and FakeStructureParts
+        foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+        {
+            var mf = sp.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && claimed.Add(mf))
+                result.Add((mf, mf.gameObject));
+        }
+        foreach (var fsp in go.GetComponentsInChildren<FakeStructurePart>(true))
+        {
+            var mf = fsp.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && claimed.Add(mf))
+                result.Add((mf, mf.gameObject));
+        }
+
         return result;
     }
 
