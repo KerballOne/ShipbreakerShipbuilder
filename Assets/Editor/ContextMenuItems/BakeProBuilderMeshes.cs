@@ -3,24 +3,29 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-public static class BakeProBuilderChildren
+public static class BakeProBuilderMeshes
 {
-    const string GOMenuPath   = "GameObject/Shipbuilder/Bake ProBuilder Children";
-    const string ShipMenuPath = "Shipbuilder/Bake ProBuilder Children";
+    const string GOMenuPath   = "GameObject/Shipbuilder/Bake PB Meshes";
+    const string ShipMenuPath = "Shipbuilder/Bake PB Meshes";
 
     [MenuItem(GOMenuPath, true)]
-    [MenuItem(ShipMenuPath, true, priority = 141)]
+    [MenuItem(ShipMenuPath, true, priority = 202)]
     static bool Validate() => Selection.gameObjects.Length > 0;
 
     [MenuItem(GOMenuPath, false, 49)]
-    [MenuItem(ShipMenuPath, false, priority = 141)]
+    [MenuItem(ShipMenuPath, false, priority = 202)]
     static void Execute()
     {
         var selected = Selection.gameObjects;
         if (selected.Length == 0) return;
 
-        Undo.SetCurrentGroupName("Bake ProBuilder Children");
-        int group    = Undo.GetCurrentGroup();
+        // Use ProBuilder's own undoable strip action
+        EditorApplication.ExecuteMenuItem("Tools/ProBuilder/Actions/Strip ProBuilder Scripts in Selection");
+
+        // Refresh so the unsaved pb_Mesh instances are visible to AssetDatabase
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
         int totalBaked = 0;
 
         foreach (var root in selected)
@@ -59,14 +64,11 @@ public static class BakeProBuilderChildren
                 saved.name = mesh.name;
                 AssetDatabase.CreateAsset(saved, assetPath);
 
-                Undo.RecordObject(mf, "Bake ProBuilder Children");
                 mf.sharedMesh = saved;
                 EditorUtility.SetDirty(mf);
 
-                var mc = mf.GetComponent<MeshCollider>();
-                if (mc != null)
+                if (mf.TryGetComponent(out MeshCollider mc))
                 {
-                    Undo.RecordObject(mc, "Bake ProBuilder Children");
                     mc.sharedMesh = saved;
                     EditorUtility.SetDirty(mc);
                 }
@@ -75,17 +77,15 @@ public static class BakeProBuilderChildren
             }
 
             if (baked > 0)
-                Debug.Log($"[BakeProBuilderChildren] Baked {baked} mesh(es) to '{outputFolder}' on '{root.name}'.");
+                Debug.Log($"[BakeProBuilderMeshes] Baked {baked} mesh(es) to '{outputFolder}' on '{root.name}'.");
 
             totalBaked += baked;
         }
 
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Undo.CollapseUndoOperations(group);
 
-        if (selected.Length > 1)
-            Debug.Log($"[BakeProBuilderChildren] Total: {totalBaked} mesh(es) baked across {selected.Length} objects.");
+        Debug.Log($"[BakeProBuilderMeshes] Baked {totalBaked} mesh(es).");
     }
 }
 #endif
