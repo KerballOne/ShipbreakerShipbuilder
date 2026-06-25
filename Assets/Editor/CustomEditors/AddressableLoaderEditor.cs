@@ -102,17 +102,35 @@ public class AddressableLoaderEditor : Editor
             m_SimpleTreeView.OnGUI(treeRect);
         }
 
-        bool wasChanged = base.DrawDefaultInspector();
+        bool hasLight = loadedGameObject != null && loadedGameObject.GetComponentInChildren<DynamicLight>(true) != null;
 
-        // Quick room-type setter — writes into lightRoomTypeGUID without replacing the raw field.
-        EditorGUILayout.Space(2);
-        int picked = EditorGUILayout.Popup("Set Room Type", 0, kRoomTypeNames);
-        if (picked > 0)
+        // Draw all fields except the light-specific ones, which are shown conditionally below.
+        var so = serializedObject;
+        var prop = so.GetIterator();
+        bool enterChildren = true;
+        bool wasChanged = false;
+        while (prop.NextVisible(enterChildren))
         {
-            var prop = serializedObject.FindProperty("lightRoomTypeGUID");
-            prop.stringValue = kRoomTypeGuids[picked] ?? prop.stringValue;
-            serializedObject.ApplyModifiedProperties();
-            wasChanged = true;
+            enterChildren = false;
+            if (prop.name == "m_Script") continue;
+            if (!hasLight && (prop.name == "lightRoomTypeGUID" || prop.name == "lightDamagedChance" || prop.name == "lightBrokenChance")) continue;
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(prop, true);
+            if (EditorGUI.EndChangeCheck()) wasChanged = true;
+        }
+
+        // Quick room-type setter — only shown when the loaded prefab contains a DynamicLight.
+        if (hasLight)
+        {
+            EditorGUILayout.Space(2);
+            int picked = EditorGUILayout.Popup("Set Room Type", 0, kRoomTypeNames);
+            if (picked > 0)
+            {
+                var rtProp = serializedObject.FindProperty("lightRoomTypeGUID");
+                rtProp.stringValue = kRoomTypeGuids[picked] ?? rtProp.stringValue;
+                serializedObject.ApplyModifiedProperties();
+                wasChanged = true;
+            }
         }
 
         // Apply changes to the serializedProperty - always do this in the end of OnInspectorGUI.

@@ -133,6 +133,59 @@ MonoBehaviour:
   mLastKnownEntityIndex: 0
   mLastKnownEntityVersion: 0
   mLastKnownShipMemberID: 0
+--- !u!1 &202519233841838756
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1539682865784204879}
+  - component: {fileID: 5806727034048587092}
+  m_Layer: 0
+  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (3)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1539682865784204879
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 202519233841838756}
+  m_LocalRotation: {x: 0.7071068, y: -0, z: 0.7071068, w: 0}
+  m_LocalPosition: {x: -0.251, y: 0.92, z: 6.9018}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 7073231475406372224}
+  m_RootOrder: 3
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5806727034048587092
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 202519233841838756}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  refs: []
+  assetGUID: abb228d488d2c0844ae84e00ee590ae0
+  childPath: 
+  enableChildHardpoints: 0
+  disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
+  componentsOnChildren: []
+  componentsOnChildrenPaths: []
 --- !u!1 &650976488850720674
 GameObject:
   m_ObjectHideFlags: 0
@@ -894,6 +947,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &1171870857922736253
@@ -1525,6 +1581,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &2332669048240611292
@@ -1757,6 +1816,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &3172941155154122915
@@ -1807,6 +1869,40 @@ MonoBehaviour:
   m_Center: {x: 0, y: 0, z: 0}
   m_Size: {x: 75, y: 5.9505, z: 2.97525}
   m_FlowAxis: 2
+--- !u!1 &3187339905505569922
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7073231475406372224}
+  m_Layer: 0
+  m_Name: Floor Cutpoints
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7073231475406372224
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3187339905505569922}
+  m_LocalRotation: {x: 0.49999988, y: -0.5000001, z: -0.5000001, w: -0.49999988}
+  m_LocalPosition: {x: 31.872505, y: 0.040000916, z: -0.000400424}
+  m_LocalScale: {x: 1.1999999, y: 1, z: 1.1787502}
+  m_Children:
+  - {fileID: 8390813405553951270}
+  - {fileID: 5512112607067177051}
+  - {fileID: 304901975317095197}
+  - {fileID: 1539682865784204879}
+  m_Father: {fileID: 6898662603657722045}
+  m_RootOrder: 2
+  m_LocalEulerAnglesHint: {x: -90, y: 0, z: -270}
 --- !u!1 &3379788136697563541
 GameObject:
   m_ObjectHideFlags: 0
@@ -2435,6 +2531,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &3974985824906242209
@@ -2571,56 +2670,6 @@ MonoBehaviour:
   mLastKnownEntityIndex: 0
   mLastKnownEntityVersion: 0
   mLastKnownShipMemberID: 0
---- !u!1 &4138685948814861717
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 8924129770675786603}
-  - component: {fileID: 5418870839872358575}
-  m_Layer: 0
-  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (3)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &8924129770675786603
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4138685948814861717}
-  m_LocalRotation: {x: 0.7071068, y: -0, z: 0.7071068, w: 0}
-  m_LocalPosition: {x: -0.251, y: 0.92, z: 6.6957}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
-  m_Father: {fileID: 659320554186858422}
-  m_RootOrder: 3
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &5418870839872358575
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4138685948814861717}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  refs: []
-  assetGUID: abb228d488d2c0844ae84e00ee590ae0
-  childPath: 
-  enableChildHardpoints: 0
-  disabledChildren: []
-  componentsOnChildren: []
-  componentsOnChildrenPaths: []
 --- !u!1 &4241196202556407245
 GameObject:
   m_ObjectHideFlags: 0
@@ -2840,9 +2889,12 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
---- !u!1 &5401365190160706280
+--- !u!1 &5455907824275994039
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -2850,70 +2902,36 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 659320554186858422}
+  - component: {fileID: 304901975317095197}
+  - component: {fileID: 6623665075494087053}
   m_Layer: 0
-  m_Name: Floor Cutpoints
+  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &659320554186858422
+--- !u!4 &304901975317095197
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5401365190160706280}
-  m_LocalRotation: {x: -0.5, y: -0.5, z: -0.5, w: 0.5}
-  m_LocalPosition: {x: 37.805, y: 0.04, z: 0.000031471252}
-  m_LocalScale: {x: 1.1999999, y: 1, z: 1.1787502}
-  m_Children:
-  - {fileID: 817797671913823764}
-  - {fileID: 9160678701820739489}
-  - {fileID: 6190516596075628151}
-  - {fileID: 8924129770675786603}
-  m_Father: {fileID: 6898662603657722045}
-  m_RootOrder: 2
-  m_LocalEulerAnglesHint: {x: -90, y: 0, z: 0}
---- !u!1 &5538355099546183471
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 9160678701820739489}
-  - component: {fileID: 6807025425263179889}
-  m_Layer: 0
-  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (1)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &9160678701820739489
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5538355099546183471}
-  m_LocalRotation: {x: -0.7071068, y: -0, z: 0.7071068, w: 0}
-  m_LocalPosition: {x: 0.251, y: 0.92, z: -6.763}
+  m_GameObject: {fileID: 5455907824275994039}
+  m_LocalRotation: {x: 0.00000004371139, y: -0, z: 1, w: 0}
+  m_LocalPosition: {x: -6.818, y: 0.92, z: -0.26}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
-  m_Father: {fileID: 659320554186858422}
-  m_RootOrder: 1
+  m_Father: {fileID: 7073231475406372224}
+  m_RootOrder: 2
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &6807025425263179889
+--- !u!114 &6623665075494087053
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5538355099546183471}
+  m_GameObject: {fileID: 5455907824275994039}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
@@ -2924,6 +2942,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &5641487145697781913
@@ -2974,6 +2995,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &5709424386872590659
@@ -3109,6 +3133,59 @@ MonoBehaviour:
   mLastKnownEntityIndex: 0
   mLastKnownEntityVersion: 0
   mLastKnownShipMemberID: 0
+--- !u!1 &5825785225634122862
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8390813405553951270}
+  - component: {fileID: 7251923744272983487}
+  m_Layer: 0
+  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8390813405553951270
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5825785225634122862}
+  m_LocalRotation: {x: -1, y: -0, z: -0, w: 0}
+  m_LocalPosition: {x: 6.816, y: 0.92, z: 0.25000012}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 7073231475406372224}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &7251923744272983487
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5825785225634122862}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  refs: []
+  assetGUID: abb228d488d2c0844ae84e00ee590ae0
+  childPath: 
+  enableChildHardpoints: 0
+  disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
+  componentsOnChildren: []
+  componentsOnChildrenPaths: []
 --- !u!1 &5835281686052032692
 GameObject:
   m_ObjectHideFlags: 0
@@ -3136,6 +3213,7 @@ Transform:
   m_LocalPosition: {x: -0.22166827, y: -0.057678998, z: 0.011057422}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children:
+  - {fileID: 2787161588074169554}
   - {fileID: 1105497798325272606}
   m_Father: {fileID: 6898662603657722045}
   m_RootOrder: 0
@@ -3222,56 +3300,6 @@ MonoBehaviour:
   m_Center: {x: 0, y: 0, z: 0}
   m_Size: {x: 75, y: 5.9505, z: 2.97525}
   m_FlowAxis: 2
---- !u!1 &6101405802503278211
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 6190516596075628151}
-  - component: {fileID: 3297152918100776753}
-  m_Layer: 0
-  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (2)
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &6190516596075628151
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6101405802503278211}
-  m_LocalRotation: {x: 0.00000004371139, y: -0, z: 1, w: 0}
-  m_LocalPosition: {x: -6.5724, y: 0.92, z: -0.26}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
-  m_Father: {fileID: 659320554186858422}
-  m_RootOrder: 2
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &3297152918100776753
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6101405802503278211}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  refs: []
-  assetGUID: abb228d488d2c0844ae84e00ee590ae0
-  childPath: 
-  enableChildHardpoints: 0
-  disabledChildren: []
-  componentsOnChildren: []
-  componentsOnChildrenPaths: []
 --- !u!1 &6253393761225444695
 GameObject:
   m_ObjectHideFlags: 0
@@ -3320,6 +3348,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &6287061692196018611
@@ -4404,7 +4435,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1105497798325272606
 Transform:
   m_ObjectHideFlags: 0
@@ -4425,58 +4456,8 @@ Transform:
   - {fileID: 1998524665920156596}
   - {fileID: 8820008571309574601}
   m_Father: {fileID: 4366304563587873676}
-  m_RootOrder: 0
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &7453610454619871771
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 817797671913823764}
-  - component: {fileID: 4024685908362009568}
-  m_Layer: 0
-  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &817797671913823764
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7453610454619871771}
-  m_LocalRotation: {x: -1, y: -0, z: -0, w: 0}
-  m_LocalPosition: {x: 6.7283, y: 0.92, z: 0.25000012}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
-  m_Father: {fileID: 659320554186858422}
-  m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &4024685908362009568
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7453610454619871771}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  refs: []
-  assetGUID: abb228d488d2c0844ae84e00ee590ae0
-  childPath: 
-  enableChildHardpoints: 0
-  disabledChildren: []
-  componentsOnChildren: []
-  componentsOnChildrenPaths: []
 --- !u!1 &7589743650070235179
 GameObject:
   m_ObjectHideFlags: 0
@@ -4864,6 +4845,9 @@ MonoBehaviour:
   childPath: 
   enableChildHardpoints: 0
   disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
 --- !u!1 &8124747221793893381
@@ -4896,7 +4880,7 @@ Transform:
   m_Children:
   - {fileID: 4366304563587873676}
   - {fileID: 2614560085133830543}
-  - {fileID: 659320554186858422}
+  - {fileID: 7073231475406372224}
   - {fileID: 5897493386078340615}
   - {fileID: 1602170814682859754}
   - {fileID: 1786879429695395367}
@@ -5971,3 +5955,118 @@ MonoBehaviour:
   mLastKnownEntityIndex: 0
   mLastKnownEntityVersion: 0
   mLastKnownShipMemberID: 0
+--- !u!1 &9099828818844027844
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5512112607067177051}
+  - component: {fileID: 323733447436389178}
+  m_Layer: 0
+  m_Name: PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5512112607067177051
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9099828818844027844}
+  m_LocalRotation: {x: -0.7071068, y: -0, z: 0.7071068, w: 0}
+  m_LocalPosition: {x: 0.251, y: 0.92, z: -6.9692}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 7073231475406372224}
+  m_RootOrder: 1
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &323733447436389178
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9099828818844027844}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  refs: []
+  assetGUID: abb228d488d2c0844ae84e00ee590ae0
+  childPath: 
+  enableChildHardpoints: 0
+  disabledChildren: []
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
+  componentsOnChildren: []
+  componentsOnChildrenPaths: []
+--- !u!1001 &4132186847729187370
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: 4366304563587873676}
+    m_Modifications:
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_RootOrder
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3264405523978299609, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+      propertyPath: m_Name
+      value: PRF_Javelin_Cockpit_AeroBridgeTile_Baked
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+--- !u!4 &2787161588074169554 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 2302894917635423992, guid: 60e414ee16423d245834f353fbc6a3ab, type: 3}
+  m_PrefabInstance: {fileID: 4132186847729187370}
+  m_PrefabAsset: {fileID: 0}

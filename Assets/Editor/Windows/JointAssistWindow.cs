@@ -1152,9 +1152,9 @@ public class JointAssistWindow : EditorWindow
     void DrawCompatMeshResult(CompatResult r, bool jsaMjcBothFail)
     {
         if (r.state == CompatResult.State.None) return;
-        if (r.state == CompatResult.State.Pass && !jsaMjcBothFail)
+        if (r.state == CompatResult.State.Pass)
             DrawCompatRow("d_winbtn_mac_max", r.message);
-        else if (r.state == CompatResult.State.Fail || jsaMjcBothFail)
+        else if (r.state == CompatResult.State.Fail)
             DrawCompatRow("d_winbtn_mac_close_h", r.message);
         else
             DrawCompatRow("console.warnicon.sml", r.message);
