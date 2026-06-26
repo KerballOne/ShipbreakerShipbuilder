@@ -173,7 +173,11 @@ public class CustomPartWizard : EditorWindow
         if (newFbx != m_FbxSource)
         {
             m_FbxSource = newFbx;
-            if (m_FbxSource != null) m_SourceObject = null;
+            if (m_FbxSource != null)
+            {
+                m_SourceObject = null;
+                AutoPopulateFromFbx(AssetDatabase.GetAssetPath(m_FbxSource));
+            }
         }
 
         if (m_FbxSource != null)
@@ -208,13 +212,6 @@ public class CustomPartWizard : EditorWindow
         m_Mesh = (Mesh)EditorGUILayout.ObjectField("Mesh", m_Mesh, typeof(Mesh), false);
         if (m_Mesh != null) m_SourceObject = null;
 
-        if (m_Mesh != null)
-        {
-            var meshPath = AssetDatabase.GetAssetPath(m_Mesh);
-            var importer = AssetImporter.GetAtPath(meshPath) as ModelImporter;
-            if (importer != null && !importer.isReadable)
-                EditorGUILayout.HelpBox("Read/Write is disabled — will be enabled automatically on Create.", MessageType.Warning);
-        }
 
         var newSourceObject = (GameObject)EditorGUILayout.ObjectField(
             new GUIContent("Copy Mesh From",
@@ -377,8 +374,9 @@ public class CustomPartWizard : EditorWindow
         if (!File.Exists(Path.GetFullPath(templatePath)))
             return $"Template prefab not found at:\n{templatePath}";
 
-        // Mesh source exclusivity
-        int meshSources = (m_Mesh != null ? 1 : 0) + (m_SourceObject != null ? 1 : 0) + (m_FbxSource != null ? 1 : 0);
+        // Mesh source exclusivity — Mesh+Model is allowed (Mesh auto-populated as visual preview)
+        bool meshAlone = m_Mesh != null && m_FbxSource == null;
+        int meshSources = (meshAlone ? 1 : 0) + (m_SourceObject != null ? 1 : 0) + (m_FbxSource != null ? 1 : 0);
         if (meshSources > 1)
             return "Set only one of: Mesh, Copy Mesh From, or Model.";
         if (m_SourceObject != null)
@@ -453,8 +451,9 @@ public class CustomPartWizard : EditorWindow
                 resolvedMaterial = mr.sharedMaterial;
         }
 
-        // Duplicate material into output folder so each part has its own editable copy
-        if (resolvedMaterial != null)
+        // Duplicate material only when it came from a scene object (Copy Material From).
+        // Materials auto-populated from the FBX sidecar are already project assets — use them directly.
+        if (resolvedMaterial != null && m_MaterialSourceObject != null)
         {
             var matFolder = $"{outFolder}/Materials";
             if (!AssetDatabase.IsValidFolder(matFolder))
@@ -561,7 +560,7 @@ public class CustomPartWizard : EditorWindow
                     var rootMC = root.GetComponent<MeshCollider>() ?? root.AddComponent<MeshCollider>();
                     rootMF.sharedMesh  = visualMesh;
                     rootMC.sharedMesh  = visualMesh;
-                    rootMC.convex      = false;
+                    rootMC.convex      = true;
                     rootMC.isTrigger   = true;
                     if (resolvedMaterial != null)
                         rootMR.sharedMaterials = new[] { resolvedMaterial };
@@ -812,6 +811,73 @@ public class CustomPartWizard : EditorWindow
             if (so.FindProperty("addresses")       != null) return mb;
             if (so.FindProperty("componentValues") != null) return mb;
         }
+        return null;
+    }
+
+    void AutoPopulateFromFbx(string fbxAssetPath)
+    {
+        // Auto-populate Mesh with the detected visual mesh (first non-seg mesh)
+        foreach (var a in AssetDatabase.LoadAllAssetsAtPath(fbxAssetPath))
+        {
+            if (a is Mesh fm && !System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
+                m_Mesh = fm;
+        }
+
+        // Get material name from sidecar — FBX uses external materials so no Material subasset exists
+        var sidecar = CustomMeshPostprocessor.ReadSidecar(fbxAssetPath);
+        if (sidecar == null || sidecar.Count == 0)
+        {
+            Debug.Log($"[CPW] AutoPopulate: no sidecar found for {fbxAssetPath} — export from Blender first");
+            return;
+        }
+        // Use first material name in the sidecar
+        string blenderMatName = null;
+        foreach (var k in sidecar.Keys) { blenderMatName = k; break; }
+
+        var matFolder  = CustomMeshPostprocessor.GetMaterialFolder(fbxAssetPath);
+        var texFolder  = CustomMeshPostprocessor.GetTextureFolder(fbxAssetPath);
+        var shipRoot   = matFolder.Substring(0, matFolder.LastIndexOf('/'));
+
+        var matPath  = $"{matFolder}/{blenderMatName}.mat";
+        var resolved = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+
+        // Fallback: search under the ship root (catches mats created by older postprocessor version)
+        if (resolved == null)
+        {
+            foreach (var g in AssetDatabase.FindAssets($"{blenderMatName} t:Material", new[] { shipRoot }))
+            {
+                var candidate = AssetDatabase.LoadAssetAtPath<Material>(AssetDatabase.GUIDToAssetPath(g));
+                if (candidate != null && candidate.name == blenderMatName) { resolved = candidate; break; }
+            }
+        }
+
+        if (resolved == null)
+        {
+            Debug.Log($"[CPW] AutoPopulate: mat '{blenderMatName}' not found. matFolder={matFolder} shipRoot={shipRoot}");
+            return;
+        }
+
+        m_Material             = resolved;
+        m_MaterialSourceObject = null;
+        m_MaskMap              = null;
+
+        System.Collections.Generic.Dictionary<string, string> texMap = null;
+        sidecar.TryGetValue(blenderMatName, out texMap);
+
+        m_BaseColorMap = FindTexFromSidecar(texMap, "BaseColor", texFolder);
+        m_NormalMap    = FindTexFromSidecar(texMap, "Normal",    texFolder);
+        m_MaskMap      = FindTexFromSidecar(texMap, "MaskMap",   texFolder);
+
+        if (m_BaseColorMap != null || m_NormalMap != null || m_MaskMap != null)
+            m_TexturesFoldout = true;
+    }
+
+    static Texture2D FindTexFromSidecar(
+        System.Collections.Generic.Dictionary<string, string> texMap,
+        string suffix, string texFolder)
+    {
+        if (texMap != null && texMap.TryGetValue(suffix, out var fname))
+            return AssetDatabase.LoadAssetAtPath<Texture2D>($"{texFolder}/{fname}");
         return null;
     }
 

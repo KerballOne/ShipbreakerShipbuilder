@@ -19,11 +19,11 @@ public static class SetBakedPartDisplayName
         return prefab.GetComponentsInChildren<StructurePart>(true).Length > 0;
     }
 
-    [MenuItem("Assets/Shipbreaker/Set Display Name…", true)]
+    [MenuItem("Assets/Shipbuilder/Set Display Name…", true)]
     static bool ValidateAssets() => Selection.objects.Length > 0 &&
         System.Array.Exists(Selection.objects, o => IsBakedPrefab(AssetDatabase.GetAssetPath(o)));
 
-    [MenuItem("Assets/Shipbreaker/Set Display Name…", false, 100)]
+    [MenuItem("Assets/Shipbuilder/Set Display Name…", false, 100)]
     static void ExecuteAssets()
     {
         var prefabPaths = new List<string>();
