@@ -1,6 +1,7 @@
 import bpy
 import bmesh
 import gpu
+import blf
 import re
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
@@ -105,6 +106,8 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         self._axis_max = amax
         self._cut_val  = (amin + amax) / 2.0
 
+        self._fill_cut   = False  # Q toggles whether the cut face is filled
+
         self._dragging       = False
         self._drag_start_x   = event.mouse_region_x
         self._drag_start_y   = event.mouse_region_y
@@ -131,9 +134,11 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         self._handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_callback, (context,), 'WINDOW', 'POST_VIEW'
         )
+        self._hud_handle = bpy.types.SpaceView3D.draw_handler_add(
+            self._draw_hud, (context,), 'WINDOW', 'POST_PIXEL'
+        )
         context.window_manager.modal_handler_add(self)
         context.area.tag_redraw()
-        self.report({'INFO'}, "Drag=move plane | Scroll=fine | R=cycle axis | Enter=confirm | RMB/Esc=cancel")
         return {'RUNNING_MODAL'}
 
     def modal(self, context, event):
@@ -176,14 +181,14 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
 
         if event.type == 'WHEELUPMOUSE':
             span = self._axis_max - self._axis_min
-            self._cut_val = min(self._axis_max, self._cut_val + span * 0.01)
+            self._cut_val = min(self._axis_max, self._cut_val + span * 0.001)
             self._rebuild_batches()
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
         if event.type == 'WHEELDOWNMOUSE':
             span = self._axis_max - self._axis_min
-            self._cut_val = max(self._axis_min, self._cut_val - span * 0.01)
+            self._cut_val = max(self._axis_min, self._cut_val - span * 0.001)
             self._rebuild_batches()
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
@@ -194,10 +199,13 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
             self._axis_min = amin
             self._axis_max = amax
             self._cut_val  = (amin + amax) / 2.0
-            # Recompute precomputed tri data for new axis classification
             self._rebuild_batches()
             context.area.tag_redraw()
-            self.report({'INFO'}, f"Axis: {('X','Y','Z')[self._axis_idx]}")
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'Q' and event.value == 'PRESS':
+            self._fill_cut = not self._fill_cut
+            context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
         return {'PASS_THROUGH'}
@@ -248,8 +256,24 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         gpu.state.depth_test_set('LESS_EQUAL')
         gpu.state.face_culling_set('BACK')
 
+    def _draw_hud(self, context):
+        axis_name = ('X', 'Y', 'Z')[self._axis_idx]
+        fill_str  = "ON" if self._fill_cut else "OFF"
+        line1 = f"Interactive Bisect  |  Axis: {axis_name}  |  Cut: {self._cut_val:.4f} m  |  Fill cut face: {fill_str}"
+        line2 = "Drag=move plane  Scroll=fine  R=cycle axis  Q=toggle fill  Enter=confirm  RMB/Esc=cancel"
+        font_id = 0
+        blf.size(font_id, 14)
+        blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
+        blf.position(font_id, 20, 50, 0)
+        blf.draw(font_id, line1)
+        blf.size(font_id, 11)
+        blf.color(font_id, 0.7, 0.7, 0.7, 1.0)
+        blf.position(font_id, 20, 32, 0)
+        blf.draw(font_id, line2)
+
     def _finish(self, context, cancelled):
         bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
+        bpy.types.SpaceView3D.draw_handler_remove(self._hud_handle, 'WINDOW')
         context.area.tag_redraw()
         return {'CANCELLED'} if cancelled else self._apply_bisect(context)
 
@@ -307,9 +331,10 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
                     del_verts.append(v)
             bmesh.ops.delete(bm, geom=del_verts, context='VERTS')
 
-            boundary_edges = [e for e in bm.edges if e.is_boundary]
-            if boundary_edges:
-                bmesh.ops.contextual_create(bm, geom=boundary_edges)
+            if self._fill_cut:
+                boundary_edges = [e for e in bm.edges if e.is_boundary]
+                if boundary_edges:
+                    bmesh.ops.contextual_create(bm, geom=boundary_edges)
 
             bm.to_mesh(mesh)
             bm.free()
@@ -336,12 +361,12 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         # Name both halves with incrementing suffix
         base_name = _strip_numeric_suffix(self._obj_name)
         name_a, name_b = _next_pair_names(base_name)
-        obj_bottom.name = name_a
-        if obj_bottom.data:
-            obj_bottom.data.name = name_a
-        obj_top.name = name_b
+        obj_top.name = name_a
         if obj_top.data:
-            obj_top.data.name = name_b
+            obj_top.data.name = name_a
+        obj_bottom.name = name_b
+        if obj_bottom.data:
+            obj_bottom.data.name = name_b
 
         axis_name = ('X', 'Y', 'Z')[axis_idx]
         self.report({'INFO'}, f"Bisected along {axis_name} at {cut_val:.4f}m → {name_a}, {name_b}")
