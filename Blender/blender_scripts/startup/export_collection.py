@@ -1,6 +1,8 @@
 import bpy
 import os
 
+_last_export_dir = None  # last used export directory, shared across all collections
+
 bl_info = {
     "name": "Export Collection to Unity FBX",
     "author": "KerballOne",
@@ -17,16 +19,17 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
     bl_description = "Export all meshes in the active collection to FBX with Unity axis and scale settings"
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
-    scale:    bpy.props.FloatProperty(name="Scale", default=5.0, min=0.001)
+    scale:    bpy.props.FloatProperty(name="Scale", default=1.0, min=0.001)
 
     def invoke(self, context, event):
         col = context.collection
         if col is None:
             self.report({'ERROR'}, "No active collection")
             return {'CANCELLED'}
-        # Default filename = collection name, in same folder as current blend file
-        blend_dir = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else os.path.expanduser("~")
-        self.filepath = os.path.join(blend_dir, col.name + ".fbx")
+        # Use last exported directory, or default to blend file folder
+        global _last_export_dir
+        directory = _last_export_dir or (os.path.dirname(bpy.data.filepath) if bpy.data.filepath else os.path.expanduser("~"))
+        self.filepath = os.path.join(directory, col.name + ".fbx")
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -52,7 +55,7 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
             filepath            = self.filepath,
             use_selection       = True,
             object_types        = {'MESH'},
-            scale               = self.scale,
+            global_scale        = self.scale,
             apply_scale_options = 'FBX_SCALE_ALL',
             axis_forward        = 'Y',
             axis_up             = 'Z',
@@ -63,6 +66,8 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
             use_mesh_modifiers  = True,
         )
 
+        global _last_export_dir
+        _last_export_dir = os.path.dirname(self.filepath)
         self.report({'INFO'}, f"Exported {len(selected)} mesh(es) to {self.filepath}")
         return {'FINISHED'}
 

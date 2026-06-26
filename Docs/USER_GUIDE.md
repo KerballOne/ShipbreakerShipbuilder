@@ -203,6 +203,30 @@ Opens a wizard for creating new custom salvageable parts from your own meshes (F
 
 **Opening child:** By default the wizard removes the `Opening` child GO (script ID `1728645113`). This child marks an atmosphere/pressure boundary — keep it only if you are making an airlock or section connector.
 
+#### Using a segmented model (convex collider children)
+
+When a mesh is too complex or too hollow for a single convex collider (e.g. a ring, torus, or cylindrical shell), export it from Blender as a model with the original mesh plus radially-split segment objects, and use the **Model** field instead of (or alongside) **Mesh**.
+
+**Blender preparation:**
+1. Use the **Radial Split** tool (Object menu → Radial Split) to split the mesh into N segments. Keep the original unsplit object in the same collection — do not hide or delete it.
+2. Select the entire collection in the Outliner, then run **Object menu → Export Collection to Unity FBX**. This exports all mesh objects with Unity-correct axis and scale settings.
+3. Import the resulting FBX into `Assets/_CustomShips/<ShipName>/Models/`.
+
+**FBX requirements:**
+- The original unsplit mesh must be present in the FBX (not just the segments). CPW uses it for the root MeshFilter, MeshRenderer, and trigger MeshCollider.
+- Segment objects must be named with a `_seg` suffix (e.g. `Engine_Mount_seg01`). CPW identifies segments by this pattern.
+- Apply scale in Blender before export (`Ctrl+A → Scale` on all objects, after making all meshes single-user via `Object → Relations → Make Single User → Object & Data`) so export scale = 1.
+
+**In CPW:**
+1. Drag the FBX root GameObject from the Project window onto the **Model** field. The helpbox shows how many segment meshes were found and how many convex collider children will be created.
+2. Leave **Mesh** and **Copy Mesh From** blank — CPW automatically uses the non-segment mesh from the FBX as the root visual mesh.
+3. Fill in Part Name, SP Material template, and other fields as normal.
+4. Click **Create Part Prefab**.
+
+**Result structure** (matches the Engine Bell pattern):
+- **Root GO** — MeshFilter (original mesh) + MeshRenderer + MeshCollider (`isTrigger = true`, full hull for scanner/interaction) + StructurePart + EntityBlueprintComponent + AddressableSOLoader
+- **`PartName_Col_00` … `_Col_N`** — one child per segment, each with a convex MeshCollider (`isTrigger = false`) for physics and cutting
+
 ---
 
 ### 1.4 Editing Tools
