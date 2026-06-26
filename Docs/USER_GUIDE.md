@@ -8,42 +8,135 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 
 ## Table of Contents
 
-1. [The Shipbuilder Menu](#1-the-shipbuilder-menu)
-   - [Build & Run](#11-build--run)
-   - [Actions Submenu](#12-actions-submenu)
-   - [Part Creation Wizards](#13-part-creation-wizards)
-   - [Editing Tools](#14-editing-tools)
-   - [Geometry & Layout Tools](#15-geometry--layout-tools)
-   - [Visualization](#16-visualization)
-   - [Utility](#17-utility)
-2. [Context Menus](#2-context-menus)
-   - [Transform Component](#21-transform-component-right-click-the-gear-icon)
-   - [GameObject Hierarchy](#22-gameobject-hierarchy-right-click)
-   - [Assets Panel](#23-assets-panel)
-3. [Working with Game Parts](#3-working-with-game-parts)
-   - [Bake vs Import Addressable](#31-bake-vs-import-addressable)
-   - [Repositioning and Rescaling](#32-repositioning-and-rescaling)
-   - [Duplicating a Part](#33-duplicating-a-part)
-   - [Deleting a Part](#34-deleting-a-part)
-   - [Pre-Build Checklist](#35-pre-build-checklist)
-4. [Rooms](#4-rooms)
-   - [Components Overview](#41-components-overview)
-   - [DummyPlugRoom Workflow](#42-adding-a-room-dummyplugroom-workflow)
-   - [Room Type GUIDs](#43-room-type-guids)
-   - [Pressurisation State](#44-pressurisation-state)
-   - [Custom Room Data Assets](#45-custom-room-data-assets)
-5. [Joints](#5-joints)
-   - [How Auto-Jointing Works](#51-how-auto-jointing-works)
-   - [MandatoryJointContainer](#52-mandatoryjointcontainer)
-   - [InvisibleJoint Pattern](#53-invisiblejoint-pattern)
-6. [Texturing Custom Models](#6-texturing-custom-models)
-7. [SP_Mat & BP_Mat GUID Reference](#7-sp_mat--bp_mat-guid-reference)
-8. [Caveats & Gotchas](#8-caveats--gotchas)
-9. [Expected Unity Exceptions](#9-expected-unity-exceptions)
+1. [Blender Tools](#1-blender-tools)
+   - [Export to Unity FBX](#11-export-to-unity-fbx)
+   - [Radial Split](#12-radial-split)
+   - [Material & Texture Pipeline](#13-material--texture-pipeline)
+2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
+   - [Build & Run](#21-build--run)
+   - [Actions Submenu](#22-actions-submenu)
+   - [Part Creation Wizards](#23-part-creation-wizards)
+   - [Editing Tools](#24-editing-tools)
+   - [Geometry & Layout Tools](#25-geometry--layout-tools)
+   - [Visualization](#26-visualization)
+   - [Utility](#27-utility)
+3. [Context Menus](#3-context-menus)
+   - [Transform Component](#31-transform-component-right-click-the-gear-icon)
+   - [GameObject Hierarchy](#32-gameobject-hierarchy-right-click)
+   - [Assets Panel](#33-assets-panel)
+4. [Working with Game Parts](#4-working-with-game-parts)
+   - [Bake vs Import Addressable](#41-bake-vs-import-addressable)
+   - [Repositioning and Rescaling](#42-repositioning-and-rescaling)
+   - [Duplicating a Part](#43-duplicating-a-part)
+   - [Deleting a Part](#44-deleting-a-part)
+   - [Pre-Build Checklist](#45-pre-build-checklist)
+5. [Rooms](#5-rooms)
+   - [Components Overview](#51-components-overview)
+   - [DummyPlugRoom Workflow](#52-adding-a-room-dummyplugroom-workflow)
+   - [Room Type GUIDs](#53-room-type-guids)
+   - [Pressurisation State](#54-pressurisation-state)
+   - [Custom Room Data Assets](#55-custom-room-data-assets)
+6. [Joints](#6-joints)
+   - [How Auto-Jointing Works](#61-how-auto-jointing-works)
+   - [MandatoryJointContainer](#62-mandatoryjointcontainer)
+   - [InvisibleJoint Pattern](#63-invisiblejoint-pattern)
+7. [Texturing Custom Models](#7-texturing-custom-models)
+8. [SP_Mat & BP_Mat GUID Reference](#8-sp_mat--bp_mat-guid-reference)
+9. [Caveats & Gotchas](#9-caveats--gotchas)
+10. [Expected Unity Exceptions](#10-expected-unity-exceptions)
 
 ---
 
-## 1. The Shipbuilder Menu
+## 1. Blender Tools
+
+The Blender scripts live in `Blender/blender_scripts/startup/` and are registered as a Blender Script Directory — Blender auto-registers them on startup. Reload all scripts without restarting with **Ctrl+Shift+R**.
+
+---
+
+### 1.1 Export to Unity FBX
+
+**Two ways to trigger it:**
+- **N-panel sidebar:** Press **N** in the 3D viewport → **Export** tab. Shows what will be exported before you click.
+- **Outliner right-click:** Right-click any object or collection row in the Outliner → **Export to Unity FBX**.
+
+**Export source — priority order:**
+1. **Selected objects** (and their mesh children recursively) — click an object in the Outliner or viewport to select it; child meshes are automatically included
+2. **Active layer collection** — if nothing is selected, uses whichever collection is highlighted blue in the Outliner
+
+The N-panel label shows `Name (N meshes)` so you can confirm what will be exported before clicking.
+
+**What it does:**
+- Exports all mesh objects to an FBX with Unity-correct settings: `axis_forward=Y`, `axis_up=Z`, `apply_scale_options=FBX_SCALE_ALL`, `bake_space_transform=True`
+- Copies all image textures to `../Textures/` (sibling of the `Models/` folder — shared flat folder, not per-part subfolders)
+- Writes a sidecar `<name>.textures.json` next to the FBX — Unity uses this to name materials and wire textures automatically
+
+**Prerequisite — apply scale before exporting:**
+1. Make meshes single-user: `Object → Relations → Make Single User → Object & Data`
+2. Apply scale: select all objects, `Ctrl+A → Scale`
+
+If scale is not applied, the FBX exporter bakes the transform scale into the export and the geometry arrives in Unity at the wrong size.
+
+**Remembers the last export directory** for the session (persists across script reloads via `bpy.app.driver_namespace`, cleared on Blender restart).
+
+---
+
+### 1.2 Radial Split
+
+**Object menu → Radial Split** (in the 3D viewport Object menu).
+
+Splits the selected mesh into N radial pie-slice segments around a chosen axis (X, Y, or Z). Each segment becomes a separate mesh object. The original mesh is hidden (not deleted). All segments are grouped into a collection named after the original object.
+
+**Why separate objects:** Unity imports each object in an FBX as a separate `Mesh` asset. Submeshes within a single object become material slots, not separate meshes — the CPW segmented collider workflow requires separate meshes.
+
+**Typical workflow for a cylindrical shell:**
+1. Model the full ring/cylinder
+2. Radial Split → 8 segments at 45° around the long axis
+3. Keep the original (hidden) in the same collection — the CPW uses it as the visual/trigger mesh
+4. Export the collection — original + all segments end up in one FBX
+
+---
+
+### 1.3 Material & Texture Pipeline
+
+When you export from Blender, the script automatically copies textures and writes a sidecar JSON. On the Unity side, `CustomMeshPostprocessor` reads the sidecar and creates a correctly wired material automatically — no manual material setup needed.
+
+**Texture naming convention (required):**
+
+Textures must follow the `<TextureSetName>_<Suffix>.png` pattern. The suffix determines the HDRP slot:
+
+| Suffix | HDRP Slot | Import setting |
+|---|---|---|
+| `_BaseColor` | `_BaseColorMap` | Default, sRGB |
+| `_Normal` | `_NormalMap` | Normal Map type, sRGB off |
+| `_MaskMap` | `_MaskMap` | Default, sRGB off |
+| `_Metallic` / `_Roughness` / `_AO` | (copied but not auto-wired) | Default, sRGB off |
+
+**Material naming:** The material is named after the **texture set**, not the Blender material name or part name. For example, if `Aft_Section_BaseColor.png` is found, the created material is `Aft_Section.mat`. Multiple parts sharing the same texture atlas automatically reuse the same material — you do not need to create or assign it manually.
+
+**Sidecar JSON format:**
+```json
+{
+  "Aft_Section": {
+    "BaseColor": "Aft_Section_BaseColor.png",
+    "Normal": "Aft_Section_Normal.png",
+    "MaskMap": "Aft_Section_MaskMap.png"
+  }
+}
+```
+
+**CPW auto-population:** When you drag an FBX into the CPW **Model** field, the wizard reads the sidecar and auto-populates the Material, Mesh, BaseColor, Normal, and MaskMap fields. No manual picker needed.
+
+**Folder layout:**
+```
+Assets/_CustomShips/<Ship>/
+  Models/          — FBX files + sidecar .textures.json files
+  Materials/       — auto-created .mat files (named after texture set)
+  Textures/        — PNG textures (flat, shared across all parts)
+```
+
+---
+
+## 2. The Shipbuilder Menu
 
 The main `Shipbuilder` menu in the Unity menu bar is the primary interface for all build and tool operations.
 
