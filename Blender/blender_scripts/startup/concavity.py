@@ -6,9 +6,10 @@ import math
 import re
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
+from bpy_extras import view3d_utils
 
 bl_info = {
-    "name": "Concavity Split",
+    "name": "Concavity",
     "author": "KerballOne",
     "version": (1, 3),
     "blender": (4, 0, 0),
@@ -18,17 +19,20 @@ bl_info = {
 
 _THIS_FILE = __file__
 
-COLOR_SEAM = (1.0, 0.85, 0.2, 0.28)   # yellow cut face preview
 
 
 # ------------------------------------------------------------------
 # One-time mesh analysis (called at invoke only)
 
-def _analyse_mesh(obj, coplanar_deg=2.0):
+def _analyse_mesh(obj, axis_idx, coplanar_deg=2.0):
     """
-    Build a bmesh in world space, group nearly-coplanar faces, then find ALL
-    adjacent group pairs and record their geometry.  Returns a list of candidate
-    dicts — cheap to filter by area/angle threshold later.
+    Build a bmesh in world space, group nearly-coplanar faces, then find
+    adjacent group pairs and record their geometry.
+
+    Faces are seeded largest-first so that large flat panels claim their
+    coplanar neighbours before small transition/corner faces can seed their
+    own tiny groups.  This prevents small bevels from blocking detection of
+    the seam between two large adjacent panels.
 
     Each candidate:
       area_a, area_b   : float  — group areas
@@ -36,8 +40,7 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
       dot              : float  — na.dot(nb)
       plane_co         : Vector — centroid of the shared boundary verts
       plane_no         : Vector — bisector of the two group normals
-      seam_lines       : list of (Vector, Vector) — world-space line segments
-                         along the shared boundary for display
+      seam_lines       : list of (Vector, Vector) — world-space edge segments
     """
     bm = bmesh.new()
     bm.from_mesh(obj.data)
@@ -49,19 +52,24 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
         v.co = mx @ v.co
     bm.normal_update()
 
+    face_areas   = [f.calc_area() for f in bm.faces]
     face_normals = [f.normal.copy() for f in bm.faces]
 
-    # --- coplanar flood-fill grouping ---
+    # --- coplanar flood-fill, seeded largest-face-first ---
     coplanar_thresh = math.cos(math.radians(coplanar_deg))
+    # Sort face indices by area descending so large panels seed first
+    seed_order = sorted(range(len(bm.faces)), key=lambda i: face_areas[i], reverse=True)
+
     visited = set()
-    groups = []          # list of sets of face indices
+    groups = []
     face_to_group = {}
 
-    for start in bm.faces:
-        if start.index in visited:
+    for seed_fi in seed_order:
+        if seed_fi in visited:
             continue
         group = set()
-        stack = [start]
+        stack = [bm.faces[seed_fi]]
+        seed_normal = face_normals[seed_fi]
         while stack:
             f = stack.pop()
             if f.index in visited:
@@ -71,30 +79,39 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
             for edge in f.edges:
                 for linked in edge.link_faces:
                     if linked.index not in visited:
-                        if face_normals[f.index].dot(face_normals[linked.index]) >= coplanar_thresh:
+                        # Compare against the seed normal, not the current face normal,
+                        # so the group stays coherent even as we expand across the panel
+                        if seed_normal.dot(face_normals[linked.index]) >= coplanar_thresh:
                             stack.append(linked)
         g_idx = len(groups)
         groups.append(group)
         for fi in group:
             face_to_group[fi] = g_idx
 
-    # --- per-group area and normal ---
+    # --- per-group area, normal, and centroid ---
     def group_area(g):
-        return sum(bm.faces[fi].calc_area() for fi in g)
+        return sum(face_areas[fi] for fi in g)
 
     def group_normal(g):
         n = Vector((0, 0, 0))
         for fi in g:
-            n += face_normals[fi] * bm.faces[fi].calc_area()
+            n += face_normals[fi] * face_areas[fi]
         return n.normalized() if n.length > 1e-6 else Vector((0, 0, 1))
 
-    g_areas   = [group_area(g)   for g in groups]
-    g_normals = [group_normal(g) for g in groups]
+    def group_centroid(g):
+        c = Vector((0, 0, 0))
+        total = 0.0
+        for fi in g:
+            c += bm.faces[fi].calc_center_median() * face_areas[fi]
+            total += face_areas[fi]
+        return c / total if total > 1e-8 else Vector((0, 0, 0))
+
+    g_areas     = [group_area(g)     for g in groups]
+    g_normals   = [group_normal(g)   for g in groups]
+    g_centroids = [group_centroid(g) for g in groups]
 
     # --- find all adjacent group pairs ---
-    # For each pair collect every shared boundary edge as a line segment
-    pair_edges = {}   # (ga, gb) -> list of (co_a, co_b)
-
+    pair_edges = {}
     for edge in bm.edges:
         if len(edge.link_faces) != 2:
             continue
@@ -118,7 +135,6 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
             continue
         bisector.normalize()
 
-        # plane_co = centroid of all boundary verts
         all_verts = [v for seg in segs for v in seg]
         plane_co = sum(all_verts, Vector((0, 0, 0))) / len(all_verts)
 
@@ -131,17 +147,30 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
             'plane_co':  plane_co,
             'plane_no':  bisector,
             'seam_lines': segs,
+            'group_a':   ga,
+            'group_b':   gb,
         })
 
+    # --- per-group boundary edges ---
+    group_boundary_edges = [[] for _ in groups]
+    for edge in bm.edges:
+        face_groups = [face_to_group.get(f.index, -1) for f in edge.link_faces]
+        for g_idx in set(face_groups):
+            if g_idx < 0:
+                continue
+            if face_groups.count(g_idx) < len(edge.link_faces):
+                seg = (edge.verts[0].co.copy(), edge.verts[1].co.copy())
+                group_boundary_edges[g_idx].append(seg)
+
     bm.free()
-    return candidates
+    return candidates, g_areas, g_centroids, group_boundary_edges
 
 
 # ------------------------------------------------------------------
 
-class MESH_OT_concavity_split(bpy.types.Operator):
-    bl_idname  = "mesh.concavity_split"
-    bl_label   = "Concavity Split"
+class MESH_OT_concavity(bpy.types.Operator):
+    bl_idname  = "mesh.concavity"
+    bl_label   = "Concavity"
     bl_description = (
         "Detect large faces meeting at concave angles and preview split seams. "
         "Drag=face size  Q/E=angle  Enter=confirm  RMB/Esc=cancel"
@@ -168,13 +197,17 @@ class MESH_OT_concavity_split(bpy.types.Operator):
         self._angle_deg     = 15.0   # degrees
         self._fill_cut      = False
         self._axis_idx      = 2      # Z
+        self._seam_mode     = False  # C: seam-aligned planes vs radial-through-center
 
-        # Heavy work done once here
-        self._candidates = _analyse_mesh(obj)
+        # Heavy work — re-run when axis changes
+        self._candidates, self._g_areas, self._g_centroids, self._group_boundary_edges = _analyse_mesh(obj, self._axis_idx)
 
-        self._splits     = []
-        self._line_batch = None
-        self._shader     = gpu.shader.from_builtin('UNIFORM_COLOR')
+        self._splits        = []
+        self._line_batch    = None
+        self._ghost_batch   = None
+        self._wire_batches  = []
+        self._group_labels  = []
+        self._shader        = gpu.shader.from_builtin('UNIFORM_COLOR')
 
         # Precompute mesh triangle batch for semi-transparent overlay
         mx = obj.matrix_world
@@ -212,12 +245,19 @@ class MESH_OT_concavity_split(bpy.types.Operator):
 
         if event.type == 'R' and event.value == 'PRESS':
             self._axis_idx = (self._axis_idx + 1) % 3
+            self._candidates, self._g_areas, self._g_centroids, self._group_boundary_edges = _analyse_mesh(self._obj, self._axis_idx)
             self._rebuild_batches()
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
         if event.type == 'F' and event.value == 'PRESS':
             self._fill_cut = not self._fill_cut
+            context.area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'C' and event.value == 'PRESS':
+            self._seam_mode = not self._seam_mode
+            self._rebuild_batches()
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
@@ -322,51 +362,184 @@ class MESH_OT_concavity_split(bpy.types.Operator):
 
         axis_vec = Vector([1.0 if i == self._axis_idx else 0.0 for i in range(3)])
 
-        tri_verts = []
+        # Assign a color per unique group index that appears in detected splits
+        SECTOR_COLORS = [
+            (0.2, 0.6, 1.0, 1.0),   # blue
+            (0.2, 1.0, 0.4, 1.0),   # green
+            (1.0, 0.4, 0.2, 1.0),   # orange
+            (0.8, 0.2, 1.0, 1.0),   # purple
+            (0.2, 1.0, 1.0, 1.0),   # cyan
+            (1.0, 1.0, 0.2, 1.0),   # yellow-bright
+            (1.0, 0.2, 0.6, 1.0),   # pink
+            (0.4, 1.0, 0.2, 1.0),   # lime
+        ]
+        # Collect all group indices from detected splits, assign color index in order seen
+        group_color_idx = {}
         for s in self._splits:
-            # Derive cut normal from seam position relative to bbox center (radial direction)
-            plane_no = s['plane_co'].copy()
-            plane_no[self._axis_idx] = 0.0
-            plane_no -= Vector([bbox_center[i] if i != self._axis_idx else 0.0 for i in range(3)])
-            if plane_no.length < 1e-6:
+            for key in ('group_a', 'group_b'):
+                g = s[key]
+                if g not in group_color_idx:
+                    group_color_idx[g] = len(group_color_idx) % len(SECTOR_COLORS)
+
+        # Build one wire batch per color
+        color_wire_verts = {}
+        for g_idx, ci in group_color_idx.items():
+            verts = color_wire_verts.setdefault(ci, [])
+            for (va, vb) in self._group_boundary_edges[g_idx]:
+                verts += [tuple(va), tuple(vb)]
+
+        self._wire_batches = [
+            (SECTOR_COLORS[ci], batch_for_shader(self._shader, 'LINES', {"pos": verts}))
+            for ci, verts in color_wire_verts.items() if verts
+        ]
+
+        # Store (world_pos, label_str, color) for each active group label
+        self._group_labels = []
+        for g_idx, ci in group_color_idx.items():
+            co = self._g_centroids[g_idx]
+            self._group_labels.append((co, str(g_idx), SECTOR_COLORS[ci]))
+
+        # Collect mesh polygons in world space for intersection
+        mx = obj.matrix_world
+        mesh_polys = []
+        for poly in obj.data.polygons:
+            mesh_polys.append([mx @ obj.data.vertices[vi].co for vi in poly.vertices])
+
+        ghost_verts = []   # nearly invisible full-extent plane
+        cut_line_verts = [] # bright lines where plane intersects mesh faces
+
+        for s in self._splits:
+            if self._seam_mode:
+                plane_co = s['plane_co'].copy()
+                plane_no = s['plane_no'].copy()
+                if plane_no.length < 1e-6:
+                    continue
+                plane_no.normalize()
+            else:
+                plane_no = s['plane_co'].copy()
+                plane_no[self._axis_idx] = 0.0
+                plane_no -= Vector([bbox_center[i] if i != self._axis_idx else 0.0 for i in range(3)])
+                if plane_no.length < 1e-6:
+                    continue
+                plane_no.normalize()
+                plane_co = bbox_center.copy()
+
+            half_h = (ax_max - ax_min) * 0.5
+            perp = plane_no.cross(axis_vec)
+            if perp.length < 1e-6:
+                perp = Vector([1.0 if i == a0 else 0.0 for i in range(3)])
+            perp.normalize()
+
+            # Ghost quad: full bbox-spanning plane, nearly invisible
+            lo = plane_co.copy(); lo[self._axis_idx] = ax_min
+            hi = plane_co.copy(); hi[self._axis_idx] = ax_max
+            p0 = tuple(lo - perp * radius)
+            p1 = tuple(lo + perp * radius)
+            p2 = tuple(hi + perp * radius)
+            p3 = tuple(hi - perp * radius)
+            ghost_verts += [p0, p1, p2, p0, p2, p3, p0, p2, p1, p0, p3, p2]
+
+            # Build two orthonormal axes within the cut plane
+            u = axis_vec - axis_vec.dot(plane_no) * plane_no
+            if u.length < 1e-6:
+                u = perp.copy()
+            u.normalize()
+            v2 = plane_no.cross(u)
+            v2.normalize()
+
+            # Collect one crossing segment per polygon that the plane slices.
+            # A convex polygon intersected by a plane yields exactly 0 or 2 crossing
+            # points; for non-convex polys we keep all crossing points and pair them
+            # sequentially.  Each pair (p0, p1) is a chord across one polygon face.
+            cross_segments = []   # list of (Vector, Vector)
+            for poly_verts in mesh_polys:
+                nv = len(poly_verts)
+                hits = []
+                for i in range(nv):
+                    va = poly_verts[i]
+                    vb = poly_verts[(i + 1) % nv]
+                    da = (va - plane_co).dot(plane_no)
+                    db = (vb - plane_co).dot(plane_no)
+                    if (da < 0) != (db < 0):
+                        t = da / (da - db)
+                        hits.append(va + t * (vb - va))
+                for i in range(0, len(hits) - 1, 2):
+                    cross_segments.append((hits[i], hits[i + 1]))
+
+            if not cross_segments:
                 continue
-            plane_no.normalize()
 
-            # Tangent in the cut plane = axis_vec × plane_no (lies in cut plane, along axis)
-            t_along = axis_vec.cross(plane_no)
-            # t_along should be ~zero length since axis_vec ⊥ plane_no — use axis directly
-            # The cut plane quad: extends from ax_min to ax_max along axis,
-            # and from 0 to radius along plane_no direction from origin
-            lo_pt = bbox_center.copy(); lo_pt[self._axis_idx] = ax_min
-            hi_pt = bbox_center.copy(); hi_pt[self._axis_idx] = ax_max
+            # Chain segments into loops: each segment shares endpoints with
+            # neighbouring segments (within snap_dist).  Walking chains gives us
+            # the separate loops (outer wall loop, inner wall loop, etc.).
+            snap_dist = 0.001
+            snap_dist2 = snap_dist * snap_dist
+            used = [False] * len(cross_segments)
+            loops = []
 
-            p0 = tuple(lo_pt - plane_no * radius)
-            p1 = tuple(lo_pt + plane_no * radius)
-            p2 = tuple(hi_pt + plane_no * radius)
-            p3 = tuple(hi_pt - plane_no * radius)
+            def dist2(a, b):
+                d = a - b
+                return d.dot(d)
 
-            # Draw both windings so quad is visible from both sides without doubling
-            tri_verts += [p0, p1, p2, p0, p2, p3]  # front
-            tri_verts += [p0, p2, p1, p0, p3, p2]  # back
+            for start in range(len(cross_segments)):
+                if used[start]:
+                    continue
+                used[start] = True
+                loop = [cross_segments[start][0], cross_segments[start][1]]
+                # grow forward
+                changed = True
+                while changed:
+                    changed = False
+                    tail = loop[-1]
+                    for j, (pa, pb) in enumerate(cross_segments):
+                        if used[j]:
+                            continue
+                        if dist2(tail, pa) < snap_dist2:
+                            used[j] = True
+                            loop.append(pb)
+                            changed = True
+                            break
+                        if dist2(tail, pb) < snap_dist2:
+                            used[j] = True
+                            loop.append(pa)
+                            changed = True
+                            break
+                loops.append(loop)
 
-        if tri_verts:
-            self._line_batch = batch_for_shader(
-                self._shader, 'TRIS', {"pos": tri_verts}
-            )
-        else:
-            self._line_batch = None
+            # Fan-triangulate each loop independently — no bridging between loops
+            for loop in loops:
+                if len(loop) < 3:
+                    continue
+                c = sum(loop, Vector((0, 0, 0))) / len(loop)
+                ct = tuple(c)
+                for i in range(len(loop) - 1):
+                    cut_line_verts += [ct, tuple(loop[i]), tuple(loop[i + 1])]
+                # close the loop
+                cut_line_verts += [ct, tuple(loop[-1]), tuple(loop[0])]
+
+        self._ghost_batch = batch_for_shader(self._shader, 'TRIS', {"pos": ghost_verts})    if ghost_verts    else None
+        self._line_batch  = batch_for_shader(self._shader, 'TRIS', {"pos": cut_line_verts}) if cut_line_verts else None
+
 
     def _draw_callback(self, context):
-        shader = self._shader
-        if not self._line_batch:
-            return
         shader = self._shader
         gpu.state.blend_set('ALPHA')
         gpu.state.depth_test_set('ALWAYS')
         gpu.state.face_culling_set('NONE')
         shader.bind()
-        shader.uniform_float("color", COLOR_SEAM)
-        self._line_batch.draw(shader)
+        # ghost plane and intersection highlight hidden for now
+        # if self._ghost_batch:
+        #     shader.uniform_float("color", (1.0, 0.85, 0.2, 0.01))
+        #     self._ghost_batch.draw(shader)
+        # if self._line_batch:
+        #     shader.uniform_float("color", (1.0, 0.9, 0.1, 0.8))
+        #     self._line_batch.draw(shader)
+        if self._wire_batches:
+            gpu.state.line_width_set(2.0)
+            for color, batch in self._wire_batches:
+                shader.uniform_float("color", color)
+                batch.draw(shader)
+            gpu.state.line_width_set(1.0)
         gpu.state.face_culling_set('BACK')
         gpu.state.blend_set('NONE')
         gpu.state.depth_test_set('LESS_EQUAL')
@@ -374,10 +547,11 @@ class MESH_OT_concavity_split(bpy.types.Operator):
     def _draw_hud(self, context):
         axis_name = ('X', 'Y', 'Z')[self._axis_idx]
         fill_str  = "ON" if self._fill_cut else "OFF"
-        line1 = (f"Concavity Split  |  Axis: {axis_name}  |  Min Face: {self._min_face_area:.2f} m²  |  "
+        mode_str  = "Seam" if self._seam_mode else "Radial"
+        line1 = (f"Concavity  |  Axis: {axis_name}  |  Min Face: {self._min_face_area:.2f} m²  |  "
                  f"Angle: {self._angle_deg:.1f}°  |  "
-                 f"Splits: {len(self._splits)}  |  Fill: {fill_str}")
-        line2 = "Drag=face size  Scroll=fine  Q/E=angle  R=axis  F=fill  Enter=confirm  RMB/Esc=cancel"
+                 f"Splits: {len(self._splits)}  |  Fill: {fill_str}  |  Mode: {mode_str}")
+        line2 = "Drag=face size  Scroll=fine  Q/E=angle  R=axis  F=fill  C=mode  Enter=confirm  RMB/Esc=cancel"
         font_id = 0
         blf.size(font_id, 14)
         blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
@@ -387,6 +561,19 @@ class MESH_OT_concavity_split(bpy.types.Operator):
         blf.color(font_id, 0.7, 0.7, 0.7, 1.0)
         blf.position(font_id, 20, 32, 0)
         blf.draw(font_id, line2)
+
+        # Draw group ID labels at each active group's centroid
+        if self._group_labels:
+            region = context.region
+            rv3d = context.region_data
+            blf.size(font_id, 12)
+            for world_co, label, color in self._group_labels:
+                screen = view3d_utils.location_3d_to_region_2d(region, rv3d, world_co)
+                if screen is None:
+                    continue
+                blf.color(font_id, color[0], color[1], color[2], 1.0)
+                blf.position(font_id, screen.x + 4, screen.y + 4, 0)
+                blf.draw(font_id, label)
 
     def _finish(self, context, cancelled):
         bpy.types.SpaceView3D.draw_handler_remove(self._handle, 'WINDOW')
@@ -413,17 +600,34 @@ class MESH_OT_concavity_split(bpy.types.Operator):
         other = [i for i in range(3) if i != ax]
         a0, a1 = other
 
-        # Build cut plane normals (radially outward from bbox center to each seam)
-        cut_planes = []  # list of (angle, plane_normal_world)
+        # Build cut planes — (angle, normal_world, co_world)
+        cut_planes = []
         for s in self._splits:
-            pn = s['plane_co'].copy()
-            pn[ax] = 0.0
-            pn -= Vector([bbox_center[i] if i != ax else 0.0 for i in range(3)])
-            if pn.length < 1e-6:
-                continue
-            pn.normalize()
+            if self._seam_mode:
+                # Seam-aligned: plane sits at the seam centroid.
+                # Normal = direction from bbox center to seam centroid (radial),
+                # but plane_co = seam centroid instead of bbox center.
+                # This places the cut exactly on the face boundary rather than
+                # projecting it through the center of the mesh.
+                pn = s['plane_co'].copy()
+                pn[ax] = 0.0
+                pn -= Vector([bbox_center[i] if i != ax else 0.0 for i in range(3)])
+                if pn.length < 1e-6:
+                    continue
+                pn.normalize()
+                co = s['plane_co'].copy()
+            else:
+                # Radial: normal points from bbox center toward seam
+                pn = s['plane_co'].copy()
+                pn[ax] = 0.0
+                pn -= Vector([bbox_center[i] if i != ax else 0.0 for i in range(3)])
+                if pn.length < 1e-6:
+                    continue
+                pn.normalize()
+                co = bbox_center.copy()
+
             angle = math.atan2(pn[a1], pn[a0])
-            cut_planes.append((angle, pn))
+            cut_planes.append((angle, pn, co))
 
         if not cut_planes:
             self.report({'WARNING'}, "No valid cut planes")
@@ -438,10 +642,11 @@ class MESH_OT_concavity_split(bpy.types.Operator):
         context.view_layer.objects.active = obj
         bpy.ops.object.duplicate(linked=False)
         dup = context.active_object
-        local_co = dup.matrix_world.inverted() @ bbox_center
+        inv_mx = dup.matrix_world.inverted()
 
         bpy.ops.object.mode_set(mode='EDIT')
-        for _, pn in cut_planes:
+        for _, pn, co_world in cut_planes:
+            local_co = inv_mx @ co_world
             bpy.ops.mesh.select_all(action='SELECT')
             bpy.ops.mesh.bisect(
                 plane_co=local_co,
@@ -459,7 +664,7 @@ class MESH_OT_concavity_split(bpy.types.Operator):
         bm.from_mesh(mesh)
         sl = bm.faces.layers.int.new("_sector")
 
-        cut_angles = [a for a, _ in cut_planes]
+        cut_angles = [a for a, _, _co in cut_planes]
         mx = dup.matrix_world
 
         for face in bm.faces:
@@ -550,15 +755,15 @@ class MESH_OT_concavity_split(bpy.types.Operator):
 # ------------------------------------------------------------------
 
 def _menu_func(self, context):
-    self.layout.operator(MESH_OT_concavity_split.bl_idname, icon='MOD_MESHDEFORM')
+    self.layout.operator(MESH_OT_concavity.bl_idname, icon='MOD_MESHDEFORM')
 
 
 def register():
     try:
-        bpy.utils.unregister_class(MESH_OT_concavity_split)
+        bpy.utils.unregister_class(MESH_OT_concavity)
     except Exception:
         pass
-    bpy.utils.register_class(MESH_OT_concavity_split)
+    bpy.utils.register_class(MESH_OT_concavity)
 
     if hasattr(bpy.types.VIEW3D_MT_object, '_dyn_ui_initialize'):
         for fn in list(bpy.types.VIEW3D_MT_object._dyn_ui_initialize()):
@@ -573,7 +778,7 @@ def register():
 
 def unregister():
     try:
-        bpy.utils.unregister_class(MESH_OT_concavity_split)
+        bpy.utils.unregister_class(MESH_OT_concavity)
     except Exception:
         pass
     if hasattr(bpy.types.VIEW3D_MT_object, '_dyn_ui_initialize'):

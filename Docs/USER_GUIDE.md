@@ -11,7 +11,11 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 1. [Blender Tools](#1-blender-tools)
    - [Export to Unity FBX](#11-export-to-unity-fbx)
    - [Radial Split](#12-radial-split)
-   - [Material & Texture Pipeline](#13-material--texture-pipeline)
+   - [Concavity](#13-concavity)
+   - [Interactive Bisect](#14-interactive-bisect)
+   - [Hollow Mesh](#15-hollow-mesh)
+   - [Group to Collection](#16-group-to-collection)
+   - [Material & Texture Pipeline](#17-material--texture-pipeline)
 2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
    - [Build & Run](#21-build--run)
    - [Actions Submenu](#22-actions-submenu)
@@ -82,11 +86,16 @@ If scale is not applied, the FBX exporter bakes the transform scale into the exp
 
 ### 1.2 Radial Split
 
-**Object menu → Radial Split** (in the 3D viewport Object menu).
+**ShipBreaker sidebar → Radial Split** (or Object menu → Radial Split).
 
-Splits the selected mesh into N radial pie-slice segments around a chosen axis (X, Y, or Z). Each segment becomes a separate mesh object. The original mesh is hidden (not deleted). All segments are grouped into a collection named after the original object.
+Splits the selected mesh into N equal radial pie-slice segments around a chosen axis (X, Y, or Z). Each segment becomes a separate mesh object. The original mesh is hidden (not deleted). All segments are grouped into a collection named after the original object.
 
 **Why separate objects:** Unity imports each object in an FBX as a separate `Mesh` asset. Submeshes within a single object become material slots, not separate meshes — the CPW segmented collider workflow requires separate meshes.
+
+**Settings dialog:**
+- **Segments** — number of pie slices (default 8)
+- **Axis** — X, Y, or Z (default Y)
+- **Angle Offset** — rotate all cuts by this many degrees (default 0)
 
 **Typical workflow for a cylindrical shell:**
 1. Model the full ring/cylinder
@@ -96,7 +105,71 @@ Splits the selected mesh into N radial pie-slice segments around a chosen axis (
 
 ---
 
-### 1.3 Material & Texture Pipeline
+### 1.3 Concavity
+
+**ShipBreaker sidebar → Concavity** (also accessible via Radial Split → Auto-Detect Seams)
+
+Automatically detects where large faces meet at concave angles and splits the mesh at those boundaries. Unlike Radial Split which requires a known segment count, Concavity reads the mesh geometry to find the split planes itself. Works for any polygon count — octagons, pentagons, irregular shapes.
+
+> **Note:** Concavity detection is also available inside the Radial Split dialog as "Auto-Detect Seams", which launches the same interactive mode directly.
+
+**How it works:**
+1. At invoke, the tool analyses the mesh: coplanar faces (within 2°) are merged into "super-faces", then adjacent super-face pairs are evaluated for area and angle
+2. Pairs where both faces exceed **Min Face** area, meet at an angle greater than the **Angle** threshold, and have similar areas (ratio < 2:1) are detected as seam boundaries
+3. Yellow preview planes show where the cuts will be made
+4. On confirm, the mesh is duplicated, cut at all seam planes, and each angular sector is separated into its own named object in a collection
+
+**Controls:**
+| Input | Action |
+|---|---|
+| Drag up/down | Increase/decrease Min Face area threshold (50 m² range per full drag) |
+| Scroll wheel | Fine-adjust Min Face ±0.5 m² |
+| Q / E | Decrease / increase Angle threshold ±1° |
+| R | Cycle axis (X → Y → Z) |
+| F | Toggle fill on cut faces |
+| Enter / Numpad Enter | Confirm and apply |
+| RMB / Esc | Cancel |
+
+**HUD:** `Concavity  |  Axis: Z  |  Min Face: 10.00 m²  |  Angle: 15.0°  |  Splits: 8  |  Fill: OFF`
+
+**Splits count** = number of detected seam boundaries = number of output segments.
+
+**Typical workflow for a ring-shaped part:**
+1. Model the full ring
+2. Run Concavity with Axis = Z (or whichever axis runs through the ring)
+3. Adjust Min Face up until only the corner seams between wall panels remain; adjust Angle as needed
+4. Press Enter — each wall panel becomes its own `_seg01..N` object in a collection
+5. Export the collection (original hidden + all segments)
+
+**Pentagon / asymmetric shapes:** The tool uses sector-labeling rather than fixed angles, so it handles non-symmetric shapes correctly — a pentagon produces 5 segments, an irregular hexagon produces 6, etc.
+
+---
+
+### 1.4 Interactive Bisect
+
+**ShipBreaker sidebar → Interactive Bisect**
+
+Modal operator for cutting a mesh with a single plane interactively. Drag to position the cut, confirm with Enter.
+
+---
+
+### 1.5 Hollow Mesh
+
+**ShipBreaker sidebar → Hollow Mesh**
+
+Adds wall thickness to a flat or single-sided mesh by extruding faces inward. Useful for converting a thin shell mesh into a solid-walled part suitable for convex colliders.
+
+---
+
+### 1.6 Group to Collection
+
+**ShipBreaker sidebar → Group to Collection**
+
+Creates a new collection containing the selected objects, nested under their current collection. Equivalent to grouping objects in the Outliner without changing their scene positions.
+
+---
+
+### 1.7 Material & Texture Pipeline
 
 When you export from Blender, the script automatically copies textures and writes a sidecar JSON. On the Unity side, `CustomMeshPostprocessor` reads the sidecar and creates a correctly wired material automatically — no manual material setup needed.
 
@@ -301,7 +374,7 @@ Opens a wizard for creating new custom salvageable parts from your own meshes (F
 When a mesh is too complex or too hollow for a single convex collider (e.g. a ring, torus, or cylindrical shell), export it from Blender as a model with the original mesh plus radially-split segment objects, and use the **Model** field instead of (or alongside) **Mesh**.
 
 **Blender preparation:**
-1. Use the **Radial Split** tool (Object menu → Radial Split) to split the mesh into N segments. Keep the original unsplit object in the same collection — do not hide or delete it.
+1. Use **Radial Split** (for uniform N-segment rings) or **Concavity** (for polygon-shaped rings where the splits should align with face boundaries) to split the mesh into segments. Keep the original unsplit object in the same collection — do not hide or delete it.
 2. Select the entire collection in the Outliner, then run **Object menu → Export Collection to Unity FBX**. This exports all mesh objects with Unity-correct axis and scale settings.
 3. Import the resulting FBX into `Assets/_CustomShips/<ShipName>/Models/`.
 
