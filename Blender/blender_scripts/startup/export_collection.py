@@ -192,23 +192,87 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
 class VIEW3D_PT_export_unity(bpy.types.Panel):
     bl_space_type  = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category    = 'Export'
-    bl_label       = 'Export to Unity'
+    bl_category    = 'ShipBreaker'
+    bl_label       = 'ShipBreaker'
 
     def draw(self, context):
         layout = self.layout
+        obj = context.active_object
+        sel = context.selected_objects
+        is_mesh = obj and obj.type == 'MESH'
         name, meshes = _get_export_source(context)
 
-        if meshes:
-            layout.label(text=f"{name}  ({len(meshes)} mesh{'es' if len(meshes) != 1 else ''})", icon='OUTLINER_COLLECTION')
+        # --- Selection info ---
+        box = layout.box()
+        if obj:
+            if len(sel) > 1:
+                box.label(text=f"{obj.name} (+{len(sel)-1} more)", icon='OBJECT_DATA')
+            else:
+                box.label(text=obj.name, icon='OBJECT_DATA')
         else:
-            layout.label(text="No collection or selection", icon='ERROR')
+            box.label(text="Nothing selected", icon='ERROR')
 
-        layout.operator(
-            EXPORT_OT_collection_unity_fbx.bl_idname,
-            text="Export to Unity FBX",
-            icon='EXPORT',
-        )
+        layout.separator()
+
+        # --- Tools ---
+        layout.operator(EXPORT_OT_collection_unity_fbx.bl_idname, text="Export to Unity FBX", icon='EXPORT')
+        layout.operator("object.group_selected", text="Group to Collection", icon='OUTLINER_COLLECTION')
+        layout.separator()
+        layout.operator("mesh.bisect_interactive", text="Interactive Bisect", icon='MOD_BOOLEAN')
+        layout.operator("mesh.radial_split", text="Radial Split", icon='MOD_ARRAY')
+        layout.operator("mesh.hollow_mesh", text="Hollow Mesh", icon='MOD_SOLIDIFY')
+        layout.separator()
+        layout.operator("dev.reload_startup_scripts", text="Reload Scripts", icon='FILE_REFRESH')
+
+
+class OBJECT_OT_group_selected(bpy.types.Operator):
+    bl_idname  = "object.group_selected"
+    bl_label   = "Group Selected"
+    bl_description = "Create a new collection containing the selected objects, nested under their current collection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.selected_objects) > 0
+
+    def execute(self, context):
+        selected = list(context.selected_objects)
+        if not selected:
+            self.report({'ERROR'}, "Nothing selected")
+            return {'CANCELLED'}
+
+        # Find the parent collection — use the active layer collection, or the
+        # first collection the selected objects share
+        alc = context.view_layer.active_layer_collection
+        parent_col = alc.collection if alc else context.scene.collection
+
+        # Create the new collection
+        new_col = bpy.data.collections.new("Group")
+        parent_col.children.link(new_col)
+
+        # Move each selected object into the new collection,
+        # removing it from whichever collections it was in under parent_col
+        for obj in selected:
+            for col in list(obj.users_collection):
+                col.objects.unlink(obj)
+            new_col.objects.link(obj)
+
+        # Make the new collection active in the outliner
+        layer_col = self._find_layer_collection(context.view_layer.layer_collection, new_col.name)
+        if layer_col:
+            context.view_layer.active_layer_collection = layer_col
+
+        self.report({'INFO'}, f"Grouped {len(selected)} object(s) into collection '{new_col.name}'")
+        return {'FINISHED'}
+
+    def _find_layer_collection(self, layer_col, name):
+        if layer_col.collection.name == name:
+            return layer_col
+        for child in layer_col.children:
+            result = self._find_layer_collection(child, name)
+            if result:
+                return result
+        return None
 
 
 def _menu_func(self, context):
@@ -235,7 +299,7 @@ def _remove_menu_entries(menu_type, filename):
 
 
 def register():
-    for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity):
+    for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity, OBJECT_OT_group_selected):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -259,7 +323,7 @@ def unregister():
         mt = getattr(bpy.types, name, None)
         if mt:
             _remove_menu_entries(mt, 'export_collection.py')
-    for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity):
+    for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity, OBJECT_OT_group_selected):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
