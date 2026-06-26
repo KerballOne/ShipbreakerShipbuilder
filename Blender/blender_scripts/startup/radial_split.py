@@ -21,7 +21,7 @@ bl_info = {
     "version": (1, 2),
     "blender": (4, 0, 0),
     "category": "Mesh",
-    "description": "Split selected object into N radial pie-slice segments, with optional auto-detect mode",
+    "description": "Split selected object into radial segments — fixed angle or seam-detect mode",
 }
 
 _THIS_FILE = __file__
@@ -30,19 +30,9 @@ COLOR_SEAM = (1.0, 0.85, 0.2, 0.28)
 
 
 # ------------------------------------------------------------------
-# Concavity seam detection (shared by auto-detect mode)
+# Seam detection (used by Seam Detect mode)
 
 def _analyse_mesh(obj, coplanar_deg=2.0):
-    """
-    Build a bmesh in world space, group nearly-coplanar faces, find all
-    adjacent group pairs, and return candidate split seams.
-
-    Each candidate dict:
-      area_a, area_b   : float
-      dot              : float  — na.dot(nb)
-      plane_co         : Vector — centroid of shared boundary verts
-      plane_no         : Vector — bisector of the two group normals
-    """
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     bm.faces.ensure_lookup_table()
@@ -111,19 +101,16 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
         na = g_normals[ga]
         nb = g_normals[gb]
         dot = max(-1.0, min(1.0, na.dot(nb)))
-
         bisector = na + nb
         if bisector.length < 1e-6:
             continue
         bisector.normalize()
-
         all_verts = [v for seg in segs for v in seg]
         plane_co = sum(all_verts, Vector((0, 0, 0))) / len(all_verts)
-
         candidates.append({
-            'area_a':  g_areas[ga],
-            'area_b':  g_areas[gb],
-            'dot':     dot,
+            'area_a':   g_areas[ga],
+            'area_b':   g_areas[gb],
+            'dot':      dot,
             'plane_co': plane_co,
             'plane_no': bisector,
         })
@@ -133,155 +120,11 @@ def _analyse_mesh(obj, coplanar_deg=2.0):
 
 
 # ------------------------------------------------------------------
-# Apply helper — shared between both operators
+# Radial Split (Seam Detect) — interactive modal
 
-def _apply_radial_cut_planes(context, obj, obj_name, cut_planes, fill_cut):
-    """
-    Given a list of (angle, plane_normal_world) cut planes, duplicate obj,
-    bisect all planes, label faces by sector, separate, and put into a
-    named collection.  Returns {'FINISHED'} or {'CANCELLED'}.
-    """
-    cut_planes = sorted(cut_planes, key=lambda x: x[0])
-    n = len(cut_planes)
-
-    ax = None
-    # Determine axis from the cut plane normals — they're all radial so we
-    # need the bbox to know which axis is the split axis.  Caller passes
-    # cut planes already built, so we infer axis_idx from which component is
-    # absent in all normals.
-    # Actually axis_idx is provided implicitly: plane normals have 0 on the axis.
-    # Find which component is ~0 across all normals.
-    for idx in range(3):
-        if all(abs(pn[idx]) < 0.01 for _, pn in cut_planes):
-            ax = idx
-            break
-    if ax is None:
-        ax = 2  # fallback Z
-
-    other = [i for i in range(3) if i != ax]
-    a0, a1 = other
-
-    obj_coords = [obj.matrix_world @ Vector(v.co) for v in obj.data.vertices]
-    bbox_center = Vector([
-        (min(c[i] for c in obj_coords) + max(c[i] for c in obj_coords)) / 2.0
-        for i in range(3)
-    ])
-
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    context.view_layer.objects.active = obj
-    bpy.ops.object.duplicate(linked=False)
-    dup = context.active_object
-    inv_mx = dup.matrix_world.inverted()
-
-    bpy.ops.object.mode_set(mode='EDIT')
-    for _, pn in cut_planes:
-        local_co = inv_mx @ bbox_center
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.bisect(
-            plane_co=local_co,
-            plane_no=pn,
-            use_fill=fill_cut,
-            clear_inner=False,
-            clear_outer=False,
-            threshold=0.0001,
-        )
-    bpy.ops.object.mode_set(mode='OBJECT')
-
-    mesh = dup.data
-    bm = bmesh.new()
-    bm.from_mesh(mesh)
-    sl = bm.faces.layers.int.new("_sector")
-
-    cut_angles = [a for a, _ in cut_planes]
-    mx = dup.matrix_world
-
-    for face in bm.faces:
-        cw = mx @ face.calc_center_median()
-        ang = math.atan2(cw[a1] - bbox_center[a1], cw[a0] - bbox_center[a0])
-        sector = n - 1
-        for i in range(n):
-            a_lo = cut_angles[i]
-            a_hi = cut_angles[(i + 1) % n]
-            if a_hi <= a_lo:
-                a_hi += 2 * math.pi
-            a_test = ang
-            if a_test < a_lo:
-                a_test += 2 * math.pi
-            if a_lo <= a_test < a_hi:
-                sector = i
-                break
-        face[sl] = sector
-
-    bm.to_mesh(mesh)
-    bm.free()
-    mesh.update()
-
-    base_name = re.sub(r'_\d+$', '', obj_name).split(".")[0]
-    col_name = base_name
-    seg_col = bpy.data.collections.get(col_name)
-    if seg_col is None:
-        seg_col = bpy.data.collections.new(col_name)
-    parent_col = next(
-        (c for c in bpy.data.collections if obj.name in c.objects),
-        context.scene.collection,
-    )
-    if col_name not in [c.name for c in parent_col.children]:
-        parent_col.children.link(seg_col)
-
-    results = []
-    current = dup
-
-    for seg_idx in range(n - 1):
-        bpy.ops.object.select_all(action='DESELECT')
-        current.select_set(True)
-        context.view_layer.objects.active = current
-
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bm2 = bmesh.from_edit_mesh(current.data)
-        sl2 = bm2.faces.layers.int.get("_sector")
-        if sl2:
-            for face in bm2.faces:
-                face.select = (face[sl2] == seg_idx)
-        bmesh.update_edit_mesh(current.data)
-        bpy.ops.mesh.separate(type='SELECTED')
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-        pieces = [o for o in context.selected_objects if o is not current and o.type == 'MESH']
-        for piece in pieces:
-            piece.name = f"{base_name}_seg{seg_idx+1:02d}"
-            if piece.data:
-                piece.data.name = piece.name
-            for c in list(piece.users_collection):
-                c.objects.unlink(piece)
-            seg_col.objects.link(piece)
-            results.append(piece)
-
-    current.name = f"{base_name}_seg{n:02d}"
-    if current.data:
-        current.data.name = current.name
-    for c in list(current.users_collection):
-        c.objects.unlink(current)
-    seg_col.objects.link(current)
-    results.append(current)
-
-    obj.hide_set(True)
-    bpy.ops.object.select_all(action='DESELECT')
-    for seg in results:
-        seg.select_set(True)
-    if results:
-        context.view_layer.objects.active = results[0]
-
-    return results, base_name, col_name
-
-
-# ------------------------------------------------------------------
-# Auto-detect modal operator
-
-class MESH_OT_radial_split_auto(bpy.types.Operator):
-    bl_idname  = "mesh.radial_split_auto"
-    bl_label   = "Radial Split — Auto-Detect"
+class MESH_OT_radial_split_seam(bpy.types.Operator):
+    bl_idname  = "mesh.radial_split_seam"
+    bl_label   = "Radial Split (Seam Detect)"
     bl_description = (
         "Auto-detect concave seams and preview split planes interactively. "
         "Drag=face size  Q/E=angle  R=axis  F=fill  Enter=confirm  RMB/Esc=cancel"
@@ -307,7 +150,7 @@ class MESH_OT_radial_split_auto(bpy.types.Operator):
         self._min_face_area = 10.0
         self._angle_deg     = 15.0
         self._fill_cut      = False
-        self._axis_idx      = 2   # Z
+        self._axis_idx      = 2
 
         self._candidates = _analyse_mesh(obj)
         self._splits     = []
@@ -442,8 +285,6 @@ class MESH_OT_radial_split_auto(bpy.types.Operator):
                 kept_angles.append(ang)
                 self._splits.append(c)
 
-        axis_vec = Vector([1.0 if i == self._axis_idx else 0.0 for i in range(3)])
-
         tri_verts = []
         for s in self._splits:
             plane_no = s['plane_co'].copy()
@@ -485,7 +326,7 @@ class MESH_OT_radial_split_auto(bpy.types.Operator):
     def _draw_hud(self, context):
         axis_name = ('X', 'Y', 'Z')[self._axis_idx]
         fill_str  = "ON" if self._fill_cut else "OFF"
-        line1 = (f"Radial Split — Auto  |  Axis: {axis_name}  |  "
+        line1 = (f"Radial Split (Seam Detect)  |  Axis: {axis_name}  |  "
                  f"Min Face: {self._min_face_area:.2f} m²  |  "
                  f"Angle: {self._angle_deg:.1f}°  |  "
                  f"Splits: {len(self._splits)}  |  Fill: {fill_str}")
@@ -511,11 +352,12 @@ class MESH_OT_radial_split_auto(bpy.types.Operator):
             return {'CANCELLED'}
 
         obj = self._obj
-        coords = [obj.matrix_world @ Vector(v.co) for v in obj.data.vertices]
+        obj_coords = [obj.matrix_world @ Vector(v.co) for v in obj.data.vertices]
         bbox_center = Vector([
-            (min(c[i] for c in coords) + max(c[i] for c in coords)) / 2.0
+            (min(c[i] for c in obj_coords) + max(c[i] for c in obj_coords)) / 2.0
             for i in range(3)
         ])
+
         ax = self._axis_idx
         other = [i for i in range(3) if i != ax]
         a0, a1 = other
@@ -535,33 +377,132 @@ class MESH_OT_radial_split_auto(bpy.types.Operator):
             self.report({'WARNING'}, "No valid cut planes")
             return {'CANCELLED'}
 
-        results, base_name, col_name = _apply_radial_cut_planes(
-            context, obj, self._obj_name, cut_planes, self._fill_cut
+        cut_planes.sort(key=lambda x: x[0])
+        n = len(cut_planes)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        bpy.ops.object.duplicate(linked=False)
+        dup = context.active_object
+        local_co = dup.matrix_world.inverted() @ bbox_center
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        for _, pn in cut_planes:
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.bisect(
+                plane_co=local_co,
+                plane_no=pn,
+                use_fill=self._fill_cut,
+                clear_inner=False,
+                clear_outer=False,
+                threshold=0.0001,
+            )
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        mesh = dup.data
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        sl = bm.faces.layers.int.new("_sector")
+        cut_angles = [a for a, _ in cut_planes]
+        mx = dup.matrix_world
+
+        for face in bm.faces:
+            cw = mx @ face.calc_center_median()
+            ang = math.atan2(cw[a1] - bbox_center[a1], cw[a0] - bbox_center[a0])
+            sector = n - 1
+            for i in range(n):
+                a_lo = cut_angles[i]
+                a_hi = cut_angles[(i + 1) % n]
+                if a_hi <= a_lo:
+                    a_hi += 2 * math.pi
+                a_test = ang
+                if a_test < a_lo:
+                    a_test += 2 * math.pi
+                if a_lo <= a_test < a_hi:
+                    sector = i
+                    break
+            face[sl] = sector
+
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()
+
+        base_name = re.sub(r'_\d+$', '', self._obj_name).split(".")[0]
+        col_name = base_name
+        seg_col = bpy.data.collections.get(col_name)
+        if seg_col is None:
+            seg_col = bpy.data.collections.new(col_name)
+        parent_col = next(
+            (c for c in bpy.data.collections if obj.name in c.objects),
+            context.scene.collection,
         )
+        if col_name not in [c.name for c in parent_col.children]:
+            parent_col.children.link(seg_col)
+
+        results = []
+        current = dup
+
+        for seg_idx in range(n - 1):
+            bpy.ops.object.select_all(action='DESELECT')
+            current.select_set(True)
+            context.view_layer.objects.active = current
+
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bm2 = bmesh.from_edit_mesh(current.data)
+            sl2 = bm2.faces.layers.int.get("_sector")
+            if sl2:
+                for face in bm2.faces:
+                    face.select = (face[sl2] == seg_idx)
+            bmesh.update_edit_mesh(current.data)
+            bpy.ops.mesh.separate(type='SELECTED')
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+            pieces = [o for o in context.selected_objects if o is not current and o.type == 'MESH']
+            for piece in pieces:
+                piece.name = f"{base_name}_seg{seg_idx+1:02d}"
+                if piece.data:
+                    piece.data.name = piece.name
+                for c in list(piece.users_collection):
+                    c.objects.unlink(piece)
+                seg_col.objects.link(piece)
+                results.append(piece)
+
+        current.name = f"{base_name}_seg{n:02d}"
+        if current.data:
+            current.data.name = current.name
+        for c in list(current.users_collection):
+            c.objects.unlink(current)
+        seg_col.objects.link(current)
+        results.append(current)
+
+        obj.hide_set(True)
+        bpy.ops.object.select_all(action='DESELECT')
+        for seg in results:
+            seg.select_set(True)
+        if results:
+            context.view_layer.objects.active = results[0]
+
         self.report({'INFO'}, f"Split into {len(results)} segment(s) → collection '{col_name}'")
         return {'FINISHED'}
 
 
 # ------------------------------------------------------------------
-# Fixed-N dialog operator (original radial split, unchanged)
+# Radial Split (Fixed Angle) — dialog operator
 
 class MESH_OT_radial_split(bpy.types.Operator):
     bl_idname = "mesh.radial_split"
-    bl_label = "Radial Split"
-    bl_description = "Split the selected mesh into N equal radial pie-slice segments around a chosen axis. Original is hidden (not deleted) so you can undo."
+    bl_label = "Radial Split (Fixed Angle)"
+    bl_description = "Split the selected mesh into N equal radial pie-slice segments around a chosen axis."
     bl_options = {'REGISTER', 'UNDO'}
 
     segments: bpy.props.IntProperty(
         name="Segments",
-        description="Number of radial segments to split into",
-        default=8,
-        min=2,
-        max=64,
+        default=8, min=2, max=64,
     )
-
     axis: bpy.props.EnumProperty(
         name="Axis",
-        description="Local axis to split around",
         items=[
             ('X', "X", "Split around local X axis"),
             ('Y', "Y", "Split around local Y axis"),
@@ -569,13 +510,9 @@ class MESH_OT_radial_split(bpy.types.Operator):
         ],
         default='Y',
     )
-
     offset_deg: bpy.props.FloatProperty(
         name="Angle Offset",
-        description="Rotate all cuts by this many degrees",
-        default=0.0,
-        min=-180.0,
-        max=180.0,
+        default=0.0, min=-180.0, max=180.0,
     )
 
     def invoke(self, context, event):
@@ -586,8 +523,6 @@ class MESH_OT_radial_split(bpy.types.Operator):
         layout.prop(self, "segments")
         layout.prop(self, "axis")
         layout.prop(self, "offset_deg")
-        layout.separator()
-        layout.operator("mesh.radial_split_auto", text="Auto-Detect Seams", icon='VIEWZOOM')
 
     def execute(self, context):
         original = context.active_object
@@ -599,16 +534,8 @@ class MESH_OT_radial_split(bpy.types.Operator):
         angle_step = (2 * math.pi) / n
         offset_rad = math.radians(self.offset_deg)
 
-        axis_map = {
-            'X': Vector((1, 0, 0)),
-            'Y': Vector((0, 1, 0)),
-            'Z': Vector((0, 0, 1)),
-        }
-        ref_map = {
-            'X': Vector((0, 1, 0)),
-            'Y': Vector((1, 0, 0)),
-            'Z': Vector((1, 0, 0)),
-        }
+        axis_map = {'X': Vector((1,0,0)), 'Y': Vector((0,1,0)), 'Z': Vector((0,0,1))}
+        ref_map  = {'X': Vector((0,1,0)), 'Y': Vector((1,0,0)), 'Z': Vector((1,0,0))}
         up  = axis_map[self.axis]
         ref = ref_map[self.axis]
 
@@ -619,7 +546,6 @@ class MESH_OT_radial_split(bpy.types.Operator):
             boundary_normals.append(rot @ ref)
 
         base_name = original.name.split(".")[0]
-
         col_name = base_name
         seg_collection = bpy.data.collections.get(col_name)
         if seg_collection is None:
@@ -632,7 +558,6 @@ class MESH_OT_radial_split(bpy.types.Operator):
             parent_col.children.link(seg_collection)
 
         results = []
-
         for seg in range(n):
             bpy.ops.object.select_all(action='DESELECT')
             original.select_set(True)
@@ -642,7 +567,6 @@ class MESH_OT_radial_split(bpy.types.Operator):
 
             n1 = boundary_normals[seg]
             n2 = boundary_normals[(seg + 1) % n]
-
             self._bisect(dup, n1, clear_inner=True,  clear_outer=False)
             self._bisect(dup, n2, clear_inner=False, clear_outer=True)
 
@@ -690,11 +614,12 @@ class MESH_OT_radial_split(bpy.types.Operator):
 # ------------------------------------------------------------------
 
 def menu_func(self, context):
-    self.layout.operator(MESH_OT_radial_split.bl_idname, icon='MOD_BOOLEAN')
+    self.layout.operator(MESH_OT_radial_split_seam.bl_idname, icon='VIEWZOOM')
+    self.layout.operator(MESH_OT_radial_split.bl_idname, icon='MOD_ARRAY')
 
 
 def register():
-    for cls in (MESH_OT_radial_split_auto, MESH_OT_radial_split):
+    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -715,7 +640,7 @@ def register():
 
 
 def unregister():
-    for cls in (MESH_OT_radial_split_auto, MESH_OT_radial_split):
+    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:

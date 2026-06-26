@@ -10,12 +10,13 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 
 1. [Blender Tools](#1-blender-tools)
    - [Export to Unity FBX](#11-export-to-unity-fbx)
-   - [Radial Split](#12-radial-split)
-   - [Concavity](#13-concavity)
-   - [Interactive Bisect](#14-interactive-bisect)
-   - [Hollow Mesh](#15-hollow-mesh)
-   - [Group to Collection](#16-group-to-collection)
-   - [Material & Texture Pipeline](#17-material--texture-pipeline)
+   - [Radial Split (Fixed Angle)](#12-radial-split-fixed-angle)
+   - [Radial Split (Seam Detect)](#13-radial-split-seam-detect)
+   - [Concavity](#14-concavity)
+   - [Interactive Bisect](#15-interactive-bisect)
+   - [Hollow Mesh](#16-hollow-mesh)
+   - [Group to Collection](#17-group-to-collection)
+   - [Material & Texture Pipeline](#18-material--texture-pipeline)
 2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
    - [Build & Run](#21-build--run)
    - [Actions Submenu](#22-actions-submenu)
@@ -84,9 +85,9 @@ If scale is not applied, the FBX exporter bakes the transform scale into the exp
 
 ---
 
-### 1.2 Radial Split
+### 1.2 Radial Split (Fixed Angle)
 
-**ShipBreaker sidebar → Radial Split** (or Object menu → Radial Split).
+**ShipBreaker sidebar → Radial Split (Fixed Angle)** (or Object menu → Radial Split (Fixed Angle)).
 
 Splits the selected mesh into N equal radial pie-slice segments around a chosen axis (X, Y, or Z). Each segment becomes a separate mesh object. The original mesh is hidden (not deleted). All segments are grouped into a collection named after the original object.
 
@@ -99,23 +100,21 @@ Splits the selected mesh into N equal radial pie-slice segments around a chosen 
 
 **Typical workflow for a cylindrical shell:**
 1. Model the full ring/cylinder
-2. Radial Split → 8 segments at 45° around the long axis
+2. Radial Split (Fixed Angle) → 8 segments at 45° around the long axis
 3. Keep the original (hidden) in the same collection — the CPW uses it as the visual/trigger mesh
 4. Export the collection — original + all segments end up in one FBX
 
 ---
 
-### 1.3 Concavity
+### 1.3 Radial Split (Seam Detect)
 
-**ShipBreaker sidebar → Concavity** (also accessible via Radial Split → Auto-Detect Seams)
+**ShipBreaker sidebar → Radial Split (Seam Detect)** (or Object menu → Radial Split (Seam Detect)).
 
-Automatically detects where large faces meet at concave angles and splits the mesh at those boundaries. Unlike Radial Split which requires a known segment count, Concavity reads the mesh geometry to find the split planes itself. Works for any polygon count — octagons, pentagons, irregular shapes.
-
-> **Note:** Concavity detection is also available inside the Radial Split dialog as "Auto-Detect Seams", which launches the same interactive mode directly.
+Interactive modal tool that auto-detects where large faces meet at concave angles and proposes split planes at those boundaries. Unlike Fixed Angle which requires a known segment count, Seam Detect reads the mesh geometry to find the split planes itself. Works for any polygon count — octagons, pentagons, irregular shapes.
 
 **How it works:**
-1. At invoke, the tool analyses the mesh: coplanar faces (within 2°) are merged into "super-faces", then adjacent super-face pairs are evaluated for area and angle
-2. Pairs where both faces exceed **Min Face** area, meet at an angle greater than the **Angle** threshold, and have similar areas (ratio < 2:1) are detected as seam boundaries
+1. At invoke, the tool analyses the mesh: coplanar faces (within 2°) are merged into groups, then adjacent group pairs are evaluated for area and angle
+2. Groups where both faces exceed **Min Face** area, meet at an angle greater than the **Angle** threshold, and have similar areas (ratio < 2:1) are detected as seam boundaries
 3. Yellow preview planes show where the cuts will be made
 4. On confirm, the mesh is duplicated, cut at all seam planes, and each angular sector is separated into its own named object in a collection
 
@@ -130,13 +129,13 @@ Automatically detects where large faces meet at concave angles and splits the me
 | Enter / Numpad Enter | Confirm and apply |
 | RMB / Esc | Cancel |
 
-**HUD:** `Concavity  |  Axis: Z  |  Min Face: 10.00 m²  |  Angle: 15.0°  |  Splits: 8  |  Fill: OFF`
+**HUD:** `Radial Split (Seam Detect)  |  Axis: Z  |  Min Face: 10.00 m²  |  Angle: 15.0°  |  Splits: 8  |  Fill: OFF`
 
 **Splits count** = number of detected seam boundaries = number of output segments.
 
-**Typical workflow for a ring-shaped part:**
+**Typical workflow for a polygon-shaped ring:**
 1. Model the full ring
-2. Run Concavity with Axis = Z (or whichever axis runs through the ring)
+2. Run Radial Split (Seam Detect) with Axis = Z (or whichever axis runs through the ring)
 3. Adjust Min Face up until only the corner seams between wall panels remain; adjust Angle as needed
 4. Press Enter — each wall panel becomes its own `_seg01..N` object in a collection
 5. Export the collection (original hidden + all segments)
@@ -145,7 +144,15 @@ Automatically detects where large faces meet at concave angles and splits the me
 
 ---
 
-### 1.4 Interactive Bisect
+### 1.4 Concavity
+
+**ShipBreaker sidebar → Concavity**
+
+Experimental interactive tool for visualising coplanar face groups on a mesh. Detects large coplanar face groups, draws colored outlines around each group, and labels them by group index. Used for researching more advanced segmentation approaches for complex/non-radial shapes.
+
+---
+
+### 1.5 Interactive Bisect
 
 **ShipBreaker sidebar → Interactive Bisect**
 
@@ -153,7 +160,7 @@ Modal operator for cutting a mesh with a single plane interactively. Drag to pos
 
 ---
 
-### 1.5 Hollow Mesh
+### 1.6 Hollow Mesh
 
 **ShipBreaker sidebar → Hollow Mesh**
 
@@ -161,7 +168,7 @@ Adds wall thickness to a flat or single-sided mesh by extruding faces inward. Us
 
 ---
 
-### 1.6 Group to Collection
+### 1.7 Group to Collection
 
 **ShipBreaker sidebar → Group to Collection**
 
@@ -169,7 +176,7 @@ Creates a new collection containing the selected objects, nested under their cur
 
 ---
 
-### 1.7 Material & Texture Pipeline
+### 1.8 Material & Texture Pipeline
 
 When you export from Blender, the script automatically copies textures and writes a sidecar JSON. On the Unity side, `CustomMeshPostprocessor` reads the sidecar and creates a correctly wired material automatically — no manual material setup needed.
 
@@ -374,7 +381,7 @@ Opens a wizard for creating new custom salvageable parts from your own meshes (F
 When a mesh is too complex or too hollow for a single convex collider (e.g. a ring, torus, or cylindrical shell), export it from Blender as a model with the original mesh plus radially-split segment objects, and use the **Model** field instead of (or alongside) **Mesh**.
 
 **Blender preparation:**
-1. Use **Radial Split** (for uniform N-segment rings) or **Concavity** (for polygon-shaped rings where the splits should align with face boundaries) to split the mesh into segments. Keep the original unsplit object in the same collection — do not hide or delete it.
+1. Use **Radial Split (Fixed Angle)** (for uniform N-segment rings) or **Radial Split (Seam Detect)** (for polygon-shaped rings where the splits should align with face boundaries) to split the mesh into segments. Keep the original unsplit object in the same collection — do not hide or delete it.
 2. Select the entire collection in the Outliner, then run **Object menu → Export Collection to Unity FBX**. This exports all mesh objects with Unity-correct axis and scale settings.
 3. Import the resulting FBX into `Assets/_CustomShips/<ShipName>/Models/`.
 
