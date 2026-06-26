@@ -203,7 +203,7 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
-        if event.type == 'Q' and event.value == 'PRESS':
+        if event.type == 'F' and event.value == 'PRESS':
             self._fill_cut = not self._fill_cut
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
@@ -260,7 +260,7 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         axis_name = ('X', 'Y', 'Z')[self._axis_idx]
         fill_str  = "ON" if self._fill_cut else "OFF"
         line1 = f"Interactive Bisect  |  Axis: {axis_name}  |  Cut: {self._cut_val:.4f} m  |  Fill cut face: {fill_str}"
-        line2 = "Drag=move plane  Scroll=fine  R=cycle axis  Q=toggle fill  Enter=confirm  RMB/Esc=cancel"
+        line2 = "Drag=move plane  Scroll=fine  R=cycle axis  F=toggle fill  Enter=confirm  RMB/Esc=cancel"
         font_id = 0
         blf.size(font_id, 14)
         blf.color(font_id, 1.0, 1.0, 1.0, 1.0)

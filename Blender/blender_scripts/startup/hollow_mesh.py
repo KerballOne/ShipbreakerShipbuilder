@@ -111,6 +111,7 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
         self._batch_cutter = None
         self._rebuild_cutter_batch()
 
+        self._fill_cut        = False
         self._dragging        = False
         self._drag_start_y    = event.mouse_region_y
         self._drag_start_wall = self._wall_thickness
@@ -147,6 +148,11 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
         if event.type == 'E' and event.value == 'PRESS':
             self._axis_overshoot += 0.01
             self._rebuild_cutter_batch()
+            context.area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'F' and event.value == 'PRESS':
+            self._fill_cut = not self._fill_cut
             context.area.tag_redraw()
             return {'RUNNING_MODAL'}
 
@@ -230,8 +236,9 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
 
     def _draw_hud(self, context):
         axis_name = ('X', 'Y', 'Z')[self._axis_idx]
-        line1 = f"Hollow Mesh  |  Open axis: {axis_name}  |  Thickness: {self._wall_thickness:.4f} m  |  Overshoot: {self._axis_overshoot:.4f} m"
-        line2 = "Drag=thickness  Scroll=fine  R=cycle axis  Q/E=overshoot  Enter=confirm  RMB/Esc=cancel"
+        fill_str  = "ON" if self._fill_cut else "OFF"
+        line1 = f"Hollow Mesh  |  Open axis: {axis_name}  |  Thickness: {self._wall_thickness:.4f} m  |  Overshoot: {self._axis_overshoot:.4f} m  |  Fill boundary: {fill_str}"
+        line2 = "Drag=thickness  Scroll=fine  R=cycle axis  Q/E=overshoot  F=toggle fill  Enter=confirm  RMB/Esc=cancel"
         font_id = 0
         blf.size(font_id, 14)
         blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
@@ -304,18 +311,61 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
 
         bpy.data.objects.remove(dup, do_unlink=True)
 
-        # Fill open boundary loops
+        # The EXACT boolean sometimes leaves the cutter geometry as a separate
+        # disconnected island inside the mesh. Delete any island that isn't the
+        # largest one (by face count) — that's always the leftover cutter.
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         context.view_layer.objects.active = obj
         bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='DESELECT')
+        bpy.ops.mesh.select_mode(type='FACE')
+
         bm = bmesh.from_edit_mesh(obj.data)
-        bm.edges.ensure_lookup_table()
-        boundary_edges = [e for e in bm.edges if e.is_boundary]
-        if boundary_edges:
-            bmesh.ops.contextual_create(bm, geom=boundary_edges)
-            bmesh.update_edit_mesh(obj.data)
+        bm.faces.ensure_lookup_table()
+
+        # Find all disconnected islands
+        visited = set()
+        islands = []
+        for face in bm.faces:
+            if face.index in visited:
+                continue
+            island = []
+            stack = [face]
+            while stack:
+                f = stack.pop()
+                if f.index in visited:
+                    continue
+                visited.add(f.index)
+                island.append(f)
+                for edge in f.edges:
+                    for linked in edge.link_faces:
+                        if linked.index not in visited:
+                            stack.append(linked)
+            islands.append(island)
+
+        if len(islands) > 1:
+            # Keep the largest island, delete all others
+            largest = max(islands, key=len)
+            del_faces = [f for isl in islands if isl is not largest for f in isl]
+            bmesh.ops.delete(bm, geom=del_faces, context='FACES')
+
+        bmesh.update_edit_mesh(obj.data)
         bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Optionally fill open boundary loops left by the boolean
+        if self._fill_cut:
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.edges.ensure_lookup_table()
+            boundary_edges = [e for e in bm.edges if e.is_boundary]
+            if boundary_edges:
+                bmesh.ops.contextual_create(bm, geom=boundary_edges)
+                bmesh.update_edit_mesh(obj.data)
+            bpy.ops.object.mode_set(mode='OBJECT')
 
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
