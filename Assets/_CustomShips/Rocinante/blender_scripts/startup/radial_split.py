@@ -3,6 +3,14 @@ import bmesh
 import math
 from mathutils import Vector, Matrix
 
+_LOG = r"C:\Users\user\AppData\Local\Temp\blender_reload.log"
+
+def _log(msg):
+    import datetime
+    with open(_LOG, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.datetime.now()}: [radial_split] {msg}\n")
+
+
 bl_info = {
     "name": "Radial Split",
     "author": "KerballOne",
@@ -169,9 +177,6 @@ def menu_func(self, context):
     self.layout.operator(MESH_OT_radial_split.bl_idname, icon='MOD_BOOLEAN')
 
 
-_NS_KEY = "radial_split_menu_func"
-
-
 def register():
     try:
         bpy.utils.unregister_class(MESH_OT_radial_split)
@@ -179,18 +184,21 @@ def register():
         pass
     bpy.utils.register_class(MESH_OT_radial_split)
 
-    # Remove all previously registered menu funcs for this operator (cleanup duplicates)
-    for fn in list(bpy.types.VIEW3D_MT_object._dyn_ui_initialize()):
-        if getattr(fn, '__name__', '') == 'menu_func':
-            co = getattr(fn, '__code__', None)
-            if co and 'radial_split' in getattr(co, 'co_filename', ''):
-                try:
-                    bpy.types.VIEW3D_MT_object.remove(fn)
-                except Exception:
-                    pass
+    # Remove any existing entries by checking operator idname in a temp layout
+    # Use a dummy draw call to find and remove stale menu_func entries
+    to_remove = [
+        fn for fn in bpy.types.VIEW3D_MT_object._dyn_ui_initialize()
+        if getattr(fn, '__func__', fn).__code__.co_filename.endswith('radial_split.py')
+    ] if hasattr(bpy.types.VIEW3D_MT_object, '_dyn_ui_initialize') else []
+    for fn in to_remove:
+        try:
+            bpy.types.VIEW3D_MT_object.remove(fn)
+            _log(f"register: removed stale entry {fn}")
+        except Exception as e:
+            _log(f"register: remove failed {e}")
 
     bpy.types.VIEW3D_MT_object.append(menu_func)
-    bpy.app.driver_namespace[_NS_KEY] = menu_func
+    _log(f"register: appended menu_func")
 
 
 def unregister():
@@ -198,12 +206,18 @@ def unregister():
         bpy.utils.unregister_class(MESH_OT_radial_split)
     except Exception:
         pass
-    old = bpy.app.driver_namespace.pop(_NS_KEY, None)
-    if old is not None:
+    to_remove = [
+        fn for fn in bpy.types.VIEW3D_MT_object._dyn_ui_initialize()
+        if getattr(fn, '__func__', fn).__code__.co_filename.endswith('radial_split.py')
+    ] if hasattr(bpy.types.VIEW3D_MT_object, '_dyn_ui_initialize') else []
+    _log(f"unregister: found {len(to_remove)} entries to remove")
+    for fn in to_remove:
         try:
-            bpy.types.VIEW3D_MT_object.remove(old)
-        except Exception:
-            pass
+            bpy.types.VIEW3D_MT_object.remove(fn)
+            _log(f"unregister: removed {fn}")
+        except Exception as e:
+            _log(f"unregister: remove FAILED: {e}")
 
 
-register()
+# Do NOT call register() here — Blender's startup loader calls it automatically
+# for scripts with bl_info. The reload script calls it explicitly after exec().

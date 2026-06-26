@@ -485,13 +485,56 @@ public class CustomPartWizard : EditorWindow
             }
             else
             {
-                // Single-mesh mode (unchanged)
+                // Single-mesh mode
                 if (m_Mesh != null)
                 {
                     var mf = root.GetComponent<MeshFilter>();
                     if (mf) mf.sharedMesh = m_Mesh;
-                    var mc = root.GetComponent<MeshCollider>();
-                    if (mc) mc.sharedMesh = m_Mesh;
+
+                    int subMeshCount = m_Mesh.subMeshCount;
+                    if (subMeshCount <= 1)
+                    {
+                        // Single submesh — one collider on root as before
+                        var mc = root.GetComponent<MeshCollider>();
+                        if (mc) mc.sharedMesh = m_Mesh;
+                    }
+                    else
+                    {
+                        // Multiple submeshes — remove root collider, create one child per submesh
+                        var rootMc = root.GetComponent<MeshCollider>();
+                        if (rootMc != null) DestroyImmediate(rootMc);
+
+                        // Load all submesh assets from the FBX
+                        var meshAssetPath = AssetDatabase.GetAssetPath(m_Mesh);
+                        var allAssets = AssetDatabase.LoadAllAssetsAtPath(meshAssetPath);
+
+                        for (int i = 0; i < subMeshCount; i++)
+                        {
+                            var colGO = new GameObject($"{m_PartName}_Col_{i:D2}");
+                            colGO.transform.SetParent(root.transform, false);
+                            var mc = colGO.AddComponent<MeshCollider>();
+                            mc.convex = true;
+
+                            // Find the matching submesh asset by index
+                            Mesh subMesh = null;
+                            foreach (var asset in allAssets)
+                            {
+                                if (asset is Mesh candidate && candidate != m_Mesh)
+                                {
+                                    // Submesh assets are named with index suffix or match seg naming
+                                    if (candidate.name.EndsWith($"_seg{i+1:D2}") ||
+                                        candidate.name.EndsWith($"{i+1:D2}") ||
+                                        candidate.name == $"{m_Mesh.name}_{i}")
+                                    {
+                                        subMesh = candidate;
+                                        break;
+                                    }
+                                }
+                            }
+                            // Fall back to main mesh — Unity uses submesh index via the collider
+                            mc.sharedMesh = subMesh != null ? subMesh : m_Mesh;
+                        }
+                    }
                 }
 
                 if (resolvedMaterial != null)
