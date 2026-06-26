@@ -491,49 +491,40 @@ public class CustomPartWizard : EditorWindow
                     var mf = root.GetComponent<MeshFilter>();
                     if (mf) mf.sharedMesh = m_Mesh;
 
-                    int subMeshCount = m_Mesh.subMeshCount;
-                    if (subMeshCount <= 1)
+                    // Look for segment meshes (_seg01, _seg02 etc.) as sub-assets of the same FBX
+                    var meshAssetPath = AssetDatabase.GetAssetPath(m_Mesh);
+                    var allFbxAssets  = AssetDatabase.LoadAllAssetsAtPath(meshAssetPath);
+                    var segMeshes     = new List<Mesh>();
+                    for (int i = 1; i <= 64; i++)
                     {
-                        // Single submesh — one collider on root as before
-                        var mc = root.GetComponent<MeshCollider>();
-                        if (mc) mc.sharedMesh = m_Mesh;
+                        var segSuffix = $"_seg{i:D2}";
+                        Mesh segMesh  = null;
+                        foreach (var asset in allFbxAssets)
+                            if (asset is Mesh m && m.name.EndsWith(segSuffix)) { segMesh = m; break; }
+                        if (segMesh == null) break;
+                        segMeshes.Add(segMesh);
                     }
-                    else
+
+                    if (segMeshes.Count > 0)
                     {
-                        // Multiple submeshes — remove root collider, create one child per submesh
+                        // Segment meshes found — remove root collider, create one child per segment
                         var rootMc = root.GetComponent<MeshCollider>();
                         if (rootMc != null) DestroyImmediate(rootMc);
 
-                        // Load all submesh assets from the FBX
-                        var meshAssetPath = AssetDatabase.GetAssetPath(m_Mesh);
-                        var allAssets = AssetDatabase.LoadAllAssetsAtPath(meshAssetPath);
-
-                        for (int i = 0; i < subMeshCount; i++)
+                        for (int i = 0; i < segMeshes.Count; i++)
                         {
                             var colGO = new GameObject($"{m_PartName}_Col_{i:D2}");
                             colGO.transform.SetParent(root.transform, false);
                             var mc = colGO.AddComponent<MeshCollider>();
-                            mc.convex = true;
-
-                            // Find the matching submesh asset by index
-                            Mesh subMesh = null;
-                            foreach (var asset in allAssets)
-                            {
-                                if (asset is Mesh candidate && candidate != m_Mesh)
-                                {
-                                    // Submesh assets are named with index suffix or match seg naming
-                                    if (candidate.name.EndsWith($"_seg{i+1:D2}") ||
-                                        candidate.name.EndsWith($"{i+1:D2}") ||
-                                        candidate.name == $"{m_Mesh.name}_{i}")
-                                    {
-                                        subMesh = candidate;
-                                        break;
-                                    }
-                                }
-                            }
-                            // Fall back to main mesh — Unity uses submesh index via the collider
-                            mc.sharedMesh = subMesh != null ? subMesh : m_Mesh;
+                            mc.convex     = true;
+                            mc.sharedMesh = segMeshes[i];
                         }
+                    }
+                    else
+                    {
+                        // No segments found — single collider on root
+                        var mc = root.GetComponent<MeshCollider>();
+                        if (mc) mc.sharedMesh = m_Mesh;
                     }
                 }
 
