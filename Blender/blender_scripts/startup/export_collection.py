@@ -219,7 +219,7 @@ class VIEW3D_PT_export_unity(bpy.types.Panel):
         layout.operator("object.group_selected", text="Group to Collection", icon='OUTLINER_COLLECTION')
         layout.separator()
         layout.operator("mesh.bisect_interactive", text="Interactive Bisect", icon='MOD_BOOLEAN')
-        layout.operator("mesh.concavity_split", text="Concavity Split", icon='MOD_MESHDEFORM')
+        layout.operator("mesh.concavity", text="Concavity", icon='MOD_MESHDEFORM')
         layout.operator("mesh.radial_split", text="Radial Split", icon='MOD_ARRAY')
         layout.operator("mesh.hollow_mesh", text="Hollow Mesh", icon='MOD_SOLIDIFY')
         layout.separator()
