@@ -197,12 +197,12 @@ public class CustomPartWizard : EditorWindow
             var visualMeshForInfo = m_Mesh ?? visualCandidate;
             string info = segCount > 0
                 ? $"Found {segCount} segment mesh(es) → {segCount} convex collider children."
-                : "No _seg meshes found — will use all meshes as colliders.";
+                : "No _seg meshes — single convex trigger collider on root.";
             if (visualMeshForInfo != null)
                 info += $" Visual/trigger mesh: {visualMeshForInfo.name}.";
             else
                 info += " No visual mesh found in FBX — assign one via the Mesh field below.";
-            EditorGUILayout.HelpBox(info, segCount > 0 ? MessageType.None : MessageType.Warning);
+            EditorGUILayout.HelpBox(info, MessageType.None);
         }
 
         EditorGUILayout.Space(2);
@@ -576,16 +576,15 @@ public class CustomPartWizard : EditorWindow
                     if (staleMC != null) DestroyImmediate(staleMC);
                 }
 
-                // Children: one convex collider per segment mesh
-                var meshList = segMeshes.Count > 0 ? segMeshes : new List<Mesh> { visualMesh };
-                for (int i = 0; i < meshList.Count; i++)
+                // Children: one convex collider per segment mesh (only when segments exist)
+                for (int i = 0; i < segMeshes.Count; i++)
                 {
-                    if (meshList[i] == null) continue;
+                    if (segMeshes[i] == null) continue;
                     var colGO     = new GameObject($"{m_PartName}_Col_{i:D2}");
                     colGO.transform.SetParent(root.transform, false);
                     var mc        = colGO.AddComponent<MeshCollider>();
                     mc.convex     = true;
-                    mc.sharedMesh = meshList[i];
+                    mc.sharedMesh = segMeshes[i];
                 }
             }
             else

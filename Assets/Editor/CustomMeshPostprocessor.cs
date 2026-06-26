@@ -37,18 +37,26 @@ public class CustomMeshPostprocessor : AssetPostprocessor
             AssetDatabase.CreateFolder(parent, leaf);
         }
 
-        // Mat is named after the Blender material, not the FBX — shared across all parts using the same texture set.
-        var matPath  = $"{matFolder}/{material.name}.mat";
+        // Mat is named after the texture set (sidecar key), not the Blender material name.
+        // This ensures all parts sharing the same texture atlas reuse one material.
+        var texFolder  = GetTextureFolder(assetPath);
+        var sidecar    = ReadSidecar(assetPath);
+        var texSetName = material.name; // fallback
+        System.Collections.Generic.Dictionary<string, string> texMap = null;
+        if (sidecar != null)
+            foreach (var kv in sidecar) { texSetName = kv.Key; texMap = kv.Value; break; }
+
+        var matPath  = $"{matFolder}/{texSetName}.mat";
         var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
         if (existing != null)
             return existing;
 
-        var newMat = new Material(shader) { name = material.name };
+        var newMat = new Material(shader) { name = texSetName };
         newMat.SetFloat("_SurfaceType", 0);
         newMat.SetFloat("_TransmissionEnable", 0);
         newMat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Geometry;
 
-        WireTextures(newMat, GetTextureFolder(assetPath), assetPath);
+        WireTextures(newMat, texFolder, assetPath);
 
         AssetDatabase.CreateAsset(newMat, matPath);
         return newMat;
