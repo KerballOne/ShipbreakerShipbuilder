@@ -54,6 +54,10 @@ public class CustomPartWizard : EditorWindow
     // ── Hierarchy mode (MeshCurveDeformer output) ─────────────────────────────
     GameObject m_SourceObject;         // parent GO; wizard discovers all child MeshFilters
 
+    // ── FBX submesh mode ──────────────────────────────────────────────────────
+    Object m_FbxSource;                // FBX asset; each submesh becomes a convex collider child
+    Mesh   m_VisualMesh;               // optional full hull mesh for MeshFilter+MeshRenderer on root
+
     // ── Material override ─────────────────────────────────────────────────────
     GameObject m_MaterialSourceObject; // copy material FROM this scene GO's MeshRenderer
 
@@ -158,8 +162,49 @@ public class CustomPartWizard : EditorWindow
         EditorGUILayout.LabelField("Mesh & Material", EditorStyles.boldLabel);
         EditorGUILayout.Separator();
 
-        // Mesh — mutually exclusive with Copy Mesh From.
-        // Always clear the other field when either is assigned; never rely on change detection.
+        // FBX/model mode — each mesh in the file → separate convex collider child GO
+        // Can be combined with Mesh (which provides the root visual + trigger collider)
+        var newFbxGO = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Model",
+                "Drag an FBX model asset here (not a scene object). Each mesh in the file becomes a " +
+                "separate convex MeshCollider child. Combine with the Mesh field to set the root visual mesh."),
+            m_FbxSource as GameObject, typeof(GameObject), false);
+        var newFbx = newFbxGO as Object;
+        if (newFbx != m_FbxSource)
+        {
+            m_FbxSource = newFbx;
+            if (m_FbxSource != null) m_SourceObject = null;
+        }
+
+        if (m_FbxSource != null)
+        {
+            var fbxPath  = AssetDatabase.GetAssetPath(m_FbxSource);
+            var fbxSubs  = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
+            int segCount = 0;
+            Mesh visualCandidate = null;
+            foreach (var a in fbxSubs)
+            {
+                if (!(a is Mesh fm)) continue;
+                if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
+                    segCount++;
+                else if (visualCandidate == null)
+                    visualCandidate = fm;
+            }
+            var visualMeshForInfo = m_Mesh ?? visualCandidate;
+            string info = segCount > 0
+                ? $"Found {segCount} segment mesh(es) → {segCount} convex collider children."
+                : "No _seg meshes found — will use all meshes as colliders.";
+            if (visualMeshForInfo != null)
+                info += $" Visual/trigger mesh: {visualMeshForInfo.name}.";
+            else
+                info += " No visual mesh found in FBX — assign one via the Mesh field below.";
+            EditorGUILayout.HelpBox(info, segCount > 0 ? MessageType.None : MessageType.Warning);
+        }
+
+        EditorGUILayout.Space(2);
+
+        // Mesh — root visual + trigger collider. Mutually exclusive with Copy Mesh From.
+        // Can be combined with Model to add convex collider children.
         m_Mesh = (Mesh)EditorGUILayout.ObjectField("Mesh", m_Mesh, typeof(Mesh), false);
         if (m_Mesh != null) m_SourceObject = null;
 
@@ -173,14 +218,14 @@ public class CustomPartWizard : EditorWindow
 
         var newSourceObject = (GameObject)EditorGUILayout.ObjectField(
             new GUIContent("Copy Mesh From",
-                "Drag a parent GameObject to include all its child meshes as a single part. Clears the Mesh field above."),
+                "Drag a parent GameObject to include all its child meshes as a single part. Clears Model and Mesh."),
             m_SourceObject, typeof(GameObject), true);
         if (newSourceObject != m_SourceObject)
         {
             m_SourceObject = newSourceObject;
             EditorPrefs.SetInt(PrefSourceObjectID, m_SourceObject != null ? m_SourceObject.GetInstanceID() : 0);
         }
-        if (m_SourceObject != null) m_Mesh = null;
+        if (m_SourceObject != null) { m_Mesh = null; m_FbxSource = null; }
 
         if (m_SourceObject != null)
         {
@@ -332,15 +377,23 @@ public class CustomPartWizard : EditorWindow
         if (!File.Exists(Path.GetFullPath(templatePath)))
             return $"Template prefab not found at:\n{templatePath}";
 
-        // Mesh vs hierarchy exclusivity
-        if (m_Mesh != null && m_SourceObject != null)
-            return "Set either a Mesh or a Source Object, not both.";
+        // Mesh source exclusivity
+        int meshSources = (m_Mesh != null ? 1 : 0) + (m_SourceObject != null ? 1 : 0) + (m_FbxSource != null ? 1 : 0);
+        if (meshSources > 1)
+            return "Set only one of: Mesh, Copy Mesh From, or Model.";
         if (m_SourceObject != null)
         {
             var mfs = m_SourceObject.GetComponentsInChildren<MeshFilter>(true);
             bool anyMesh = false;
             foreach (var mf in mfs) if (mf.sharedMesh != null) { anyMesh = true; break; }
             if (!anyMesh) return "Source Object has no MeshFilter components with meshes.";
+        }
+        if (m_FbxSource != null)
+        {
+            var fbxSubs = AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GetAssetPath(m_FbxSource));
+            bool anyMesh = false;
+            foreach (var a in fbxSubs) if (a is Mesh) { anyMesh = true; break; }
+            if (!anyMesh) return "Model has no meshes.";
         }
 
         // Material source object validation
@@ -483,6 +536,59 @@ public class CustomPartWizard : EditorWindow
                 foreach (Transform srcChild in m_SourceObject.transform)
                     CopyNodeIntoPrefab(srcChild, root.transform, resolvedMaterial, rootLoaderForChildren);
             }
+            else if (m_FbxSource != null)
+            {
+                // FBX model mode — split into root visual + convex collider children
+                var fbxPath    = AssetDatabase.GetAssetPath(m_FbxSource);
+                var fbxSubs    = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
+                Mesh visualMesh = m_Mesh; // user-supplied override takes priority
+                var segMeshes  = new List<Mesh>();
+                foreach (var a in fbxSubs)
+                {
+                    if (!(a is Mesh fm)) continue;
+                    // Mesh whose name ends with _segNN → convex collider child
+                    if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
+                        segMeshes.Add(fm);
+                    else if (visualMesh == null)
+                        visualMesh = fm; // first non-seg mesh is the visual/trigger hull
+                }
+
+                // Root: MeshFilter + MeshRenderer (visual) + trigger MeshCollider (hull detection)
+                if (visualMesh != null)
+                {
+                    var rootMF = root.GetComponent<MeshFilter>()  ?? root.AddComponent<MeshFilter>();
+                    var rootMR = root.GetComponent<MeshRenderer>() ?? root.AddComponent<MeshRenderer>();
+                    var rootMC = root.GetComponent<MeshCollider>() ?? root.AddComponent<MeshCollider>();
+                    rootMF.sharedMesh  = visualMesh;
+                    rootMC.sharedMesh  = visualMesh;
+                    rootMC.convex      = false;
+                    rootMC.isTrigger   = true;
+                    if (resolvedMaterial != null)
+                        rootMR.sharedMaterials = new[] { resolvedMaterial };
+                }
+                else
+                {
+                    // No visual mesh found — strip mesh components
+                    var staleMF = root.GetComponent<MeshFilter>();
+                    var staleMR = root.GetComponent<MeshRenderer>();
+                    var staleMC = root.GetComponent<MeshCollider>();
+                    if (staleMF != null) DestroyImmediate(staleMF);
+                    if (staleMR != null) DestroyImmediate(staleMR);
+                    if (staleMC != null) DestroyImmediate(staleMC);
+                }
+
+                // Children: one convex collider per segment mesh
+                var meshList = segMeshes.Count > 0 ? segMeshes : new List<Mesh> { visualMesh };
+                for (int i = 0; i < meshList.Count; i++)
+                {
+                    if (meshList[i] == null) continue;
+                    var colGO     = new GameObject($"{m_PartName}_Col_{i:D2}");
+                    colGO.transform.SetParent(root.transform, false);
+                    var mc        = colGO.AddComponent<MeshCollider>();
+                    mc.convex     = true;
+                    mc.sharedMesh = meshList[i];
+                }
+            }
             else
             {
                 // Single-mesh mode
@@ -491,41 +597,8 @@ public class CustomPartWizard : EditorWindow
                     var mf = root.GetComponent<MeshFilter>();
                     if (mf) mf.sharedMesh = m_Mesh;
 
-                    // Look for segment meshes (_seg01, _seg02 etc.) as sub-assets of the same FBX
-                    var meshAssetPath = AssetDatabase.GetAssetPath(m_Mesh);
-                    var allFbxAssets  = AssetDatabase.LoadAllAssetsAtPath(meshAssetPath);
-                    var segMeshes     = new List<Mesh>();
-                    for (int i = 1; i <= 64; i++)
-                    {
-                        var segSuffix = $"_seg{i:D2}";
-                        Mesh segMesh  = null;
-                        foreach (var asset in allFbxAssets)
-                            if (asset is Mesh m && m.name.EndsWith(segSuffix)) { segMesh = m; break; }
-                        if (segMesh == null) break;
-                        segMeshes.Add(segMesh);
-                    }
-
-                    if (segMeshes.Count > 0)
-                    {
-                        // Segment meshes found — remove root collider, create one child per segment
-                        var rootMc = root.GetComponent<MeshCollider>();
-                        if (rootMc != null) DestroyImmediate(rootMc);
-
-                        for (int i = 0; i < segMeshes.Count; i++)
-                        {
-                            var colGO = new GameObject($"{m_PartName}_Col_{i:D2}");
-                            colGO.transform.SetParent(root.transform, false);
-                            var mc = colGO.AddComponent<MeshCollider>();
-                            mc.convex     = true;
-                            mc.sharedMesh = segMeshes[i];
-                        }
-                    }
-                    else
-                    {
-                        // No segments found — single collider on root
-                        var mc = root.GetComponent<MeshCollider>();
-                        if (mc) mc.sharedMesh = m_Mesh;
-                    }
+                    var mc = root.GetComponent<MeshCollider>();
+                    if (mc) mc.sharedMesh = m_Mesh;
                 }
 
                 if (resolvedMaterial != null)
