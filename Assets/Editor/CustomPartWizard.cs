@@ -195,7 +195,7 @@ public class CustomPartWizard : EditorWindow
                     visualCandidate = fm;
             }
             string info = segCount > 0
-                ? $"Found {segCount} segment mesh(es) → {segCount} self-contained child GOs (MeshFilter + MeshRenderer + MeshCollider + SP + EBC). Root is container only."
+                ? $"Found {segCount} submesh(es)."
                 : "No _seg meshes — single convex collider on root.";
             EditorGUILayout.HelpBox(info, MessageType.None);
         }
@@ -546,6 +546,14 @@ public class CustomPartWizard : EditorWindow
                         segMeshes.Add(fm);
                 }
 
+                // Ensure Read/Write is enabled on the FBX — game reads mesh vertices for volume/mass
+                var modelImporter = AssetImporter.GetAtPath(fbxPath) as ModelImporter;
+                if (modelImporter != null && !modelImporter.isReadable)
+                {
+                    modelImporter.isReadable = true;
+                    modelImporter.SaveAndReimport();
+                }
+
                 // Read GUIDs from template loader before stripping (override takes priority)
                 string spGuid2 = !string.IsNullOrEmpty(m_SpMatOverrideGuid) ? m_SpMatOverrideGuid : null;
                 string bpGuid2 = !string.IsNullOrEmpty(m_BpOverrideGuid)    ? m_BpOverrideGuid    : null;
@@ -583,7 +591,7 @@ public class CustomPartWizard : EditorWindow
                 for (int i = 0; i < segMeshes.Count; i++)
                 {
                     if (segMeshes[i] == null) continue;
-                    var segGO = new GameObject($"{m_PartName}_Col_{i:D2}");
+                    var segGO = new GameObject($"{m_PartName}_{i:D2}");
                     segGO.transform.SetParent(root.transform, false);
 
                     var mf        = segGO.AddComponent<MeshFilter>();

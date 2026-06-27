@@ -149,7 +149,7 @@ class MESH_OT_radial_split_seam(bpy.types.Operator):
 
         self._min_face_area = 10.0
         self._angle_deg     = 15.0
-        self._fill_cut      = False
+        self._fill_cut      = True
         self._axis_idx      = 2
 
         self._candidates = _analyse_mesh(obj)
@@ -393,7 +393,7 @@ class MESH_OT_radial_split_seam(bpy.types.Operator):
             bpy.ops.mesh.bisect(
                 plane_co=local_co,
                 plane_no=pn,
-                use_fill=self._fill_cut,
+                use_fill=False,
                 clear_inner=False,
                 clear_outer=False,
                 threshold=0.0001,
@@ -476,6 +476,21 @@ class MESH_OT_radial_split_seam(bpy.types.Operator):
             c.objects.unlink(current)
         seg_col.objects.link(current)
         results.append(current)
+
+        if self._fill_cut:
+            for seg in results:
+                bm3 = bmesh.new()
+                bm3.from_mesh(seg.data)
+                bm3.edges.ensure_lookup_table()
+                boundary = [e for e in bm3.edges if e.is_boundary]
+                if boundary:
+                    bmesh.ops.holes_fill(bm3, edges=boundary, sides=0)
+                bmesh.ops.recalc_face_normals(bm3, faces=bm3.faces)
+                bm3.to_mesh(seg.data)
+                bm3.free()
+                seg.data.update()
+                seg.update_tag()
+            context.view_layer.update()
 
         obj.hide_set(True)
         bpy.ops.object.select_all(action='DESELECT')
@@ -581,6 +596,18 @@ class MESH_OT_radial_split(bpy.types.Operator):
             else:
                 bpy.data.objects.remove(dup, do_unlink=True)
 
+        for seg in results:
+            bm = bmesh.new()
+            bm.from_mesh(seg.data)
+            bm.edges.ensure_lookup_table()
+            boundary = [e for e in bm.edges if e.is_boundary]
+            if boundary:
+                bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            bm.to_mesh(seg.data)
+            bm.free()
+            seg.data.update()
+
         original.hide_set(True)
         bpy.ops.object.select_all(action='DESELECT')
         for o in results:
@@ -600,7 +627,7 @@ class MESH_OT_radial_split(bpy.types.Operator):
         bpy.ops.mesh.bisect(
             plane_co=(0.0, 0.0, 0.0),
             plane_no=normal,
-            use_fill=True,
+            use_fill=False,
             clear_inner=clear_inner,
             clear_outer=clear_outer,
             threshold=0.0001,

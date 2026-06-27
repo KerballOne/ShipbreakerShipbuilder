@@ -5,17 +5,28 @@ import json
 
 _PREFS_FILE = os.path.join(os.path.dirname(__file__), "export_collection_prefs.json")
 
-def _get_last_dir():
+def _get_last_dir(name=None):
     try:
         with open(_PREFS_FILE, 'r') as f:
-            return json.load(f).get("last_dir")
+            data = json.load(f)
+        if name and name in data.get("last_dirs", {}):
+            return data["last_dirs"][name]
+        return data.get("last_dir")
     except Exception:
         return None
 
-def _set_last_dir(path):
+def _set_last_dir(path, name=None):
     try:
+        try:
+            with open(_PREFS_FILE, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data["last_dir"] = path
+        if name:
+            data.setdefault("last_dirs", {})[name] = path
         with open(_PREFS_FILE, 'w') as f:
-            json.dump({"last_dir": path}, f)
+            json.dump(data, f)
     except Exception:
         pass
 
@@ -93,7 +104,7 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
             return {'CANCELLED'}
 
         self.export_name = name
-        directory = _get_last_dir() or (os.path.dirname(bpy.data.filepath) if bpy.data.filepath else os.path.expanduser("~"))
+        directory = _get_last_dir(name) or (os.path.dirname(bpy.data.filepath) if bpy.data.filepath else os.path.expanduser("~"))
         self.filepath = os.path.join(directory, name + ".fbx")
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
@@ -109,7 +120,8 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
             return {'CANCELLED'}
 
         # Select only the meshes we want to export
-        bpy.ops.object.select_all(action='DESELECT')
+        for obj in bpy.context.scene.objects:
+            obj.select_set(False)
         for obj in meshes:
             obj.select_set(True)
 
@@ -128,7 +140,7 @@ class EXPORT_OT_collection_unity_fbx(bpy.types.Operator):
             use_mesh_modifiers  = True,
         )
 
-        _set_last_dir(os.path.dirname(self.filepath))
+        _set_last_dir(os.path.dirname(self.filepath), self.export_name)
 
         copied = self._copy_textures(meshes, self.filepath)
         msg = f"Exported {len(meshes)} mesh(es) to {self.filepath}"
