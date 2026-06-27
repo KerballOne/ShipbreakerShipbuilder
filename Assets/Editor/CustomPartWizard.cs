@@ -189,19 +189,14 @@ public class CustomPartWizard : EditorWindow
             foreach (var a in fbxSubs)
             {
                 if (!(a is Mesh fm)) continue;
-                if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
+                if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+"))
                     segCount++;
                 else if (visualCandidate == null)
                     visualCandidate = fm;
             }
-            var visualMeshForInfo = m_Mesh ?? visualCandidate;
             string info = segCount > 0
-                ? $"Found {segCount} segment mesh(es) → {segCount} convex collider children."
-                : "No _seg meshes — single convex trigger collider on root.";
-            if (visualMeshForInfo != null)
-                info += $" Visual/trigger mesh: {visualMeshForInfo.name}.";
-            else
-                info += " No visual mesh found in FBX — assign one via the Mesh field below.";
+                ? $"Found {segCount} segment mesh(es) → {segCount} self-contained child GOs (MeshFilter + MeshRenderer + MeshCollider + SP + EBC). Root is container only."
+                : "No _seg meshes — single convex collider on root.";
             EditorGUILayout.HelpBox(info, MessageType.None);
         }
 
@@ -209,8 +204,10 @@ public class CustomPartWizard : EditorWindow
 
         // Mesh — root visual + trigger collider. Mutually exclusive with Copy Mesh From.
         // Can be combined with Model to add convex collider children.
-        m_Mesh = (Mesh)EditorGUILayout.ObjectField("Mesh", m_Mesh, typeof(Mesh), false);
-        if (m_Mesh != null) m_SourceObject = null;
+        var meshLabel = m_FbxSource != null ? "Single Mesh" : "Mesh";
+        m_Mesh = (Mesh)EditorGUILayout.ObjectField(meshLabel, m_Mesh, typeof(Mesh), false);
+        if (m_FbxSource != null) m_Mesh = null;
+        else if (m_Mesh != null) m_SourceObject = null;
 
 
         var newSourceObject = (GameObject)EditorGUILayout.ObjectField(
@@ -537,54 +534,107 @@ public class CustomPartWizard : EditorWindow
             }
             else if (m_FbxSource != null)
             {
-                // FBX model mode — split into root visual + convex collider children
-                var fbxPath    = AssetDatabase.GetAssetPath(m_FbxSource);
-                var fbxSubs    = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
-                Mesh visualMesh = m_Mesh; // user-supplied override takes priority
-                var segMeshes  = new List<Mesh>();
+                // FBX model mode — each _seg mesh becomes a fully self-contained child GO
+                // (MeshFilter + MeshRenderer + MeshCollider + SP + EBC) so demo charges,
+                // cutting, and salvage all work. Root is a container only (no mesh/collider).
+                var fbxPath   = AssetDatabase.GetAssetPath(m_FbxSource);
+                var fbxSubs   = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
+                var segMeshes = new List<Mesh>();
                 foreach (var a in fbxSubs)
                 {
-                    if (!(a is Mesh fm)) continue;
-                    // Mesh whose name ends with _segNN → convex collider child
-                    if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
+                    if (a is Mesh fm && System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+"))
                         segMeshes.Add(fm);
-                    else if (visualMesh == null)
-                        visualMesh = fm; // first non-seg mesh is the visual/trigger hull
                 }
 
-                // Root: MeshFilter + MeshRenderer (visual) + trigger MeshCollider (hull detection)
-                if (visualMesh != null)
+                // Read GUIDs from template loader before stripping (override takes priority)
+                string spGuid2 = !string.IsNullOrEmpty(m_SpMatOverrideGuid) ? m_SpMatOverrideGuid : null;
+                string bpGuid2 = !string.IsNullOrEmpty(m_BpOverrideGuid)    ? m_BpOverrideGuid    : null;
+                if (spGuid2 == null || bpGuid2 == null)
                 {
-                    var rootMF = root.GetComponent<MeshFilter>()  ?? root.AddComponent<MeshFilter>();
-                    var rootMR = root.GetComponent<MeshRenderer>() ?? root.AddComponent<MeshRenderer>();
-                    var rootMC = root.GetComponent<MeshCollider>() ?? root.AddComponent<MeshCollider>();
-                    rootMF.sharedMesh  = visualMesh;
-                    rootMC.sharedMesh  = visualMesh;
-                    rootMC.convex      = true;
-                    rootMC.isTrigger   = true;
-                    if (resolvedMaterial != null)
-                        rootMR.sharedMaterials = new[] { resolvedMaterial };
+                    var existingLoader = FindLoaderMonoBehaviour(root);
+                    if (existingLoader != null)
+                    {
+                        var lso   = new SerializedObject(existingLoader);
+                        var refs  = lso.FindProperty("refs");
+                        var addrs = lso.FindProperty("addresses");
+                        if (refs != null && refs.isArray && refs.arraySize >= 2)
+                        {
+                            if (spGuid2 == null) spGuid2 = refs.GetArrayElementAtIndex(0).stringValue;
+                            if (bpGuid2 == null) bpGuid2 = refs.GetArrayElementAtIndex(1).stringValue;
+                        }
+                        else if (addrs != null && addrs.isArray && addrs.arraySize >= 2)
+                        {
+                            if (spGuid2 == null) spGuid2 = addrs.GetArrayElementAtIndex(0).stringValue;
+                            if (bpGuid2 == null) bpGuid2 = addrs.GetArrayElementAtIndex(1).stringValue;
+                        }
+                    }
                 }
-                else
-                {
-                    // No visual mesh found — strip mesh components
-                    var staleMF = root.GetComponent<MeshFilter>();
-                    var staleMR = root.GetComponent<MeshRenderer>();
-                    var staleMC = root.GetComponent<MeshCollider>();
-                    if (staleMF != null) DestroyImmediate(staleMF);
-                    if (staleMR != null) DestroyImmediate(staleMR);
-                    if (staleMC != null) DestroyImmediate(staleMC);
-                }
+                Debug.Log($"[CPW] segmented GUIDs: sp={spGuid2} bp={bpGuid2}");
 
-                // Children: one convex collider per segment mesh (only when segments exist)
+                // Root: strip everything, then add a fresh ACL — root is a container only
+                foreach (var comp in root.GetComponents<Component>())
+                {
+                    if (comp is Transform) continue;
+                    DestroyImmediate(comp);
+                }
+                var rootLoaderMB = root.AddComponent<AddressableComponentLoader>();
+
+                // Children: each segment = full self-contained salvageable GO
                 for (int i = 0; i < segMeshes.Count; i++)
                 {
                     if (segMeshes[i] == null) continue;
-                    var colGO     = new GameObject($"{m_PartName}_Col_{i:D2}");
-                    colGO.transform.SetParent(root.transform, false);
-                    var mc        = colGO.AddComponent<MeshCollider>();
+                    var segGO = new GameObject($"{m_PartName}_Col_{i:D2}");
+                    segGO.transform.SetParent(root.transform, false);
+
+                    var mf        = segGO.AddComponent<MeshFilter>();
+                    mf.sharedMesh = segMeshes[i];
+
+                    var mr = segGO.AddComponent<MeshRenderer>();
+                    if (resolvedMaterial != null)
+                        mr.sharedMaterials = new[] { resolvedMaterial };
+
+                    var mc        = segGO.AddComponent<MeshCollider>();
                     mc.convex     = true;
                     mc.sharedMesh = segMeshes[i];
+
+                    segGO.AddComponent(typeof(BBI.Unity.Game.StructurePart));
+                    var ebc = segGO.AddComponent(typeof(BBI.Unity.Game.EntityBlueprintComponent)) as MonoBehaviour;
+                    // AutoInitialize must be true so the game wires the blueprint at runtime via ACL
+                    if (ebc != null)
+                    {
+                        var ebcSO = new SerializedObject(ebc);
+                        var autoProp = ebcSO.FindProperty("m_AutoInitialize");
+                        if (autoProp != null) { autoProp.boolValue = true; ebcSO.ApplyModifiedPropertiesWithoutUndo(); }
+                    }
+                }
+
+                // Add MandatoryJointContainer on root so joints work correctly
+                root.AddComponent<BBI.Unity.Game.MandatoryJointContainer>();
+
+                // Auto-register all child SP+EBC into the root ACL
+                Debug.Log($"[CPW] segmented ACL populate: rootLoader={rootLoaderMB != null}, segCount={segMeshes.Count}, spGuid={spGuid2}, bpGuid={bpGuid2}");
+
+                if (rootLoaderMB != null && segMeshes.Count > 0)
+                {
+                    int added = 0;
+                    foreach (Transform child in root.transform)
+                    {
+                        var sp = child.GetComponent<BBI.Unity.Game.StructurePart>();
+                        var eb = child.GetComponent<BBI.Unity.Game.EntityBlueprintComponent>();
+                        Debug.Log($"[CPW]   child={child.name} sp={sp != null} eb={eb != null}");
+                        if (sp != null && spGuid2 != null)
+                        {
+                            rootLoaderMB.componentValues.Add(new AddressableComponentValue { component = sp, field = "m_StructurePartAsset", address = spGuid2 });
+                            added++;
+                        }
+                        if (eb != null && bpGuid2 != null)
+                        {
+                            rootLoaderMB.componentValues.Add(new AddressableComponentValue { component = eb, field = "m_BlueprintAsset", address = bpGuid2 });
+                            added++;
+                        }
+                    }
+                    Debug.Log($"[CPW] added {added} ACL entries, componentValues.Count={rootLoaderMB.componentValues.Count}");
+                    EditorUtility.SetDirty(rootLoaderMB);
                 }
             }
             else
@@ -815,12 +865,8 @@ public class CustomPartWizard : EditorWindow
 
     void AutoPopulateFromFbx(string fbxAssetPath)
     {
-        // Auto-populate Mesh with the detected visual mesh (first non-seg mesh)
-        foreach (var a in AssetDatabase.LoadAllAssetsAtPath(fbxAssetPath))
-        {
-            if (a is Mesh fm && !System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+$"))
-                m_Mesh = fm;
-        }
+        // Clear any previously auto-set mesh — segments are self-rendering, no separate root mesh needed
+        m_Mesh = null;
 
         // Get material name from sidecar — FBX uses external materials so no Material subasset exists
         var sidecar = CustomMeshPostprocessor.ReadSidecar(fbxAssetPath);
