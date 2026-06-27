@@ -16,7 +16,8 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
    - [Interactive Bisect](#15-interactive-bisect)
    - [Hollow Mesh](#16-hollow-mesh)
    - [Group to Collection](#17-group-to-collection)
-   - [Material & Texture Pipeline](#18-material--texture-pipeline)
+   - [Fix Normals](#18-fix-normals)
+   - [Material & Texture Pipeline](#19-material--texture-pipeline)
 2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
    - [Build & Run](#21-build--run)
    - [Actions Submenu](#22-actions-submenu)
@@ -60,15 +61,13 @@ The Blender scripts live in `Blender/blender_scripts/startup/` and are registere
 
 ### 1.1 Export to Unity FBX
 
-**Two ways to trigger it:**
-- **N-panel sidebar:** Press **N** in the 3D viewport → **Export** tab. Shows what will be exported before you click.
-- **Outliner right-click:** Right-click any object or collection row in the Outliner → **Export to Unity FBX**.
+**Trigger:** N-panel sidebar → **ShipBreaker** tab → **Export to Unity FBX**. (The Outliner right-click option has been removed — it was unreliable about which object it targeted.)
+
+**Sidebar label** shows the active object when objects are selected, or the active collection name when nothing is selected — use this to confirm what will be exported before clicking.
 
 **Export source — priority order:**
 1. **Selected objects** (and their mesh children recursively) — click an object in the Outliner or viewport to select it; child meshes are automatically included
 2. **Active layer collection** — if nothing is selected, uses whichever collection is highlighted blue in the Outliner
-
-The N-panel label shows `Name (N meshes)` so you can confirm what will be exported before clicking.
 
 **What it does:**
 - Exports all mesh objects to an FBX with Unity-correct settings: `axis_forward=Y`, `axis_up=Z`, `apply_scale_options=FBX_SCALE_ALL`, `bake_space_transform=True`
@@ -81,7 +80,7 @@ The N-panel label shows `Name (N meshes)` so you can confirm what will be export
 
 If scale is not applied, the FBX exporter bakes the transform scale into the export and the geometry arrives in Unity at the wrong size.
 
-**Remembers the last export directory** for the session (persists across script reloads via `bpy.app.driver_namespace`, cleared on Blender restart).
+**Remembers the last export directory** across Blender restarts (saved to `export_collection_prefs.json` next to the script).
 
 ---
 
@@ -176,7 +175,48 @@ Creates a new collection containing the selected objects, nested under their cur
 
 ---
 
-### 1.8 Material & Texture Pipeline
+### 1.8 Fix Normals
+
+**ShipBreaker sidebar → Fix Normals panel**
+
+Tools for detecting and correcting face normal problems on imported or modelled meshes. Located in the **Fix Normals** sub-panel in the ShipBreaker N-panel tab.
+
+#### Check Mesh
+
+Analyses all selected objects and reports per-object: total face count, non-manifold edge count, and thin face count. After running, thin faces (faces on open/single-thickness surfaces) are selected across all objects and Edit Mode opens in Face Select so you can see them highlighted in orange.
+
+**What "thin faces" means:** A face whose edges are only shared by one face (non-manifold boundary edges). These are surfaces with no thickness — flipping their normal just moves the problem to the other side. They need Solidify before normals can be fixed.
+
+#### Solidify
+
+Adds thickness to all selected mesh objects using Blender's Solidify modifier, then applies it. Opens a dialog to set the **Thickness** in metres before applying.
+
+- Grows inward (`offset = -1`) so the outer surface stays in place
+- Use this when Check Mesh reports NEEDS SOLIDIFY
+- **Thickness affects in-game mass** — the game uses mesh volume for mass calculation, so adjust thickness intentionally
+
+**Workflow for game-exported ring meshes (e.g. reactor housing segments):**
+1. Select all segments
+2. **Check Mesh** — confirm they need solidify
+3. **Solidify** — set thickness to suit gameplay/mass requirements
+4. After solidify, run **Mesh → Normals → Recalculate Outside** (Alt+N in Edit Mode) — all faces should turn blue
+5. Export to Unity FBX
+
+#### Fix Inner Normals
+
+Experimental raycast-based tool for flipping inward-facing normals on ring-segment meshes. For game-exported meshes, use the **Solidify → Recalculate** workflow above instead — it is more reliable. Fix Inner Normals is intended for meshes that are already solid (have wall thickness) but have inconsistent normals.
+
+**Settings:**
+- **Ring Axis** — the axis the ring runs along (Z/Y/X)
+- **Show Debug Rays** — draws 3 yellow ray lines in the viewport instead of flipping, for diagnosing raycast behaviour
+
+#### Clear Debug Rays
+
+Clears the yellow debug ray lines from the viewport.
+
+---
+
+### 1.9 Material & Texture Pipeline
 
 When you export from Blender, the script automatically copies textures and writes a sidecar JSON. On the Unity side, `CustomMeshPostprocessor` reads the sidecar and creates a correctly wired material automatically — no manual material setup needed.
 

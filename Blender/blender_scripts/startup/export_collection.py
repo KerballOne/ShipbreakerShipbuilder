@@ -3,13 +3,21 @@ import os
 import shutil
 import json
 
-_PREFS_KEY = "export_collection_last_dir"
+_PREFS_FILE = os.path.join(os.path.dirname(__file__), "export_collection_prefs.json")
 
 def _get_last_dir():
-    return bpy.app.driver_namespace.get(_PREFS_KEY)
+    try:
+        with open(_PREFS_FILE, 'r') as f:
+            return json.load(f).get("last_dir")
+    except Exception:
+        return None
 
 def _set_last_dir(path):
-    bpy.app.driver_namespace[_PREFS_KEY] = path
+    try:
+        with open(_PREFS_FILE, 'w') as f:
+            json.dump({"last_dir": path}, f)
+    except Exception:
+        pass
 
 bl_info = {
     "name": "Export Collection to Unity FBX",
@@ -199,16 +207,23 @@ class VIEW3D_PT_export_unity(bpy.types.Panel):
         layout = self.layout
         obj = context.active_object
         sel = context.selected_objects
-        is_mesh = obj and obj.type == 'MESH'
         name, meshes = _get_export_source(context)
 
         # --- Selection info ---
+        alc = context.view_layer.active_layer_collection
         box = layout.box()
-        if obj:
-            if len(sel) > 1:
-                box.label(text=f"{obj.name} (+{len(sel)-1} more)", icon='OBJECT_DATA')
+        if sel:
+            # Active object selected — show it
+            if obj:
+                if len(sel) > 1:
+                    box.label(text=f"{obj.name} (+{len(sel)-1} more)", icon='OBJECT_DATA')
+                else:
+                    box.label(text=obj.name, icon='OBJECT_DATA')
             else:
-                box.label(text=obj.name, icon='OBJECT_DATA')
+                box.label(text=f"{len(sel)} selected", icon='OBJECT_DATA')
+        elif alc and alc.collection != context.scene.collection:
+            # Nothing selected — show active collection
+            box.label(text=alc.collection.name, icon='OUTLINER_COLLECTION')
         else:
             box.label(text="Nothing selected", icon='ERROR')
 
@@ -277,30 +292,22 @@ class OBJECT_OT_group_selected(bpy.types.Operator):
         return None
 
 
-def _menu_func(self, context):
-    self.layout.operator(
-        EXPORT_OT_collection_unity_fbx.bl_idname,
-        text="Export to Unity FBX",
-        icon='EXPORT',
-    )
-
-_MENU_TYPES = [
-    "OUTLINER_MT_object",
-    "OUTLINER_MT_collection",
-    "OUTLINER_MT_collection_new",
-]
-
-def _remove_menu_entries(menu_type, filename):
-    if hasattr(menu_type, '_dyn_ui_initialize'):
-        for fn in list(menu_type._dyn_ui_initialize()):
-            if getattr(fn, '__func__', fn).__code__.co_filename.endswith(filename):
-                try:
-                    menu_type.remove(fn)
-                except Exception:
-                    pass
+def _remove_menu_entries():
+    for type_name in ("OUTLINER_MT_object", "OUTLINER_MT_collection",
+                      "OUTLINER_MT_collection_new", "VIEW3D_MT_object"):
+        mt = getattr(bpy.types, type_name, None)
+        if mt and hasattr(mt, '_dyn_ui_initialize'):
+            for fn in list(mt._dyn_ui_initialize()):
+                src = getattr(getattr(fn, '__func__', fn), '__code__', None)
+                if src and 'export_collection.py' in src.co_filename:
+                    try:
+                        mt.remove(fn)
+                    except Exception:
+                        pass
 
 
 def register():
+    _remove_menu_entries()
     for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity, OBJECT_OT_group_selected):
         try:
             bpy.utils.unregister_class(cls)
@@ -308,23 +315,8 @@ def register():
             pass
         bpy.utils.register_class(cls)
 
-    # Remove leftover entries from all menus (including old Object menu)
-    for name in _MENU_TYPES + ["VIEW3D_MT_object"]:
-        mt = getattr(bpy.types, name, None)
-        if mt:
-            _remove_menu_entries(mt, 'export_collection.py')
-
-    for name in _MENU_TYPES:
-        mt = getattr(bpy.types, name, None)
-        if mt:
-            mt.append(_menu_func)
-
 
 def unregister():
-    for name in _MENU_TYPES + ["VIEW3D_MT_object"]:
-        mt = getattr(bpy.types, name, None)
-        if mt:
-            _remove_menu_entries(mt, 'export_collection.py')
     for cls in (EXPORT_OT_collection_unity_fbx, VIEW3D_PT_export_unity, OBJECT_OT_group_selected):
         try:
             bpy.utils.unregister_class(cls)
