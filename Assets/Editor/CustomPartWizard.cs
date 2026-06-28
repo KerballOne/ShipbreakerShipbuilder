@@ -189,14 +189,14 @@ public class CustomPartWizard : EditorWindow
             foreach (var a in fbxSubs)
             {
                 if (!(a is Mesh fm)) continue;
-                if (System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+"))
+                if (fm != null)
                     segCount++;
                 else if (visualCandidate == null)
                     visualCandidate = fm;
             }
             string info = segCount > 0
                 ? $"Found {segCount} submesh(es)."
-                : "No _seg meshes — single convex collider on root.";
+                : "No meshes found in model.";
             EditorGUILayout.HelpBox(info, MessageType.None);
         }
 
@@ -542,7 +542,7 @@ public class CustomPartWizard : EditorWindow
                 var segMeshes = new List<Mesh>();
                 foreach (var a in fbxSubs)
                 {
-                    if (a is Mesh fm && System.Text.RegularExpressions.Regex.IsMatch(fm.name, @"_seg\d+"))
+                    if (a is Mesh fm)
                         segMeshes.Add(fm);
                 }
 
