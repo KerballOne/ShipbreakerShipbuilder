@@ -478,14 +478,27 @@ class MESH_OT_radial_split_seam(bpy.types.Operator):
         results.append(current)
 
         if self._fill_cut:
+            _log(f"=== holes_fill pass: {len(results)} segments ===")
             for seg in results:
                 bm3 = bmesh.new()
                 bm3.from_mesh(seg.data)
                 bm3.edges.ensure_lookup_table()
+                faces_before = len(bm3.faces)
                 boundary = [e for e in bm3.edges if e.is_boundary]
+                new_faces = []
                 if boundary:
-                    bmesh.ops.holes_fill(bm3, edges=boundary, sides=0)
+                    ret = bmesh.ops.holes_fill(bm3, edges=boundary, sides=0)
+                    new_faces = ret.get('faces', [])
+                # Assign UV(0,0) to all loops on new faces so FBX exporter keeps them
+                uv_layer = bm3.loops.layers.uv.active
+                if uv_layer and new_faces:
+                    for face in new_faces:
+                        for loop in face.loops:
+                            loop[uv_layer].uv = (0.0, 0.0)
                 bmesh.ops.recalc_face_normals(bm3, faces=bm3.faces)
+                faces_after = len(bm3.faces)
+                tris_after = sum(len(f.verts) - 2 for f in bm3.faces)
+                _log(f"  {seg.name}: faces_before={faces_before} boundary_edges={len(boundary)} new_faces={len(new_faces)} faces_after={faces_after} tris_after={tris_after} uv_layer={'YES' if uv_layer else 'NO'}")
                 bm3.to_mesh(seg.data)
                 bm3.free()
                 seg.data.update()
@@ -596,14 +609,25 @@ class MESH_OT_radial_split(bpy.types.Operator):
             else:
                 bpy.data.objects.remove(dup, do_unlink=True)
 
+        _log(f"=== holes_fill pass (Fixed Angle): {len(results)} segments ===")
         for seg in results:
             bm = bmesh.new()
             bm.from_mesh(seg.data)
             bm.edges.ensure_lookup_table()
+            faces_before = len(bm.faces)
             boundary = [e for e in bm.edges if e.is_boundary]
+            new_faces = []
             if boundary:
-                bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+                ret = bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+                new_faces = ret.get('faces', [])
+            uv_layer = bm.loops.layers.uv.active
+            if uv_layer and new_faces:
+                for face in new_faces:
+                    for loop in face.loops:
+                        loop[uv_layer].uv = (0.0, 0.0)
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            tris_after = sum(len(f.verts) - 2 for f in bm.faces)
+            _log(f"  {seg.name}: faces_before={faces_before} boundary_edges={len(boundary)} new_faces={len(new_faces)} tris_after={tris_after} uv_layer={'YES' if uv_layer else 'NO'}")
             bm.to_mesh(seg.data)
             bm.free()
             seg.data.update()
