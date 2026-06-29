@@ -531,6 +531,15 @@ The most complex tool in the mod. Automates the placement of joint markers betwe
 
 **When auto-jointing is enough:** If both parts use compatible `SP_Mat` types (e.g. both are `SP_Mat_Panel_Ext_Nanocarbon`) their `JointSetupAsset` pairing allows them to auto-joint at spawn without an explicit InvisibleJoint — the proximity is enough. Use Joint Assist's compatibility check to confirm before placing unnecessary markers.
 
+**How the JSA compatibility check works:** Each `StructurePartAsset` references a `JointSetupAsset` (JSA) by name (e.g. `JOINT_Chassis`, `JOINT_Panel_Ext`). The check resolves the JSA for each selected part via four paths in priority order:
+
+1. `AddressableSOLoader.refs[0]` on the GO — used for custom baked parts whose SP_Mat GUID is stored directly
+2. The ancestor `AddressableComponentLoader` (ACL) — walks up the hierarchy to find the ACL, then looks up the SP_Mat address stored for this GO's `StructurePart` entry. The SP_Mat GUID is resolved via `known_assets.json` (GUID → filename), then the filename is matched to a JSA name via longest-prefix match against the known JSA table (e.g. `SP_Mat_Chassis_CutPoint_Grade0_VaporizeJointEverything` → `JOINT_Chassis_CutPoint`)
+3. `AddressableLoader.assetGUID` — for game addressable parts, looks up the prefab GUID in the enriched data
+4. Prefab name / asset GUID fallback — matches GO or prefab name against `known_assets_enriched.json` part names
+
+The JSA compatibility table (`jsa_compat.json`) is populated by **PartInfoLogger** at runtime: on gameplay start, it reflects the complete `JointabilityAsset.m_AllPairingAssets` table (351 pairs, 55 JSA names as of the Rocinante build). SP_Mat filenames have decoration suffixes that do not appear in JSA names — the longest-prefix match strips these correctly.
+
 ---
 
 #### `Shipbuilder / Radial Duplicate`
