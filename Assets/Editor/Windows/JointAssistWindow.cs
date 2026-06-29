@@ -738,9 +738,16 @@ public class JointAssistWindow : EditorWindow
                     {
                         var fileName = Path.GetFileNameWithoutExtension(kv.Value);
                         if (!fileName.StartsWith("SP_Mat_")) continue;
-                        var candidate = "JOINT_" + fileName.Substring("SP_Mat_".Length);
-                        if (jsaKeys.Contains(candidate))
+                        // SP_Mat filenames append extra suffixes (e.g. _Grade0_VaporizeJointEverything)
+                        // that aren't part of the JSA name. Match longest prefix that exists in the table.
+                        var parts = fileName.Substring("SP_Mat_".Length).Split('_');
+                        for (int n = parts.Length; n > 0; n--)
+                        {
+                            var candidate = "JOINT_" + string.Join("_", parts, 0, n);
+                            if (!jsaKeys.Contains(candidate)) continue;
                             spMatJsaMap[kv.Key] = candidate;
+                            break;
+                        }
                     }
             }
         }
