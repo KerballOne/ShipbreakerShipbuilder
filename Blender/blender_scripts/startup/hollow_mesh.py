@@ -211,14 +211,17 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
             else:
                 cutter_scale[i] = (d + 2 * self._axis_overshoot) / d
 
-        # Build a world matrix that applies the cutter scale in local space:
-        # cutter_mx = Translation(loc) @ Rotation @ Scale(cutter_scale)
-        # This matches what the execute path does via dup.scale = cutter_scale.
+        # Build a world matrix that applies the cutter scale centered on the bbox center,
+        # not the object origin, so overshoot expands symmetrically on both sides.
         loc, rot, orig_scale = obj.matrix_world.decompose()
+        bb = obj.bound_box  # 8 corners in local space
+        local_center = Vector(sum((Vector(v) for v in bb), Vector()) / 8)
+        world_center = obj.matrix_world @ local_center
         cutter_mx = (
-            Matrix.Translation(loc)
+            Matrix.Translation(world_center)
             @ rot.to_matrix().to_4x4()
             @ Matrix.Diagonal(Vector([orig_scale[i] * cutter_scale[i] for i in range(3)] + [1.0]))
+            @ Matrix.Translation(-local_center)
         )
 
         self._batch_cutter = _build_wire_batch(obj, override_mx=cutter_mx)
@@ -289,8 +292,34 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
             else:
                 scale[i] = (d + 2 * overshoot) / d
 
+        # Scale around the bbox center so overshoot expands symmetrically on both sides.
+        # After transform_apply(rotation=True, scale=True), dup has identity rot/scale,
+        # so bound_box corners are in local space == world space offset by location.
+        bb = dup.bound_box
+        local_center = sum((Vector(v) for v in bb), Vector()) / 8
+        # Temporarily move origin to bbox center, scale, move back.
+        dup.location += local_center
+        for v in dup.data.vertices:
+            v.co -= local_center
         dup.scale = tuple(scale)
+        bpy.ops.object.select_all(action='DESELECT')
+        dup.select_set(True)
+        context.view_layer.objects.active = dup
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+        # Remove faces whose normal aligns with the open axis so the cutter is an
+        # open shell — prevents the boolean from capping the holes it cuts.
+        bpy.ops.object.select_all(action='DESELECT')
+        dup.select_set(True)
+        context.view_layer.objects.active = dup
+        bpy.ops.object.mode_set(mode='EDIT')
+        bm_dup = bmesh.from_edit_mesh(dup.data)
+        axis_vec = Vector([1.0 if i == axis_idx else 0.0 for i in range(3)])
+        cap_faces = [f for f in bm_dup.faces if abs(f.normal.dot(axis_vec)) > 0.99]
+        if cap_faces:
+            bmesh.ops.delete(bm_dup, geom=cap_faces, context='FACES')
+        bmesh.update_edit_mesh(dup.data)
+        bpy.ops.object.mode_set(mode='OBJECT')
 
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
@@ -310,48 +339,6 @@ class MESH_OT_hollow_mesh(bpy.types.Operator):
             return {'CANCELLED'}
 
         bpy.data.objects.remove(dup, do_unlink=True)
-
-        # The EXACT boolean sometimes leaves the cutter geometry as a separate
-        # disconnected island inside the mesh. Delete any island that isn't the
-        # largest one (by face count) — that's always the leftover cutter.
-        bpy.ops.object.select_all(action='DESELECT')
-        obj.select_set(True)
-        context.view_layer.objects.active = obj
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.mesh.select_mode(type='FACE')
-
-        bm = bmesh.from_edit_mesh(obj.data)
-        bm.faces.ensure_lookup_table()
-
-        # Find all disconnected islands
-        visited = set()
-        islands = []
-        for face in bm.faces:
-            if face.index in visited:
-                continue
-            island = []
-            stack = [face]
-            while stack:
-                f = stack.pop()
-                if f.index in visited:
-                    continue
-                visited.add(f.index)
-                island.append(f)
-                for edge in f.edges:
-                    for linked in edge.link_faces:
-                        if linked.index not in visited:
-                            stack.append(linked)
-            islands.append(island)
-
-        if len(islands) > 1:
-            # Keep the largest island, delete all others
-            largest = max(islands, key=len)
-            del_faces = [f for isl in islands if isl is not largest for f in isl]
-            bmesh.ops.delete(bm, geom=del_faces, context='FACES')
-
-        bmesh.update_edit_mesh(obj.data)
-        bpy.ops.object.mode_set(mode='OBJECT')
 
         # Optionally fill open boundary loops left by the boolean
         if self._fill_cut:
