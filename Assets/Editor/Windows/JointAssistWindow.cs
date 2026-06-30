@@ -617,6 +617,7 @@ public class JointAssistWindow : EditorWindow
             {
                 string goName = System.Text.RegularExpressions.Regex.Replace(go.name.Trim(), @"\s*\(\d+\)$", "").Trim();
                 goName = System.Text.RegularExpressions.Regex.Replace(goName, @"\s*-\s*\d+$", "").Trim();
+                // First pass: match by GO identity or name (pasted ACL may point at donor GOs, so fall through to second pass)
                 foreach (var cv in acl.componentValues)
                 {
                     if (cv.component == null) continue;
@@ -624,7 +625,17 @@ public class JointAssistWindow : EditorWindow
                     cvName = System.Text.RegularExpressions.Regex.Replace(cvName, @"\s*-\s*\d+$", "").Trim();
                     if (cv.component.gameObject != go && cvName != goName) continue;
                     var jsa = EnrichedJsaName(cv.address);
-                    log += $"\n  P1.5: ACL entry on '{cv.component.gameObject.name}' addr={cv.address} → {jsa ?? "miss"}";
+                    log += $"\n  P1.5a: ACL entry on '{cv.component.gameObject.name}' addr={cv.address} → {jsa ?? "miss"}";
+                    if (jsa != null) { Debug.Log(log); return jsa; }
+                }
+                // Second pass: ACL was pasted from a donor (component refs point at wrong GOs).
+                // Try any StructurePart entry — all SP entries in a homogeneous ACL share the same SP_Mat.
+                foreach (var cv in acl.componentValues)
+                {
+                    if (cv.component == null) continue;
+                    if (!(cv.component is BBI.Unity.Game.StructurePart)) continue;
+                    var jsa = EnrichedJsaName(cv.address);
+                    log += $"\n  P1.5b: any-SP ACL entry on '{cv.component.gameObject.name}' addr={cv.address} → {jsa ?? "miss"}";
                     if (jsa != null) { Debug.Log(log); return jsa; }
                 }
             }
@@ -708,9 +719,9 @@ public class JointAssistWindow : EditorWindow
     }
 
     // enriched JSON lookups: guid → jsaName, partName → jsaName
-    Dictionary<string, string> enrichedJsaMap;     // prefab guid → jsaName
-    Dictionary<string, string> enrichedJsaByName;  // partName → jsaName
-    Dictionary<string, string> spMatJsaMap;         // SP_Mat asset guid → jsaName
+    Dictionary<string, string> enrichedJsaMap;   // prefab guid → jsaName
+    Dictionary<string, string> enrichedJsaByName; // partName/displayName → jsaName
+    Dictionary<string, string> spMatJsaMap;        // SP asset guid → jsaName (via sp_jsa_map.json + known_assets)
 
     void EnsureEnrichedData()
     {
@@ -719,57 +730,76 @@ public class JointAssistWindow : EditorWindow
         enrichedJsaByName = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
         spMatJsaMap       = new Dictionary<string, string>();
 
-        // Build SP_Mat GUID → jsaName from known_assets.json + jsa_compat key names
+        var path = Path.Combine(Application.dataPath, "..", "known_assets_enriched.json");
+        if (File.Exists(path))
+        {
+            try
+            {
+                var raw = JsonConvert.DeserializeObject<Dictionary<string, Newtonsoft.Json.Linq.JObject>>(File.ReadAllText(path));
+                if (raw != null)
+                    foreach (var kv in raw)
+                    {
+                        var jsaTok = kv.Value["jsaName"];
+                        var jsa = jsaTok != null ? jsaTok.ToString() : null;
+                        if (string.IsNullOrEmpty(jsa)) continue;
+                        enrichedJsaMap[kv.Key] = jsa!;
+                        var nameTok = kv.Value["partName"];
+                        if (nameTok != null && !string.IsNullOrEmpty(nameTok.ToString()))
+                            enrichedJsaByName[nameTok.ToString()] = jsa!;
+                        var displayTok = kv.Value["displayName"];
+                        if (displayTok != null && !string.IsNullOrEmpty(displayTok.ToString()))
+                            enrichedJsaByName[displayTok.ToString()] = jsa!;
+                    }
+            }
+            catch { }
+        }
+
+        // Build spMatJsaMap: SP asset GUID → jsaName
+        // Source 1: sp_jsa_map.json (SP asset name → jsaName, dumped at runtime by PartInfoLogger)
+        // Source 2: enriched spMatName field (fallback for parts already logged with that field)
         try
         {
-            var kaPath = Path.Combine(Application.dataPath, "..", "known_assets.json");
-            var jcPath = Path.Combine(Application.dataPath, "..", "jsa_compat.json");
-            if (File.Exists(kaPath) && File.Exists(jcPath))
+            var spNameToJsa = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+
+            // Load sp_jsa_map.json
+            var spJsaPath = Path.Combine(Application.dataPath, "..", "sp_jsa_map.json");
+            if (File.Exists(spJsaPath))
             {
-                var ka    = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(kaPath));
-                var jcRaw = JsonConvert.DeserializeObject<Dictionary<string, bool>>(File.ReadAllText(jcPath));
-                var jsaKeys = new HashSet<string>();
-                if (jcRaw != null)
-                    foreach (var k in jcRaw.Keys)
-                        foreach (var part in k.Split('|'))
-                            jsaKeys.Add(part);
+                var spMap = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(spJsaPath));
+                if (spMap != null)
+                    foreach (var kv in spMap)
+                        spNameToJsa[kv.Key] = kv.Value;
+            }
+
+            // Also pull spMatName from enriched entries as a fallback
+            var enrichedPath = Path.Combine(Application.dataPath, "..", "known_assets_enriched.json");
+            if (File.Exists(enrichedPath))
+            {
+                var raw2 = JsonConvert.DeserializeObject<Dictionary<string, Newtonsoft.Json.Linq.JObject>>(File.ReadAllText(enrichedPath));
+                if (raw2 != null)
+                    foreach (var kv in raw2)
+                    {
+                        var jsaTok = kv.Value["jsaName"];
+                        var spTok  = kv.Value["spMatName"];
+                        if (jsaTok == null || spTok == null) continue;
+                        var jsa = jsaTok.ToString(); var sp = spTok.ToString();
+                        if (!string.IsNullOrEmpty(jsa) && !string.IsNullOrEmpty(sp) && !spNameToJsa.ContainsKey(sp))
+                            spNameToJsa[sp] = jsa;
+                    }
+            }
+
+            // Map SP asset GUIDs via known_assets.json filename → spNameToJsa
+            var kaPath = Path.Combine(Application.dataPath, "..", "known_assets.json");
+            if (File.Exists(kaPath) && spNameToJsa.Count > 0)
+            {
+                var ka = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(kaPath));
                 if (ka != null)
                     foreach (var kv in ka)
                     {
-                        var fileName = Path.GetFileNameWithoutExtension(kv.Value);
-                        if (!fileName.StartsWith("SP_Mat_")) continue;
-                        // SP_Mat filenames append extra suffixes (e.g. _Grade0_VaporizeJointEverything)
-                        // that aren't part of the JSA name. Match longest prefix that exists in the table.
-                        var parts = fileName.Substring("SP_Mat_".Length).Split('_');
-                        for (int n = parts.Length; n > 0; n--)
-                        {
-                            var candidate = "JOINT_" + string.Join("_", parts, 0, n);
-                            if (!jsaKeys.Contains(candidate)) continue;
-                            spMatJsaMap[kv.Key] = candidate;
-                            break;
-                        }
+                        var assetName = Path.GetFileNameWithoutExtension(kv.Value);
+                        if (!string.IsNullOrEmpty(assetName) && spNameToJsa.TryGetValue(assetName, out var jsa2))
+                            spMatJsaMap[kv.Key] = jsa2;
                     }
-            }
-        }
-        catch { }
-        var path = Path.Combine(Application.dataPath, "..", "known_assets_enriched.json");
-        if (!File.Exists(path)) return;
-        try
-        {
-            var raw = JsonConvert.DeserializeObject<Dictionary<string, Newtonsoft.Json.Linq.JObject>>(File.ReadAllText(path));
-            if (raw == null) return;
-            foreach (var kv in raw)
-            {
-                var jsaTok = kv.Value["jsaName"];
-                var jsa = jsaTok != null ? jsaTok.ToString() : null;
-                if (string.IsNullOrEmpty(jsa)) continue;
-                enrichedJsaMap[kv.Key] = jsa!;
-                var nameTok = kv.Value["partName"];
-                if (nameTok != null && !string.IsNullOrEmpty(nameTok.ToString()))
-                    enrichedJsaByName[nameTok.ToString()] = jsa!;
-                var displayTok = kv.Value["displayName"];
-                if (displayTok != null && !string.IsNullOrEmpty(displayTok.ToString()))
-                    enrichedJsaByName[displayTok.ToString()] = jsa!;
             }
         }
         catch { }

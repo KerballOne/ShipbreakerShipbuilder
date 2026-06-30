@@ -17,6 +17,34 @@ public class ComponentCopyWindow : EditorWindow
 
     // ── Tab 0: Component diff ─────────────────────────────────────────────────
     GameObject   _compSrc;
+    string       _compSrcName; // display name when GO ref goes null on prefab exit
+
+    // Snapshotted source data — populated on lock, survives prefab context exit
+    class LockedSourceData
+    {
+        // Per component: live ref (valid while prefab open) + YAML text snapshot via EditorUtility
+        public class CompSnapshot
+        {
+            public string typeName;       // display e.g. "StructurePart"
+            public string typeFullName;   // AssemblyQualifiedName for GetType lookup
+            public Component liveComp;    // non-null while prefab context is open
+            public string yamlText;       // EditorUtility.CopySerialized-compatible: written at capture time
+        }
+        public List<CompSnapshot> components = new List<CompSnapshot>();
+
+        // ACL entries as plain strings
+        public class AclSnapshot
+        {
+            public string typeFullName; // component type
+            public string field;        // e.g. "m_StructurePartAsset"
+            public string address;      // GUID or path
+            public string addrLabel;    // resolved asset name for display
+        }
+        public List<AclSnapshot> aclEntries = new List<AclSnapshot>();
+        public string goName;
+    }
+    LockedSourceData _lockedSrc;
+
     GameObject[] _compDsts = new GameObject[0];
     Vector2 _compScroll;
 
@@ -36,8 +64,9 @@ public class ComponentCopyWindow : EditorWindow
     // ACL sub-section
     struct AclEntry
     {
-        public AddressableComponentValue srcVal;
-        public AddressableComponentValue dstVal; // null = missing in first dst (representative)
+        public AddressableComponentValue srcVal;      // live ref — may be null if source is locked
+        public LockedSourceData.AclSnapshot srcSnap;  // snapshot used when source is locked
+        public AddressableComponentValue dstVal;      // null = missing in first dst (representative)
         public string label;   // type prefix e.g. "StructurePart"
         public string srcAddr; // resolved asset name from source
         public string dstAddr; // resolved asset name from target(s); "(various)" if targets differ
@@ -81,14 +110,46 @@ public class ComponentCopyWindow : EditorWindow
     {
         EditorGUILayout.LabelField("Source → Target component diff", EditorStyles.boldLabel);
 
-        // Source: explicit picker
+        // Source: picker — snapshot taken immediately on change so data survives prefab context exit
         EditorGUI.BeginChangeCheck();
-        _compSrc = (GameObject)EditorGUILayout.ObjectField("Source", _compSrc, typeof(GameObject), true);
+        EditorGUILayout.BeginHorizontal();
+        if (_compSrc == null && _lockedSrc != null)
+        {
+            // GO ref lost on prefab exit — show snapshotted name, read-only
+            GUI.enabled = false;
+            EditorGUILayout.TextField("Source", _compSrcName ?? "(snapshot)");
+            GUI.enabled = true;
+            if (GUILayout.Button("Clear", GUILayout.Width(50)))
+                { _lockedSrc = null; _compSrcName = null; }
+        }
+        else
+        {
+            var prev = _compSrc;
+            _compSrc = (GameObject)EditorGUILayout.ObjectField("Source", _compSrc, typeof(GameObject), true);
+            if (_compSrc != prev)
+            {
+                _lockedSrc   = _compSrc != null ? CaptureSource(_compSrc) : null;
+                _compSrcName = _compSrc != null ? _compSrc.name : null;
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        // "Set from Selection" — picks the selected GO from inside a prefab context
+        if (GUILayout.Button("Set Source from Selection", EditorStyles.miniButton))
+        {
+            var picked = Selection.activeGameObject;
+            if (picked != null)
+            {
+                _compSrc     = picked;
+                _compSrcName = picked.name;
+                _lockedSrc   = CaptureSource(picked);
+            }
+        }
         bool changed = EditorGUI.EndChangeCheck();
 
-        // Target: driven by hierarchy selection (excluding source)
+        // When source is a snapshot (_compSrc null), all selections are targets; otherwise exclude the source GO
         var sel = Selection.gameObjects
-            .Where(go => go != _compSrc)
+            .Where(go => _compSrc == null || go != _compSrc)
             .ToArray();
         if (!sel.SequenceEqual(_compDsts)) { _compDsts = sel; changed = true; }
 
@@ -99,7 +160,7 @@ public class ComponentCopyWindow : EditorWindow
 
         if (changed) RebuildCompDiff();
 
-        if (_compSrc == null || _compDsts.Length == 0)
+        if ((_compSrc == null && _lockedSrc == null) || _compDsts.Length == 0)
         {
             EditorGUILayout.HelpBox("Set Source and select one or more Target GameObjects in the Hierarchy.", MessageType.Info);
             return;
@@ -141,9 +202,10 @@ public class ComponentCopyWindow : EditorWindow
             EditorGUILayout.LabelField("  No differing components found.", EditorStyles.miniLabel);
 
         // ── ACL entries — only shown when target has a real ACL of its own (baked) ──
-        var srcAcl = FindAncestorAcl(_compSrc.transform);
+        bool hasSrcAcl = (_compSrc != null && FindAncestorAcl(_compSrc.transform) != null)
+                      || (_lockedSrc != null && _lockedSrc.aclEntries.Count > 0);
         var dstAcl = FindAncestorAcl(_compDsts[0].transform);
-        if (srcAcl != null && dstAcl != null && _aclEntries.Count > 0)
+        if (hasSrcAcl && dstAcl != null && _aclEntries.Count > 0)
         {
             EditorGUILayout.Space(4);
             _aclFoldout = EditorGUILayout.Foldout(_aclFoldout, $"ACL entries ({_aclEntries.Count} differ)", true);
@@ -186,16 +248,15 @@ public class ComponentCopyWindow : EditorWindow
         _compEntries.Clear();
         _aclEntries.Clear();
         _dstIsAddressable = false;
-        if (_compSrc == null || _compDsts.Length == 0) return;
+        bool usingSnapshot = _compSrc == null && _lockedSrc != null;
+        if ((_compSrc == null && _lockedSrc == null) || _compDsts.Length == 0) return;
 
         var _compDst = _compDsts[0]; // representative target for component diff
 
-        // Target is addressable if it carries an AddressableLoader or SelectAddressableParent —
-        // those are only present on unrendered addressable instances, never on baked prefabs.
         _dstIsAddressable = _compDst.GetComponentInParent<AddressableLoader>(true) != null
                          || _compDst.GetComponentInParent<SelectAddressableParent>(true) != null;
 
-        // Build set of types that are ACL-driven on the dst GO (for per-row greying on baked targets)
+        // Build set of types that are ACL-driven on the dst GO
         var aclDrivenTypes = new HashSet<System.Type>();
         var dstAclEarly = FindAncestorAcl(_compDst.transform);
         if (dstAclEarly != null)
@@ -208,10 +269,7 @@ public class ComponentCopyWindow : EditorWindow
             }
         }
 
-        var srcComps = _compSrc.GetComponents<Component>();
         var dstComps = _compDst.GetComponents<Component>();
-
-        // Index dst by type
         var dstByType = new Dictionary<System.Type, List<Component>>();
         foreach (var c in dstComps)
         {
@@ -220,34 +278,54 @@ public class ComponentCopyWindow : EditorWindow
             if (!dstByType.ContainsKey(t)) dstByType[t] = new List<Component>();
             dstByType[t].Add(c);
         }
-
         var usedDst = new HashSet<Component>();
 
-        foreach (var src in srcComps)
+        if (usingSnapshot)
         {
-            if (src == null || src is Transform) continue;
-            var type = src.GetType();
-            Component dst = null;
-            if (dstByType.TryGetValue(type, out var candidates))
+            // Source is a snapshot — build comp entries from snapshot types only
+            foreach (var snap in _lockedSrc.components)
             {
-                dst = candidates.FirstOrDefault(c => !usedDst.Contains(c));
-                if (dst != null) usedDst.Add(dst);
+                var type = System.Type.GetType(snap.typeFullName);
+                if (type == null) continue;
+                Component dst = null;
+                if (dstByType.TryGetValue(type, out var candidates))
+                {
+                    dst = candidates.FirstOrDefault(c => !usedDst.Contains(c));
+                    if (dst != null) usedDst.Add(dst);
+                }
+                bool driven = aclDrivenTypes.Contains(type);
+                _compEntries.Add(new CompEntry
+                {
+                    srcComp = null, dstComp = dst,
+                    label = dst == null ? $"[MISSING in target] {snap.typeName}" : snap.typeName,
+                    different = true, // always show when using snapshot — can't deep-compare
+                    selected = false,
+                    aclDriven = driven,
+                });
             }
-
-            bool driven = aclDrivenTypes.Contains(type);
-            bool diff = dst == null || !ComponentsEqual(src, dst);
-            string label = dst == null
-                ? $"[MISSING in target] {AbbrevType(type)}"
-                : $"{AbbrevType(type)}";
-
-            _compEntries.Add(new CompEntry
+        }
+        else
+        {
+            var srcComps = _compSrc.GetComponents<Component>();
+            foreach (var src in srcComps)
             {
-                srcComp   = src, dstComp = dst,
-                label     = label,
-                different = diff,
-                selected  = false,
-                aclDriven = driven,
-            });
+                if (src == null || src is Transform) continue;
+                var type = src.GetType();
+                Component dst = null;
+                if (dstByType.TryGetValue(type, out var candidates))
+                {
+                    dst = candidates.FirstOrDefault(c => !usedDst.Contains(c));
+                    if (dst != null) usedDst.Add(dst);
+                }
+                bool driven = aclDrivenTypes.Contains(type);
+                bool diff = dst == null || !ComponentsEqual(src, dst);
+                _compEntries.Add(new CompEntry
+                {
+                    srcComp = src, dstComp = dst,
+                    label = dst == null ? $"[MISSING in target] {AbbrevType(type)}" : AbbrevType(type),
+                    different = diff, selected = false, aclDriven = driven,
+                });
+            }
         }
 
         // Components only on dst (extra)
@@ -262,44 +340,27 @@ public class ComponentCopyWindow : EditorWindow
             });
         }
 
-        // ACL diff — representative diff vs first dst, but dstAddr aggregates all targets
-        var srcAcl = FindAncestorAcl(_compSrc.transform);
+        // ACL diff
         var dstAcl = FindAncestorAcl(_compDst.transform);
-        if (srcAcl != null && dstAcl != null)
-        {
-            var srcEntries = srcAcl.componentValues
-                .Where(cv => cv.component != null && cv.component.gameObject == _compSrc)
-                .ToList();
-            if (srcEntries.Count == 0)
-            {
-                string srcName = StripCopySuffix(_compSrc.name);
-                srcEntries = srcAcl.componentValues
-                    .Where(cv => cv.component != null && StripCopySuffix(cv.component.gameObject.name) == srcName)
-                    .ToList();
-            }
+        if (dstAcl == null) return;
 
-            foreach (var sv in srcEntries)
+        if (usingSnapshot)
+        {
+            // Build ACL diff from snapshot
+            foreach (var snap in _lockedSrc.aclEntries)
             {
+                var type = System.Type.GetType(snap.typeFullName);
+
                 AddressableComponentValue FindDstVal(GameObject dstGo, AddressableComponentLoader acl)
                 {
-                    var dv = acl.componentValues.FirstOrDefault(cv =>
+                    string nm = StripCopySuffix(dstGo.name);
+                    return acl.componentValues.FirstOrDefault(cv =>
                         cv.component != null &&
-                        cv.component.gameObject == dstGo &&
-                        cv.field == sv.field &&
-                        cv.component.GetType() == sv.component.GetType());
-                    if (dv == null)
-                    {
-                        string nm = StripCopySuffix(dstGo.name);
-                        dv = acl.componentValues.FirstOrDefault(cv =>
-                            cv.component != null &&
-                            StripCopySuffix(cv.component.gameObject.name) == nm &&
-                            cv.field == sv.field &&
-                            cv.component.GetType() == sv.component.GetType());
-                    }
-                    return dv;
+                        (cv.component.gameObject == dstGo || StripCopySuffix(cv.component.gameObject.name) == nm) &&
+                        cv.field == snap.field &&
+                        cv.component.GetType() == type);
                 }
 
-                // Collect dstAddr across all targets — show (various) if they differ
                 var dstAddrs = new HashSet<string>();
                 AddressableComponentValue repDv = null;
                 foreach (var dstGo in _compDsts)
@@ -307,23 +368,83 @@ public class ComponentCopyWindow : EditorWindow
                     var acl = FindAncestorAcl(dstGo.transform);
                     if (acl == null) continue;
                     var dv = FindDstVal(dstGo, acl);
-                    string addr = dv == null ? "<missing>" : AddressToAssetName(dv.address);
-                    dstAddrs.Add(addr);
+                    dstAddrs.Add(dv == null ? "<missing>" : AddressToAssetName(dv.address));
                     if (dstGo == _compDst) repDv = dv;
                 }
 
-                // Skip row only if ALL targets already match source
-                bool allSame = dstAddrs.Count == 1 && dstAddrs.Contains(AddressToAssetName(sv.address));
+                bool allSame = dstAddrs.Count == 1 && dstAddrs.Contains(snap.addrLabel);
                 if (allSame) continue;
 
-                string srcAddr = AddressToAssetName(sv.address);
-                string dstAddr = dstAddrs.Count == 1 ? dstAddrs.First() : "(various)";
-                string typeLabel = AbbrevType(sv.component.GetType());
-                string fieldLabel = AbbrevField(sv.field);
+                string typeLabel = type != null ? AbbrevType(type) : snap.typeFullName;
+                string fieldLabel = AbbrevField(snap.field);
                 string prefix = fieldLabel == typeLabel ? typeLabel : $"{typeLabel}.{fieldLabel}";
-
-                _aclEntries.Add(new AclEntry { srcVal = sv, dstVal = repDv, label = prefix, srcAddr = srcAddr, dstAddr = dstAddr, selected = false });
+                _aclEntries.Add(new AclEntry
+                {
+                    srcVal = null, srcSnap = snap, dstVal = repDv,
+                    label = prefix, srcAddr = snap.addrLabel,
+                    dstAddr = dstAddrs.Count == 1 ? dstAddrs.First() : "(various)",
+                    selected = false,
+                });
             }
+            return;
+        }
+
+        var srcAcl = FindAncestorAcl(_compSrc.transform);
+        if (srcAcl == null) return;
+
+        var srcEntries = srcAcl.componentValues
+            .Where(cv => cv.component != null && cv.component.gameObject == _compSrc)
+            .ToList();
+        if (srcEntries.Count == 0)
+        {
+            string srcName = StripCopySuffix(_compSrc.name);
+            srcEntries = srcAcl.componentValues
+                .Where(cv => cv.component != null && StripCopySuffix(cv.component.gameObject.name) == srcName)
+                .ToList();
+        }
+
+        foreach (var sv in srcEntries)
+        {
+            AddressableComponentValue FindDstVal(GameObject dstGo, AddressableComponentLoader acl)
+            {
+                var dv = acl.componentValues.FirstOrDefault(cv =>
+                    cv.component != null &&
+                    cv.component.gameObject == dstGo &&
+                    cv.field == sv.field &&
+                    cv.component.GetType() == sv.component.GetType());
+                if (dv == null)
+                {
+                    string nm = StripCopySuffix(dstGo.name);
+                    dv = acl.componentValues.FirstOrDefault(cv =>
+                        cv.component != null &&
+                        StripCopySuffix(cv.component.gameObject.name) == nm &&
+                        cv.field == sv.field &&
+                        cv.component.GetType() == sv.component.GetType());
+                }
+                return dv;
+            }
+
+            var dstAddrs = new HashSet<string>();
+            AddressableComponentValue repDv = null;
+            foreach (var dstGo in _compDsts)
+            {
+                var acl = FindAncestorAcl(dstGo.transform);
+                if (acl == null) continue;
+                var dv = FindDstVal(dstGo, acl);
+                string addr = dv == null ? "<missing>" : AddressToAssetName(dv.address);
+                dstAddrs.Add(addr);
+                if (dstGo == _compDst) repDv = dv;
+            }
+
+            bool allSame = dstAddrs.Count == 1 && dstAddrs.Contains(AddressToAssetName(sv.address));
+            if (allSame) continue;
+
+            string srcAddr = AddressToAssetName(sv.address);
+            string dstAddr = dstAddrs.Count == 1 ? dstAddrs.First() : "(various)";
+            string typeLabel = AbbrevType(sv.component.GetType());
+            string fieldLabel = AbbrevField(sv.field);
+            string prefix = fieldLabel == typeLabel ? typeLabel : $"{typeLabel}.{fieldLabel}";
+            _aclEntries.Add(new AclEntry { srcVal = sv, srcSnap = null, dstVal = repDv, label = prefix, srcAddr = srcAddr, dstAddr = dstAddr, selected = false });
         }
     }
 
@@ -357,20 +478,47 @@ public class ComponentCopyWindow : EditorWindow
         foreach (var dstGo in _compDsts)
         {
             // Copy selected components
-            foreach (var entry in _compEntries.Where(e => e.selected && !e.aclDriven && e.srcComp != null))
+            foreach (var entry in _compEntries.Where(e => e.selected && !e.aclDriven))
             {
-                var dstComp = dstGo.GetComponents<Component>()
-                    .FirstOrDefault(c => c != null && c.GetType() == entry.srcComp.GetType());
-                if (dstComp == null)
+                if (entry.srcComp != null)
                 {
-                    var newComp = dstGo.AddComponent(entry.srcComp.GetType());
-                    Undo.RegisterCreatedObjectUndo(newComp, "Component Copy");
-                    CopySerializedFields(entry.srcComp, newComp);
+                    // Live source
+                    var dstComp = dstGo.GetComponents<Component>()
+                        .FirstOrDefault(c => c != null && c.GetType() == entry.srcComp.GetType());
+                    if (dstComp == null)
+                    {
+                        var newComp = dstGo.AddComponent(entry.srcComp.GetType());
+                        Undo.RegisterCreatedObjectUndo(newComp, "Component Copy");
+                        CopySerializedFields(entry.srcComp, newComp);
+                    }
+                    else
+                    {
+                        Undo.RecordObject(dstComp, "Component Copy");
+                        CopySerializedFields(entry.srcComp, dstComp);
+                    }
                 }
-                else
+                else if (_lockedSrc != null)
                 {
-                    Undo.RecordObject(dstComp, "Component Copy");
-                    CopySerializedFields(entry.srcComp, dstComp);
+                    // Snapshot source — find matching snapshot by label
+                    var snap = _lockedSrc.components.FirstOrDefault(s => s.typeName == entry.label || entry.label.EndsWith(s.typeName));
+                    if (snap == null) continue;
+                    var type = System.Type.GetType(snap.typeFullName);
+                    if (type == null) continue;
+                    var dstComp = dstGo.GetComponents<Component>()
+                        .FirstOrDefault(c => c != null && c.GetType() == type);
+                    if (dstComp == null)
+                    {
+                        dstComp = dstGo.AddComponent(type);
+                        Undo.RegisterCreatedObjectUndo(dstComp, "Component Copy");
+                    }
+                    else
+                    {
+                        Undo.RecordObject(dstComp, "Component Copy");
+                    }
+                    if (snap.liveComp != null)
+                        CopySerializedFields(snap.liveComp, dstComp);
+                    else
+                        EditorJsonUtility.FromJsonOverwrite(snap.yamlText, dstComp);
                 }
             }
 
@@ -383,22 +531,39 @@ public class ComponentCopyWindow : EditorWindow
 
                 foreach (var entry in _aclEntries.Where(e => e.selected))
                 {
-                    var sv = entry.srcVal;
+                    // Resolve address and type from live ref or snapshot
+                    string field, address;
+                    System.Type compType;
+                    if (entry.srcVal != null)
+                    {
+                        field = entry.srcVal.field;
+                        address = entry.srcVal.address;
+                        compType = entry.srcVal.component.GetType();
+                    }
+                    else if (entry.srcSnap != null)
+                    {
+                        field = entry.srcSnap.field;
+                        address = entry.srcSnap.address;
+                        compType = System.Type.GetType(entry.srcSnap.typeFullName);
+                        if (compType == null) continue;
+                    }
+                    else continue;
+
                     var dstComp = dstGo.GetComponents<Component>()
-                        .FirstOrDefault(c => c != null && c.GetType() == sv.component.GetType());
+                        .FirstOrDefault(c => c != null && c.GetType() == compType);
                     if (dstComp == null) continue;
 
                     dstAcl.componentValues.RemoveAll(cv =>
                         cv.component != null &&
                         StripCopySuffix(cv.component.gameObject.name) == dstGoName &&
-                        cv.field == sv.field &&
-                        cv.component.GetType() == sv.component.GetType());
+                        cv.field == field &&
+                        cv.component.GetType() == compType);
 
                     dstAcl.componentValues.Add(new AddressableComponentValue
                     {
                         component = dstComp,
-                        field     = sv.field,
-                        address   = sv.address,
+                        field     = field,
+                        address   = address,
                     });
                 }
                 EditorUtility.SetDirty(dstAcl);
@@ -644,6 +809,47 @@ public class ComponentCopyWindow : EditorWindow
         props["__keywords__"] = kw.Success ? kw.Groups[1].Value.Trim() : "";
 
         return props;
+    }
+
+    // ── Locked source snapshot ────────────────────────────────────────────────
+
+    LockedSourceData CaptureSource(GameObject go)
+    {
+        var data = new LockedSourceData { goName = go.name };
+
+        // Snapshot components — store live ref + YAML text via EditorJsonUtility
+        foreach (var comp in go.GetComponents<Component>())
+        {
+            if (comp == null || comp is Transform) continue;
+            data.components.Add(new LockedSourceData.CompSnapshot
+            {
+                typeName     = AbbrevType(comp.GetType()),
+                typeFullName = comp.GetType().AssemblyQualifiedName,
+                liveComp     = comp,
+                yamlText     = EditorJsonUtility.ToJson(comp, prettyPrint: false),
+            });
+        }
+
+        // Snapshot ACL entries for this GO
+        var acl = FindAncestorAcl(go.transform);
+        if (acl != null)
+        {
+            string goName = StripCopySuffix(go.name);
+            foreach (var cv in acl.componentValues)
+            {
+                if (cv.component == null) continue;
+                if (cv.component.gameObject != go && StripCopySuffix(cv.component.gameObject.name) != goName) continue;
+                data.aclEntries.Add(new LockedSourceData.AclSnapshot
+                {
+                    typeFullName = cv.component.GetType().AssemblyQualifiedName,
+                    field        = cv.field,
+                    address      = cv.address,
+                    addrLabel    = AddressToAssetName(cv.address),
+                });
+            }
+        }
+
+        return data;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
