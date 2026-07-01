@@ -76,8 +76,23 @@ public class ComponentCopyWindow : EditorWindow
     bool _aclFoldout = true;
 
     // ── Tab 1: Material shader diff ───────────────────────────────────────────
-    GameObject _matSrc, _matDst;
-    int _matSrcSlot, _matDstSlot;
+    // Snapshotted source material — survives prefab context exit
+    class LockedMatSource
+    {
+        public string goName;
+        public int slot;
+        public string matPath;
+        public string shaderGuid;
+        public Dictionary<string, string> props;
+    }
+
+    GameObject _matSrc;
+    string _matSrcName;
+    LockedMatSource _lockedMatSrc;
+    int _matSrcSlot;
+
+    GameObject[] _matDstGos = new GameObject[0];
+    int _matDstSlot;
     Vector2 _matScroll;
 
     struct MatProp
@@ -600,27 +615,135 @@ public class ComponentCopyWindow : EditorWindow
     {
         EditorGUILayout.LabelField("Material shader properties diff", EditorStyles.boldLabel);
 
+        // ── Source GO picker + snapshot ──
         EditorGUI.BeginChangeCheck();
-        _matSrc = (GameObject)EditorGUILayout.ObjectField("Source", _matSrc, typeof(GameObject), true);
-        if (_matSrc != null)
+        EditorGUILayout.BeginHorizontal();
+        if (_matSrc == null && _lockedMatSrc != null)
         {
-            int slots = MatSlotCount(_matSrc);
-            if (slots > 1) _matSrcSlot = EditorGUILayout.IntSlider("Source slot", _matSrcSlot, 0, slots - 1);
-            else _matSrcSlot = 0;
+            GUI.enabled = false;
+            EditorGUILayout.TextField("Source", _matSrcName ?? "(snapshot)");
+            GUI.enabled = true;
+            if (GUILayout.Button("Clear", GUILayout.Width(50)))
+                { _lockedMatSrc = null; _matSrcName = null; _matDiffBuilt = false; }
         }
-        _matDst = (GameObject)EditorGUILayout.ObjectField("Target", _matDst, typeof(GameObject), true);
-        if (_matDst != null)
+        else
         {
-            int slots = MatSlotCount(_matDst);
-            if (slots > 1) _matDstSlot = EditorGUILayout.IntSlider("Target slot", _matDstSlot, 0, slots - 1);
-            else _matDstSlot = 0;
+            var prev = _matSrc;
+            _matSrc = (GameObject)EditorGUILayout.ObjectField("Source", _matSrc, typeof(GameObject), true);
+            if (_matSrc != prev)
+            {
+                _matSrcName   = _matSrc != null ? _matSrc.name : null;
+                _lockedMatSrc = _matSrc != null ? CaptureMatSource(_matSrc, _matSrcSlot) : null;
+                _matDiffBuilt = false;
+            }
         }
-        if (EditorGUI.EndChangeCheck()) _matDiffBuilt = false;
+        EditorGUILayout.EndHorizontal();
 
-        if (_matSrc == null || _matDst == null)
+        if (_matSrc != null || _lockedMatSrc != null)
         {
-            EditorGUILayout.HelpBox("Assign both Source and Target GameObjects.", MessageType.Info);
+            int slots = _matSrc != null ? MatSlotCount(_matSrc) : 1;
+            if (slots > 1)
+            {
+                int prev = _matSrcSlot;
+                _matSrcSlot = EditorGUILayout.IntSlider("Source slot", _matSrcSlot, 0, slots - 1);
+                if (_matSrcSlot != prev && _matSrc != null)
+                {
+                    _lockedMatSrc = CaptureMatSource(_matSrc, _matSrcSlot);
+                    _matDiffBuilt = false;
+                }
+            }
+            else _matSrcSlot = 0;
+
+            // Show resolved material name
+            if (_lockedMatSrc != null)
+            {
+                var srcMat = AssetDatabase.LoadAssetAtPath<Material>(_lockedMatSrc.matPath);
+                GUI.enabled = false;
+                EditorGUILayout.ObjectField("  Material", srcMat, typeof(Material), false);
+                GUI.enabled = true;
+            }
+        }
+        bool srcChanged = EditorGUI.EndChangeCheck();
+
+        if (GUILayout.Button("Set Source from Selection", EditorStyles.miniButton))
+        {
+            var picked = Selection.activeGameObject;
+            if (picked != null)
+            {
+                _matSrc       = picked;
+                _matSrcName   = picked.name;
+                _lockedMatSrc = CaptureMatSource(picked, _matSrcSlot);
+                _matDiffBuilt = false;
+            }
+        }
+        EditorGUILayout.Space(2);
+        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
+
+        // ── Targets from Hierarchy selection ──
+        var selGos = Selection.gameObjects
+            .Where(go => go != _matSrc)
+            .ToArray();
+        if (!selGos.SequenceEqual(_matDstGos)) { _matDstGos = selGos; _matDiffBuilt = false; }
+
+        // Show GO count and resolve unique target materials
+        string targetGoLabel = _matDstGos.Length == 0 ? "—"
+            : _matDstGos.Length == 1 ? _matDstGos[0].name
+            : $"{_matDstGos.Length} objects selected";
+        EditorGUILayout.LabelField("Target", targetGoLabel);
+
+        if (_matDstGos.Length > 0)
+        {
+            int slots = MatSlotCount(_matDstGos[0]);
+            if (slots > 1)
+            {
+                int prev = _matDstSlot;
+                _matDstSlot = EditorGUILayout.IntSlider("Target slot", _matDstSlot, 0, slots - 1);
+                if (_matDstSlot != prev) _matDiffBuilt = false;
+            }
+            else _matDstSlot = 0;
+
+            // Resolve and display unique target materials
+            var uniqueDstMats = _matDstGos
+                .Select(go => GetMat(go, _matDstSlot))
+                .Where(m => m != null)
+                .Distinct()
+                .ToArray();
+            if (uniqueDstMats.Length == 1)
+            {
+                GUI.enabled = false;
+                EditorGUILayout.ObjectField("  Material", uniqueDstMats[0], typeof(Material), false);
+                GUI.enabled = true;
+            }
+            else if (uniqueDstMats.Length > 1)
+                EditorGUILayout.LabelField("  Material", $"{uniqueDstMats.Length} unique materials");
+        }
+
+        EditorGUILayout.Space(2);
+        EditorGUILayout.LabelField("", GUI.skin.horizontalSlider);
+
+        if ((_matSrc == null && _lockedMatSrc == null) || _matDstGos.Length == 0)
+        {
+            EditorGUILayout.HelpBox("Set Source and select one or more Target GameObjects in the Hierarchy.", MessageType.Info);
             return;
+        }
+
+        // ── Shader guard: check all unique target materials ──
+        string srcShaderGuid = _lockedMatSrc?.shaderGuid;
+        if (!string.IsNullOrEmpty(srcShaderGuid))
+        {
+            var mismatch = _matDstGos
+                .Select(go => GetMat(go, _matDstSlot))
+                .Where(m => m != null)
+                .Distinct()
+                .Where(m => MatShaderGuidFromPath(AssetDatabase.GetAssetPath(m)) != srcShaderGuid)
+                .ToArray();
+            if (mismatch.Length > 0)
+            {
+                EditorGUILayout.HelpBox(
+                    $"Shader mismatch on {mismatch.Length} target material(s) (e.g. '{mismatch[0].name}') — applying across different shaders will corrupt the material.",
+                    MessageType.Error);
+                return;
+            }
         }
 
         if (!_matDiffBuilt)
@@ -649,8 +772,8 @@ public class ComponentCopyWindow : EditorWindow
             var p = _matProps[i];
             string label = $"{p.name}:  {Truncate(p.srcVal, 30)}  →  {Truncate(p.dstVal, 30)}";
             EditorGUILayout.BeginHorizontal();
-            bool sel = EditorGUILayout.ToggleLeft(label, p.selected);
-            if (sel != p.selected) { p.selected = sel; _matProps[i] = p; }
+            bool propSel = EditorGUILayout.ToggleLeft(label, p.selected);
+            if (propSel != p.selected) { p.selected = propSel; _matProps[i] = p; }
             EditorGUILayout.EndHorizontal();
         }
         EditorGUILayout.EndScrollView();
@@ -660,7 +783,11 @@ public class ComponentCopyWindow : EditorWindow
         EditorGUILayout.Space(6);
         bool anySelected = _matProps.Any(p => p.selected);
         GUI.enabled = anySelected;
-        if (GUILayout.Button("Apply Selected to Target Material"))
+        var uniqueMats = _matDstGos.Select(go => GetMat(go, _matDstSlot)).Where(m => m != null).Distinct().ToArray();
+        string applyLabel = uniqueMats.Length == 1
+            ? $"Apply Selected to '{uniqueMats[0].name}'"
+            : $"Apply Selected to {uniqueMats.Length} Materials";
+        if (GUILayout.Button(applyLabel))
             ApplyMatCopy();
         GUI.enabled = true;
     }
@@ -678,10 +805,28 @@ public class ComponentCopyWindow : EditorWindow
         return mr.sharedMaterials[slot];
     }
 
-    string MatPath(GameObject go, int slot)
+    LockedMatSource CaptureMatSource(GameObject go, int slot)
     {
         var mat = GetMat(go, slot);
-        return mat != null ? AssetDatabase.GetAssetPath(mat) : null;
+        if (mat == null) return null;
+        string path = AssetDatabase.GetAssetPath(mat);
+        if (string.IsNullOrEmpty(path)) return null;
+        var shaderMatch = Regex.Match(File.ReadAllText(path), @"m_Shader:.*?guid:\s*(\w+)");
+        return new LockedMatSource
+        {
+            goName     = go.name,
+            slot       = slot,
+            matPath    = path,
+            shaderGuid = shaderMatch.Success ? shaderMatch.Groups[1].Value : null,
+            props      = ParseMatProps(path),
+        };
+    }
+
+    string MatShaderGuidFromPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+        var m = Regex.Match(File.ReadAllText(path), @"m_Shader:.*?guid:\s*(\w+)");
+        return m.Success ? m.Groups[1].Value : null;
     }
 
     void BuildMatDiff()
@@ -689,31 +834,28 @@ public class ComponentCopyWindow : EditorWindow
         _matProps.Clear();
         _matDiffBuilt = false;
 
-        string srcPath = MatPath(_matSrc, _matSrcSlot);
-        string dstPath = MatPath(_matDst, _matDstSlot);
-        if (string.IsNullOrEmpty(srcPath) || string.IsNullOrEmpty(dstPath))
-        {
-            EditorUtility.DisplayDialog("Material Diff", "Could not find material asset paths for the selected slots.", "OK");
-            return;
-        }
+        if (_lockedMatSrc == null || _matDstGos.Length == 0) return;
 
-        var srcProps = ParseMatProps(srcPath);
+        var srcProps = _lockedMatSrc.props;
+        var repMat = GetMat(_matDstGos[0], _matDstSlot);
+        string dstPath = repMat != null ? AssetDatabase.GetAssetPath(repMat) : null;
+        if (string.IsNullOrEmpty(dstPath)) { EditorUtility.DisplayDialog("Material Diff", "Could not find target material.", "OK"); return; }
         var dstProps = ParseMatProps(dstPath);
 
-        // Keywords diff
+        // Keywords diff — show source vs representative first target
         string srcKw = DictGet(srcProps, "__keywords__");
         string dstKw = DictGet(dstProps, "__keywords__");
         if (srcKw != dstKw)
-            _matProps.Add(new MatProp { name = "__ShaderKeywords__", srcVal = srcKw, dstVal = dstKw, selected = true });
+            _matProps.Add(new MatProp { name = "__ShaderKeywords__", srcVal = srcKw, dstVal = dstKw, selected = false });
 
-        // Non-texture property diffs
+        // Non-texture property diffs — default unchecked
         foreach (var key in srcProps.Keys.Union(dstProps.Keys).OrderBy(k => k))
         {
             if (key.StartsWith("__") || key.StartsWith("TEX_")) continue;
             string sv = DictGet(srcProps, key, "<missing>");
             string dv = DictGet(dstProps, key, "<missing>");
             if (sv != dv)
-                _matProps.Add(new MatProp { name = key, srcVal = sv, dstVal = dv, selected = true });
+                _matProps.Add(new MatProp { name = key, srcVal = sv, dstVal = dv, selected = false });
         }
 
         _matDiffBuilt = true;
@@ -726,50 +868,52 @@ public class ComponentCopyWindow : EditorWindow
 
     void ApplyMatCopy()
     {
-        string dstPath = MatPath(_matDst, _matDstSlot);
-        string srcPath = MatPath(_matSrc, _matSrcSlot);
-        if (string.IsNullOrEmpty(dstPath) || string.IsNullOrEmpty(srcPath)) return;
+        if (_lockedMatSrc == null) return;
+        string srcText = File.Exists(_lockedMatSrc.matPath) ? File.ReadAllText(_lockedMatSrc.matPath) : "";
+        var selectedProps = _matProps.Where(p => p.selected).ToList();
 
-        string text = File.ReadAllText(dstPath);
-        string srcText = File.ReadAllText(srcPath);
+        // Collect unique target material paths
+        var uniquePaths = _matDstGos
+            .Select(go => GetMat(go, _matDstSlot))
+            .Where(m => m != null)
+            .Distinct()
+            .Select(m => AssetDatabase.GetAssetPath(m))
+            .Where(p => !string.IsNullOrEmpty(p))
+            .ToList();
+        int applied = 0;
 
-        foreach (var prop in _matProps.Where(p => p.selected))
+        foreach (var dstPath in uniquePaths)
         {
-            if (prop.name == "__ShaderKeywords__")
+
+            string text = File.ReadAllText(dstPath);
+
+            foreach (var prop in selectedProps)
             {
-                // Replace everything between m_ShaderKeywords: and m_LightmapFlags
-                text = Regex.Replace(text,
-                    @"m_ShaderKeywords:.*?(?=\n\s*m_LightmapFlags)",
-                    $"m_ShaderKeywords: {prop.srcVal}",
-                    RegexOptions.Singleline);
-            }
-            else
-            {
-                // Float/color: "    - PropName: value\n" 
-                string escaped = Regex.Escape(prop.name);
-                // Replace existing
-                var replaced = Regex.Replace(text,
-                    $@"(- {escaped}: )(.+)",
-                    $"${{1}}{prop.srcVal}");
-                if (replaced == text && prop.dstVal == "<missing>")
+                if (prop.name == "__ShaderKeywords__")
                 {
-                    // Property missing in dst — insert after last float/color entry before m_Colors or end
-                    // Find insertion point: just before "    m_Colors:" or "  m_BuildTextureStacks"
-                    string insertAfter = prop.name.StartsWith("_") && IsColorProp(srcText, prop.name)
-                        ? "    m_Colors:"
-                        : "    m_Floats:";
-                    // Insert at end of the relevant block
-                    replaced = InsertPropBeforeSection(text, prop.name, prop.srcVal,
-                        IsColorProp(srcText, prop.name));
+                    text = Regex.Replace(text,
+                        @"m_ShaderKeywords:.*?(?=\n\s*m_LightmapFlags)",
+                        $"m_ShaderKeywords: {prop.srcVal}",
+                        RegexOptions.Singleline);
                 }
-                text = replaced;
+                else
+                {
+                    string escaped = Regex.Escape(prop.name);
+                    var replaced = Regex.Replace(text, $@"(- {escaped}: )(.+)", $"${{1}}{prop.srcVal}");
+                    if (replaced == text && prop.dstVal == "<missing>")
+                        replaced = InsertPropBeforeSection(text, prop.name, prop.srcVal, IsColorProp(srcText, prop.name));
+                    text = replaced;
+                }
             }
+
+            File.WriteAllText(dstPath, text);
+            AssetDatabase.ImportAsset(dstPath);
+            applied++;
         }
 
-        File.WriteAllText(dstPath, text);
-        AssetDatabase.ImportAsset(dstPath);
         BuildMatDiff();
-        Debug.Log($"[ComponentCopy] Material properties applied to '{dstPath}'.");
+        string names = uniquePaths.Count == 1 ? $"'{Path.GetFileNameWithoutExtension(uniquePaths[0])}'" : $"{applied}/{uniquePaths.Count} materials";
+        Debug.Log($"[ComponentCopy] Material properties applied to {names}.");
     }
 
     bool IsColorProp(string matText, string propName)

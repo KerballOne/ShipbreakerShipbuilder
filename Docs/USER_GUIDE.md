@@ -457,10 +457,14 @@ A two-tab editor window for diffing and copying data between GameObjects or mate
 **When to use:** After baking a new part variant that is similar to an existing one — copy the `StructurePart`, `EntityBlueprintComponent`, and ACL entries from the working part rather than setting them up from scratch.
 
 **Tab 1 — Material shader diff/copy:**
-- Set a Source material and a Target material
-- Shows which shader properties differ
-- Check properties to copy and click Copy
-- Useful when you have a working material and want to apply specific property values (e.g. surface type, transmission) to a new material without re-doing everything
+- Set a **Source GO** (snapshot is taken immediately; source survives prefab context exit)
+- Set one or more **Target GOs** — the tool resolves and displays the actual material asset(s) used by each GO
+- Shows which shader properties differ between the source snapshot and the first target material
+- All properties default to **unchecked** — select only what you want to copy
+- **Shader guard:** if the source and any target use different shaders the copy is blocked and the mismatch is shown. Do not copy properties across different shaders — keyword semantics differ and the result will mangle the target material (e.g. adding `_PIXEL_DISPLACEMENT` to an HDRP Lit mat breaks its depth appearance)
+- Click **Apply** to write selected properties to all unique target materials at once
+
+**When to use:** After copying SP/BP components from a working game part to a custom baked part, the custom mesh's material is not updated — it retains its Blender-origin values. If the part glows in-game, use this tab to compare the glowing material against a non-glowing game part that uses the same Lynx shader and copy the differing float values and keywords. See [Persistent glow after SP/BP copy](#persistent-glow-after-spbp-component-copy) in Caveats.
 
 **Addressable detection:** The tool identifies a GO as an addressable loader (not a baked part) by the presence of an `AddressableLoader` component — not by the absence of `StructurePart`. Keep this in mind if you see unexpected classification.
 
@@ -1098,6 +1102,17 @@ The game reads raw vertex data from `MeshFilter.sharedMesh` to calculate part ma
 
 **Non-unit scale is invisible to the game's physics systems**
 Joint anchor points and mass are calculated from mesh vertex positions. Transform scale is applied visually but does not affect the raw mesh data the game reads. Always run **Lock In Rescale** before building any rescaled part.
+
+**Persistent glow after SP/BP component copy**
+After copying `StructurePart` and `EntityBlueprintComponent` from a working game part to a custom baked part (via Component Copy Window → Component tab), the custom mesh's material is not updated — it keeps the Blender-origin material, which lacks the Lynx shader keywords and float values that suppress the built-in cut/scorch glow effect. The part will glow bright white/orange in-game as if permanently on fire.
+
+Fix: open **Component Copy Window → Material Shader tab**, set the glowing part as Target and a known non-glowing Lynx-shader part as Source, then diff and copy the following:
+- Keywords: add `_EMISSIVE_COLOR_MAP` and `_SKIN_PLANAR_MAPPING` to `m_ShaderKeywords`
+- `_CutIntensity`: set to `0.603` (default 1.0 triggers full glow)
+- `_CutWidth`: set to `0.8` (default 0.1 makes the glow cover the whole face)
+- `_EmissiveColorMap`: assign a real emissive texture from a working game part
+
+Rebuild after saving the material. The glow will be gone on next load.
 
 **ACL null entries crash ship load**
 An `AddressableComponentLoader` with null/missing entries causes `ShipPreviewUtils.CalculateSpaceTruckPartCount` to receive null `moduleSummaries`, which chains to a crash that freezes the loading screen. The validator catches these as errors and blocks the build. After deleting any part GO, clean its ACL entries immediately.
