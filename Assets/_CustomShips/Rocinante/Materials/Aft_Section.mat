@@ -136,12 +136,14 @@ Material:
     - _AlphaSrcBlend: 1
     - _Anisotropy: 0
     - _BlendMode: 0
+    - _BoundsMax: 1
     - _CoatMask: 0
     - _CullMode: 2
     - _CullModeForward: 2
     - _CutIntensity: 0.603
     - _CutWidth: 0.8
     - _Cutoff: 0.5
+    - _DamageDarkenAmount: 0
     - _DamageFlashValue: 0
     - _DepthOffsetEnable: 0
     - _DetailAlbedoScale: 1
@@ -153,6 +155,7 @@ Material:
     - _DisplacementLockTilingScale: 1
     - _DisplacementMode: 2
     - _DissolveAmount: 0
+    - _DissolveCutOff: 1
     - _DissolveWidth: 0.02
     - _DistortionBlendMode: 0
     - _DistortionBlurBlendMode: 0
@@ -170,6 +173,7 @@ Material:
     - _DistortionVectorScale: 2
     - _DoubleSidedEnable: 0
     - _DoubleSidedNormalMode: 1
+    - _Drag: 1
     - _DstBlend: 0
     - _EmissiveColorMode: 1
     - _EmissiveExposureWeight: 1
@@ -180,12 +184,16 @@ Material:
     - _EnableDissolve: 0
     - _EnableFogOnTransparent: 1
     - _EnableGeometricSpecularAA: 0
+    - _EnableMotionVectorForVertexAnimation: 0
     - _EnableSkinProjection: 0
+    - _EnableSpecularOcclusion: 0
+    - _EnableWind: 0
     - _EnergyConservingSpecularColor: 1
     - _FreezingIntensity: 0
     - _HdrpVersion: 2
     - _HeightAmplitude: 0
     - _HeightBlendAmount: 1
+    - _HeightBlendSharpness: 0.1
     - _HeightCenter: 1
     - _HeightMapParametrization: 0
     - _HeightMax: 1
@@ -194,13 +202,16 @@ Material:
     - _HeightPoMAmplitude: 0
     - _HeightTessAmplitude: 2
     - _HeightTessCenter: 0.5
+    - _InitialBend: 1
     - _InvTilingScale: 1
     - _Ior: 1
     - _IridescenceMask: 1
     - _IridescenceThickness: 1
     - _LinkDetailsWithBase: 1
     - _MaterialID: 1
-    - _Metallic: 0.8
+    - _Metallic: 0.174
+    - _MetallicRemapMax: 1
+    - _MetallicRemapMin: 0
     - _MicroStrength: 0.164
     - _Micro_far: 35
     - _Micro_near: 2
@@ -212,11 +223,14 @@ Material:
     - _PPDMinSamples: 5
     - _PPDPrimitiveLength: 1
     - _PPDPrimitiveWidth: 1
+    - _PreRefractionPass: 0
     - _ProjectionScale: 1
     - _ReceivesSSR: 0
     - _RefractionModel: 0
     - _SSRefractionProjectionModel: 0
-    - _Smoothness: 0.5
+    - _ShiverDirectionality: 0.5
+    - _ShiverDrag: 0.2
+    - _Smoothness: 0.799
     - _SmoothnessRemapMax: 1
     - _SmoothnessRemapMin: 0
     - _SpecularAAScreenSpaceVariance: 0.1
@@ -233,12 +247,14 @@ Material:
     - _StencilWriteMaskDistortionVec: 255
     - _StencilWriteMaskGBuffer: 51
     - _StencilWriteMaskMV: 176
+    - _Stiffness: 1
     - _SubsurfaceMask: 1
     - _SupportDecals: 0
     - _SurfaceType: 0
     - _TexWorldScale: 1
     - _TexWorldScaleEmissive: 1
     - _Thickness: 1
+    - _ThicknessMultiplier: 1
     - _TransmissionEnable: 1
     - _TransparentBackfaceEnable: 0
     - _TransparentCullMode: 2
@@ -246,6 +262,7 @@ Material:
     - _TransparentDepthPrepassEnable: 0
     - _TransparentSortPriority: 0
     - _TransparentWritingMotionVec: 0
+    - _TriPlanarOffset: 0
     - _UVBase: 0
     - _UVDetail: 0
     - _UVEmissive: 0
@@ -258,47 +275,30 @@ Material:
     - _ZTestModeDistortion: 4
     - _ZTestTransparent: 4
     - _ZWrite: 1
-    - _BoundsMax: 1
-    - _DamageDarkenAmount: 0
-    - _DissolveCutOff: 1
-    - _Drag: 1
-    - _EnableMotionVectorForVertexAnimation: 0
-    - _EnableSpecularOcclusion: 0
-    - _EnableWind: 0
-    - _HeightBlendSharpness: 0.1
-    - _InitialBend: 1
-    - _MetallicRemapMax: 1
-    - _MetallicRemapMin: 0
-    - _PreRefractionPass: 0
-    - _ShiverDirectionality: 0.5
-    - _ShiverDrag: 0.2
-    - _Stiffness: 1
-    - _ThicknessMultiplier: 1
-    - _TriPlanarOffset: 0
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _BaseColorMap_MipInfo: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _CutGlow: {r: 32.114, g: 5.6734, b: 3.1811, a: 1}
     - _DiffusionProfileAsset: {r: 0, g: 0, b: 0, a: 0}
+    - _DissolveColor: {r: 10.917, g: 2.5725, b: 0, a: 0}
     - _DoubleSidedConstants: {r: 1, g: 1, b: -1, a: 0}
     - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissiveColor: {r: 0, g: 0, b: 0, a: 1}
     - _EmissiveColorLDR: {r: 0, g: 0, b: 0, a: 1}
+    - _FadeDetailParams: {r: 2, g: 24, b: 0.3, a: 1}
+    - _GlowIntensity: {r: 1, g: 1, b: 1, a: 0}
     - _InvPrimScale: {r: 1, g: 1, b: 0, a: 0}
     - _IridescenceThicknessRemap: {r: 0, g: 1, b: 0, a: 0}
-    - _GlowIntensity: {r: 1, g: 1, b: 1, a: 0}
-    - _LynxShaderType: 0
+    - _LynxShaderType: {r: 1, g: 1, b: 1, a: 0}
     - _MainColor: {r: 0.2924528, g: 0.04552332, b: 0.04552332, a: 1}
+    - _PivotPos: {r: 0, g: 0, b: 0, a: 0}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 1}
+    - _TexTransform: {r: 1, g: 1, b: 0, a: 0}
     - _ThicknessRemap: {r: 0, g: 1, b: 0, a: 0}
     - _TransmittanceColor: {r: 1, g: 1, b: 1, a: 1}
     - _UVDetailsMappingMask: {r: 1, g: 0, b: 0, a: 0}
     - _UVMappingMask: {r: 1, g: 0, b: 0, a: 0}
     - _UVMappingMaskEmissive: {r: 1, g: 0, b: 0, a: 0}
-    - _DissolveColor: {r: 10.917, g: 2.5725, b: 0, a: 0}
-    - _FadeDetailParams: {r: 2, g: 24, b: 0.3, a: 1}
-    - _PivotPos: {r: 0, g: 0, b: 0, a: 0}
-    - _TexTransform: {r: 1, g: 1, b: 0, a: 0}
     - _WorldPosition: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
