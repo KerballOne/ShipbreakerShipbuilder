@@ -152,6 +152,7 @@ class VIEW3D_PT_split_by_convex_hulls(bpy.types.Panel):
     bl_category    = 'ShipBreaker'
     bl_label       = 'Split By Convex Hulls'
     bl_options     = {'DEFAULT_CLOSED'}
+    bl_order       = 1
 
     def draw(self, context):
         layout = self.layout

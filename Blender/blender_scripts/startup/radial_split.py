@@ -669,8 +669,21 @@ def menu_func(self, context):
     self.layout.operator(MESH_OT_radial_split.bl_idname, icon='MOD_ARRAY')
 
 
+class VIEW3D_PT_radial_split(bpy.types.Panel):
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = 'ShipBreaker'
+    bl_label       = 'Radial Split'
+    bl_options     = {'DEFAULT_CLOSED'}
+    bl_order       = 0
+
+    def draw(self, context):
+        self.layout.operator(MESH_OT_radial_split_seam.bl_idname, text="Radial Split (Seam Detect)", icon='VIEWZOOM')
+        self.layout.operator(MESH_OT_radial_split.bl_idname, text="Radial Split (Fixed Angle)", icon='MOD_ARRAY')
+
+
 def register():
-    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split):
+    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split, VIEW3D_PT_radial_split):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -691,7 +704,7 @@ def register():
 
 
 def unregister():
-    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split):
+    for cls in (MESH_OT_radial_split_seam, MESH_OT_radial_split, VIEW3D_PT_radial_split):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:

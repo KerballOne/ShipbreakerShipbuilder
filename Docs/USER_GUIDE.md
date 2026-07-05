@@ -12,7 +12,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
    - [Export to Unity FBX](#11-export-to-unity-fbx)
    - [Radial Split (Fixed Angle)](#12-radial-split-fixed-angle)
    - [Radial Split (Seam Detect)](#13-radial-split-seam-detect)
-   - [Concavity](#14-concavity)
+   - [Convex Hull Preview](#14-convex-hull-preview)
    - [Interactive Bisect](#15-interactive-bisect)
    - [Hollow Mesh](#16-hollow-mesh)
    - [Group to Collection](#17-group-to-collection)
@@ -143,11 +143,11 @@ Interactive modal tool that auto-detects where large faces meet at concave angle
 
 ---
 
-### 1.4 Concavity
+### 1.4 Convex Hull Preview
 
-**ShipBreaker sidebar → Concavity**
+**ShipBreaker sidebar → Convex Hull Preview**
 
-Experimental interactive tool for visualising coplanar face groups on a mesh. Detects large coplanar face groups, draws colored outlines around each group, and labels them by group index. Used for researching more advanced segmentation approaches for complex/non-radial shapes.
+Visualization-only tool that previews the convex hull mesh Unity would generate for a MeshCollider. Select any number of mesh objects and click **Preview Convex Hull(s)** — each object's hull is computed (via an isolated bmesh convex-hull op, no edit-mode/undo needed) and drawn as a colored wireframe overlay. When two or more hulls actually intersect (checked via an exact boolean intersection, not just a bounding-box test), the true overlap volume is highlighted in red, flagging real collider interpenetration. Click **Clear Preview** to remove the overlay.
 
 ---
 

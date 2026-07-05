@@ -331,6 +331,21 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VIEW3D_PT_check_mesh(bpy.types.Panel):
+    bl_space_type  = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category    = 'ShipBreaker'
+    bl_label       = 'Check Mesh'
+    bl_options     = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        self.layout.operator(MESH_OT_check_mesh.bl_idname,
+                             text="Check Mesh", icon='VIEWZOOM')
+        self.layout.separator()
+        self.layout.operator("mesh.convex_hull_preview", text="Preview Convex Hull(s)", icon='MOD_MESHDEFORM')
+        self.layout.operator("mesh.convex_hull_preview_clear", text="Clear Hull Preview", icon='X')
+
+
 class VIEW3D_PT_fix_inner_normals(bpy.types.Panel):
     bl_space_type  = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -339,8 +354,6 @@ class VIEW3D_PT_fix_inner_normals(bpy.types.Panel):
     bl_options     = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
-        self.layout.operator(MESH_OT_check_mesh.bl_idname,
-                             text="Check Mesh", icon='VIEWZOOM')
         self.layout.operator(MESH_OT_solidify_meshes.bl_idname,
                              text="Solidify", icon='MOD_SOLIDIFY')
         self.layout.operator(MESH_OT_fix_inner_normals.bl_idname,
@@ -351,7 +364,7 @@ class VIEW3D_PT_fix_inner_normals(bpy.types.Panel):
 
 def register():
     _install_draw_handler()
-    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_fix_inner_normals):
+    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -361,7 +374,7 @@ def register():
 
 def unregister():
     _remove_draw_handler()
-    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_fix_inner_normals):
+    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:

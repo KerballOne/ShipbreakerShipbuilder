@@ -221,6 +221,9 @@ class VIEW3D_PT_export_unity(bpy.types.Panel):
         sel = context.selected_objects
         name, meshes = _get_export_source(context)
 
+        layout.operator("dev.reload_startup_scripts", text="Reload Scripts", icon='FILE_REFRESH')
+        layout.separator()
+
         # --- Selection info ---
         alc = context.view_layer.active_layer_collection
         box = layout.box()
@@ -246,12 +249,7 @@ class VIEW3D_PT_export_unity(bpy.types.Panel):
         layout.operator("object.group_selected", text="Group to Collection", icon='OUTLINER_COLLECTION')
         layout.separator()
         layout.operator("mesh.bisect_interactive", text="Interactive Bisect", icon='MOD_BOOLEAN')
-        layout.operator("mesh.concavity", text="Concavity", icon='MOD_MESHDEFORM')
-        layout.operator("mesh.radial_split_seam", text="Radial Split (Seam Detect)", icon='VIEWZOOM')
-        layout.operator("mesh.radial_split", text="Radial Split (Fixed Angle)", icon='MOD_ARRAY')
         layout.operator("mesh.hollow_mesh", text="Hollow Mesh", icon='MOD_SOLIDIFY')
-        layout.separator()
-        layout.operator("dev.reload_startup_scripts", text="Reload Scripts", icon='FILE_REFRESH')
 
 
 class OBJECT_OT_group_selected(bpy.types.Operator):
