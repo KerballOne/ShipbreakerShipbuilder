@@ -236,11 +236,11 @@ class MESH_OT_check_mesh(bpy.types.Operator):
             bm.free()
 
             total_thin += len(thin_faces)
-            needs_solidify = len(non_manifold) > 0 or is_flat_shell
+            needs_solidify = len(non_manifold) > 0 or (is_flat_shell and len(thin_faces) > 0)
             reason = []
             if len(non_manifold) > 0:
                 reason.append(f"{len(non_manifold)} open edges")
-            if is_flat_shell:
+            if is_flat_shell and len(thin_faces) > 0:
                 reason.append(f"flat shell (vol/area={volume/area:.4f})")
             lines.append(
                 f"{obj.name}: {len(obj.data.polygons)} faces, "
@@ -304,6 +304,16 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
         precision=4,
     )
 
+    use_even_offset: bpy.props.BoolProperty(
+        name="Even Thickness",
+        description=(
+            "Keep wall thickness uniform around corners by extending miters "
+            "further. More prone to self-intersecting geometry at sharp "
+            "concave corners/notches — turn off for parts with tight details"
+        ),
+        default=True,
+    )
+
     @classmethod
     def poll(cls, context):
         return (context.mode == 'OBJECT' and
@@ -314,6 +324,7 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
 
     def draw(self, context):
         self.layout.prop(self, "thickness")
+        self.layout.prop(self, "use_even_offset")
 
     def execute(self, context):
         meshes = [o for o in context.selected_objects if o.type == 'MESH']
@@ -322,7 +333,7 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
             mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
             mod.thickness = self.thickness
             mod.offset = -1.0  # grow inward so outer surface stays in place
-            mod.use_even_offset = True
+            mod.use_even_offset = self.use_even_offset
             mod.use_quality_normals = True
             context.view_layer.objects.active = obj
             bpy.ops.object.modifier_apply(modifier=mod.name)

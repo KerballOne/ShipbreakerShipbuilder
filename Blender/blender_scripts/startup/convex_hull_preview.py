@@ -4,6 +4,13 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
+_LOG = r"C:\Users\user\source\repos\ShipbreakerShipbuilder\blender_debug.log"
+
+
+def _log(msg):
+    with open(_LOG, 'a') as f:
+        f.write(msg + "\n")
+
 bl_info = {
     "name": "Convex Hull Preview",
     "author": "KerballOne",
@@ -87,13 +94,56 @@ def _boxes_overlap(amin, amax, bmin, bmax):
             amin.z <= bmax.z and amax.z >= bmin.z)
 
 
-def _hull_intersection_tris(bm_a, bm_b):
+_MIN_OVERLAP_VOLUME = 1e-6  # m^3 — below this, treat two touching hulls (shared face/edge, no real interpenetration) as non-overlapping
+
+
+def _bm_volume(bm):
+    """Same divergence-theorem volume calc as _mesh_volume, but operating
+    directly on a bmesh's (already-triangulated-by-convex_hull) faces."""
+    vol = 0.0
+    for f in bm.faces:
+        verts = f.verts
+        v0 = verts[0].co
+        for i in range(1, len(verts) - 1):
+            v1 = verts[i].co
+            v2 = verts[i + 1].co
+            vol += v0.dot(v1.cross(v2)) / 6.0
+    return abs(vol)
+
+
+def _mesh_volume(mesh):
+    """Signed volume via the divergence theorem, summed over triangles from
+    the origin — degenerate slivers left by touching (non-overlapping) hulls
+    have near-zero volume even though the boolean solver returns a non-empty,
+    numerically noisy mesh for them."""
+    mesh.calc_loop_triangles()
+    vol = 0.0
+    for tri in mesh.loop_triangles:
+        v0 = mesh.vertices[tri.vertices[0]].co
+        v1 = mesh.vertices[tri.vertices[1]].co
+        v2 = mesh.vertices[tri.vertices[2]].co
+        vol += v0.dot(v1.cross(v2)) / 6.0
+    return abs(vol)
+
+
+def _hull_intersection_tris(bm_a, bm_b, vol_a, vol_b):
     """Exact boolean INTERSECT of two hull bmeshes (already in world space,
     faces already welled up by convex_hull). Uses temporary mesh objects
     with a Boolean modifier — the same approach as Split By Convex Hulls —
     since bmesh.ops.intersect operates on a single self-intersecting mesh,
     not two separate solids. Returns a flat list of triangle verts for the
-    overlap solid (empty if the hulls don't actually intersect)."""
+    overlap solid, or an empty list if the hulls don't actually interpenetrate.
+
+    Two safety checks on the raw boolean result:
+    - near-zero volume: hulls that merely touch along a shared face/edge can
+      still produce a thin, numerically-noisy non-empty result.
+    - volume exceeding min(vol_a, vol_b): a true intersection can never be
+      larger than its smallest operand. The EXACT solver has been observed
+      to emit a corrupted/mis-wound result mesh for certain thin, coplanar-
+      touching hull pairs, whose "volume" computes to many times larger than
+      either input — that's a solver artifact, not a real overlap, so it's
+      discarded rather than trusted.
+    """
     mesh_a = bpy.data.meshes.new("_hull_overlap_a_tmp")
     bm_a.to_mesh(mesh_a)
     obj_a = bpy.data.objects.new("_hull_overlap_a_tmp", mesh_a)
@@ -114,10 +164,18 @@ def _hull_intersection_tris(bm_a, bm_b):
         depsgraph = bpy.context.evaluated_depsgraph_get()
         obj_a_eval = obj_a.evaluated_get(depsgraph)
         eval_mesh = obj_a_eval.to_mesh()
-        eval_mesh.calc_loop_triangles()
-        for tri in eval_mesh.loop_triangles:
-            for vi in tri.vertices:
-                tris.append(tuple(eval_mesh.vertices[vi].co))
+        vol = _mesh_volume(eval_mesh)
+        max_plausible = min(vol_a, vol_b) * (1.0 + 1e-4)
+        if vol < _MIN_OVERLAP_VOLUME:
+            pass  # touching, not overlapping
+        elif vol > max_plausible:
+            _log(f"hull overlap DISCARDED (implausible): result_vol={vol:.6f} "
+                 f"exceeds min(hull_a={vol_a:.6f}, hull_b={vol_b:.6f}) — solver artifact")
+        else:
+            eval_mesh.calc_loop_triangles()
+            for tri in eval_mesh.loop_triangles:
+                for vi in tri.vertices:
+                    tris.append(tuple(eval_mesh.vertices[vi].co))
         obj_a_eval.to_mesh_clear()
     finally:
         bpy.data.objects.remove(obj_a, do_unlink=True)
@@ -223,11 +281,13 @@ class MESH_OT_convex_hull_preview(bpy.types.Operator):
         try:
             for i in range(len(hulls)):
                 for j in range(i + 1, len(hulls)):
-                    _, bm_a, _, amin, amax = hulls[i]
-                    _, bm_b, _, bmin, bmax = hulls[j]
+                    obj_a, bm_a, _, amin, amax = hulls[i]
+                    obj_b, bm_b, _, bmin, bmax = hulls[j]
                     if not _boxes_overlap(amin, amax, bmin, bmax):
                         continue
-                    tris = _hull_intersection_tris(bm_a, bm_b)
+                    vol_a = _bm_volume(bm_a)
+                    vol_b = _bm_volume(bm_b)
+                    tris = _hull_intersection_tris(bm_a, bm_b, vol_a, vol_b)
                     if tris:
                         overlap_count += 1
                         overlap_tris += tris
