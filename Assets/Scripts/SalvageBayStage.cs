@@ -48,6 +48,8 @@ public class SalvageBayStage : MonoBehaviour
 
     void RenderBay()
     {
+        if (visibleBay != null) DestroyImmediate(visibleBay);
+        if (visibleJack != null) DestroyImmediate(visibleJack);
         visibleBay = GameObject.Instantiate(bay, new Vector3(21.83f, 11.8f, 35.9f), Quaternion.identity, transform);
         visibleJack = GameObject.Instantiate(jack, new Vector3(22.35f, 9.5f, 112.9f), Quaternion.Euler(0, -90, 0), transform);
     }
