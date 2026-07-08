@@ -331,12 +331,11 @@ public static class JointCensusGizmos
     static void OnSceneGUI(SceneView sv)
     {
         if (!GameRenderWindow.drawJointCensus) return;
-        if (!GameRenderWindow.drawJointCensusHull && !GameRenderWindow.drawJointCensusWireframe) return;
 
         TryLoad();
         if (s_parts.Count == 0) return;
 
-        bool clusterMode = GameRenderWindow.jointCensusGroupByCluster;
+        bool clusterMode = !GameRenderWindow.jointCensusShowByNeighborCount;
         int selectedCluster = GameRenderWindow.jointCensusClusterIndex;
 
         foreach (var root in GetActiveRootObjects())
@@ -372,8 +371,7 @@ public static class JointCensusGizmos
                         foreach (var (a, b) in hullEdges)
                             Handles.DrawLine(a, b);
                 }
-
-                if (GameRenderWindow.drawJointCensusWireframe)
+                else
                 {
                     var wireEdges = GetWireEdges(mesh);
                     using (new Handles.DrawingScope(col, m))

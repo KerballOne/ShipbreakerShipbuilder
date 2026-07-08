@@ -23,12 +23,10 @@ public class GameRenderWindow : EditorWindow
     public static Color bakedJointColor = new Color(1f, 0.85f, 0f, 0.85f);
 
     public static bool drawJointCensus = false;
-    public static bool drawJointCensusHull = true;
-    public static bool drawJointCensusWireframe = false;
-    public static bool jointCensusShowByNeighborCount = true;
+    public static bool drawJointCensusHull = true; // true = Convex Hull, false = Mesh Wireframe (mutually exclusive)
+    public static bool jointCensusShowByNeighborCount = true; // true = Neighbor Count, false = Cluster (mutually exclusive)
     public static int jointCensusNeighborIndex = 0; // 0-5, where 5 means "5 or more"
     public static Color jointCensusNeighborColor = new Color(1f, 0f, 0f, 0.5f);
-    public static bool jointCensusGroupByCluster = false;
     public static int jointCensusClusterIndex = 0;
     public static Color jointCensusClusterColor = new Color(0f, 1f, 1f, 0.6f);
     string lastFrameStatus;
@@ -67,14 +65,15 @@ public class GameRenderWindow : EditorWindow
         bakedJointColor       = LoadColor(K + "bakedJointColor",       bakedJointColor);
         drawJointCensus           = EditorPrefs.GetBool(K + "drawJointCensus", drawJointCensus);
         drawJointCensusHull       = EditorPrefs.GetBool(K + "drawJointCensusHull", drawJointCensusHull);
-        drawJointCensusWireframe  = EditorPrefs.GetBool(K + "drawJointCensusWireframe", drawJointCensusWireframe);
         jointCensusShowByNeighborCount = EditorPrefs.GetBool(K + "jointCensusShowByNeighborCount", jointCensusShowByNeighborCount);
         jointCensusNeighborIndex       = EditorPrefs.GetInt(K + "jointCensusNeighborIndex", jointCensusNeighborIndex);
         jointCensusNeighborColor       = LoadColor(K + "jointCensusNeighborColor", jointCensusNeighborColor);
-        jointCensusGroupByCluster = EditorPrefs.GetBool(K + "jointCensusGroupByCluster", jointCensusGroupByCluster);
         jointCensusClusterIndex   = EditorPrefs.GetInt(K + "jointCensusClusterIndex", jointCensusClusterIndex);
         jointCensusClusterColor   = LoadColor(K + "jointCensusClusterColor", jointCensusClusterColor);
     }
+
+    const float ColorColumnWidth = 60f;
+    const float StepperArrowWidth = 24f;
 
     void OnGUI()
     {
@@ -96,86 +95,67 @@ public class GameRenderWindow : EditorWindow
         showHidden = GUILayout.Toggle(showHidden, "Show hidden", GUILayout.ExpandWidth(false));
         EditorGUILayout.EndHorizontal();
 
+        Separator();
+
         GUILayout.Label("Room volumes", EditorStyles.boldLabel);
-        drawRooms = GUILayout.Toggle(drawRooms, "Draw Rooms");
-        GUILayout.Label("Room volume colors", EditorStyles.label);
-        roomColorInclude = EditorGUILayout.ColorField(roomColorInclude);
-        roomColorExclude = EditorGUILayout.ColorField(roomColorExclude);
+        drawRooms = ToggleWithColor(drawRooms, "Draw Rooms", ref roomColorInclude);
+        roomColorExclude = LabeledColorFieldFixed(new GUIContent("Exclude Color"), roomColorExclude);
 
         GUILayout.Label("Room overlaps", EditorStyles.boldLabel);
-        drawRoomOverlaps = GUILayout.Toggle(drawRoomOverlaps, "Draw Room Overlaps");
-        GUILayout.Label("Overlap Color", EditorStyles.label);
-        roomOverlapColor = EditorGUILayout.ColorField(roomOverlapColor);
-        drawRoomOverlapFlows = GUILayout.Toggle(drawRoomOverlapFlows, "Draw Room Overlap Flows");
-        GUILayout.Label("Overlap Color", EditorStyles.label);
-        roomOverlapFlowColor = EditorGUILayout.ColorField(roomOverlapFlowColor);
+        drawRoomOverlaps = ToggleWithColor(drawRoomOverlaps, "Draw Room Overlaps", ref roomOverlapColor);
+        drawRoomOverlapFlows = ToggleWithColor(drawRoomOverlapFlows, "Draw Room Overlap Flows", ref roomOverlapFlowColor);
+
+        Separator();
 
         GUILayout.Label("Joints", EditorStyles.boldLabel);
         drawJoints = GUILayout.Toggle(drawJoints, "Draw Joints");
-        GUILayout.Label("Root — cross-part joint surface", EditorStyles.label);
-        jointRootColor = EditorGUILayout.ColorField(jointRootColor);
-        GUILayout.Label("Standard — internal structural", EditorStyles.label);
-        jointStandardColor = EditorGUILayout.ColorField(jointStandardColor);
-        GUILayout.Label("Cut point", EditorStyles.label);
-        jointCutColor = EditorGUILayout.ColorField(jointCutColor);
+        jointRootColor = LabeledColorFieldFixed(new GUIContent("Root", "Cross-part joint surface"), jointRootColor);
+        jointStandardColor = LabeledColorFieldFixed(new GUIContent("Standard", "Internal structural joint"), jointStandardColor);
+        jointCutColor = LabeledColorFieldFixed(new GUIContent("Cut point"), jointCutColor);
 
-        GUILayout.Label("Baked joints (InvisibleJoint)", EditorStyles.boldLabel);
-        drawBakedJoints = GUILayout.Toggle(drawBakedJoints, "Draw Baked Joints");
-        GUILayout.Label("StructureParts baked directly in the ship prefab", EditorStyles.label);
-        bakedJointColor = EditorGUILayout.ColorField(bakedJointColor);
+        drawBakedJoints = ToggleWithColor(drawBakedJoints, new GUIContent("Draw Baked Joints", "StructureParts baked directly in the ship prefab (InvisibleJoint)"), ref bakedJointColor);
+
+        Separator();
 
         GUILayout.Label("Joint census overlay", EditorStyles.boldLabel);
-        GUILayout.Label("Colors parts by jointed-neighbor count from joint_census.csv (PartInfoLogger)", EditorStyles.label);
         var prevDrawJointCensus = drawJointCensus;
-        drawJointCensus = GUILayout.Toggle(drawJointCensus, "Draw Joint Census");
+        drawJointCensus = GUILayout.Toggle(drawJointCensus, new GUIContent("Draw Joint Census", "Colors parts by jointed-neighbor count or connected cluster, from joint_census.csv (PartInfoLogger)"));
         if (drawJointCensus != prevDrawJointCensus)
         {
             if (drawJointCensus)
                 JointCensusGizmos.ReloadCsv();
             SceneView.RepaintAll();
         }
-        EditorGUILayout.BeginHorizontal();
-        drawJointCensusHull = GUILayout.Toggle(drawJointCensusHull, "Convex Hull", GUILayout.ExpandWidth(false));
-        drawJointCensusWireframe = GUILayout.Toggle(drawJointCensusWireframe, "Mesh Wireframe", GUILayout.ExpandWidth(false));
-        EditorGUILayout.EndHorizontal();
-        jointCensusShowByNeighborCount = GUILayout.Toggle(jointCensusShowByNeighborCount, "Show by Neighbor Count");
+
+        drawJointCensusHull = DrawSwitch(drawJointCensusHull, "Convex Hull", "Mesh Wireframe");
+        jointCensusShowByNeighborCount = DrawSwitch(jointCensusShowByNeighborCount, "Neighbor Count", "Cluster");
+
         if (jointCensusShowByNeighborCount)
         {
             EditorGUILayout.BeginHorizontal();
-            GUI.enabled = jointCensusNeighborIndex > 0;
-            if (GUILayout.Button("◀", GUILayout.Width(30))) jointCensusNeighborIndex--;
-            GUI.enabled = true;
+            DrawStepperArrows(ref jointCensusNeighborIndex, 0, 5);
             var label = jointCensusNeighborIndex >= 5 ? "5+ neighbors" : $"{jointCensusNeighborIndex} neighbor{(jointCensusNeighborIndex == 1 ? "" : "s")}";
             GUILayout.Label(label, GUILayout.Width(110));
-            GUI.enabled = jointCensusNeighborIndex < 5;
-            if (GUILayout.Button("▶", GUILayout.Width(30))) jointCensusNeighborIndex++;
-            GUI.enabled = true;
+            GUILayout.FlexibleSpace();
+            jointCensusNeighborColor = ColorFieldFixed(GUIContent.none, jointCensusNeighborColor);
             EditorGUILayout.EndHorizontal();
             jointCensusNeighborIndex = EditorGUILayout.IntSlider(jointCensusNeighborIndex, 0, 5);
-            jointCensusNeighborColor = EditorGUILayout.ColorField(jointCensusNeighborColor);
         }
-        GUILayout.Label("Group by connected cluster", EditorStyles.label);
-        GUILayout.Label("Isolates disconnected clusters of the ship's joint graph, sorted fewest parts first", EditorStyles.wordWrappedMiniLabel);
-        jointCensusGroupByCluster = GUILayout.Toggle(jointCensusGroupByCluster, "Group by Cluster");
-        if (jointCensusGroupByCluster)
+        else
         {
             var prevClusterIndex = jointCensusClusterIndex;
+            var maxIndex = Mathf.Max(0, JointCensusGizmos.ClusterCount - 1);
 
             EditorGUILayout.BeginHorizontal();
-            var maxIndex = Mathf.Max(0, JointCensusGizmos.ClusterCount - 1);
-            GUI.enabled = jointCensusClusterIndex > 0;
-            if (GUILayout.Button("◀", GUILayout.Width(30))) jointCensusClusterIndex--;
-            GUI.enabled = true;
+            DrawStepperArrows(ref jointCensusClusterIndex, 0, maxIndex);
             var clusterSize = JointCensusGizmos.GetClusterSize(jointCensusClusterIndex);
-            GUILayout.Label($"Cluster {jointCensusClusterIndex} / {maxIndex} ({clusterSize} part{(clusterSize == 1 ? "" : "s")})", GUILayout.Width(190));
-            GUI.enabled = jointCensusClusterIndex < maxIndex;
-            if (GUILayout.Button("▶", GUILayout.Width(30))) jointCensusClusterIndex++;
-            GUI.enabled = true;
+            GUILayout.Label(new GUIContent($"Cluster {jointCensusClusterIndex} / {maxIndex} ({clusterSize} part{(clusterSize == 1 ? "" : "s")})",
+                "Isolates disconnected clusters of the ship's joint graph, sorted fewest parts first"), GUILayout.Width(190));
+            GUILayout.FlexibleSpace();
+            jointCensusClusterColor = ColorFieldFixed(GUIContent.none, jointCensusClusterColor);
             EditorGUILayout.EndHorizontal();
             jointCensusClusterIndex = EditorGUILayout.IntSlider(jointCensusClusterIndex, 0, maxIndex);
             jointCensusClusterIndex = Mathf.Clamp(jointCensusClusterIndex, 0, maxIndex);
-            GUILayout.Label("Cluster color", EditorStyles.label);
-            jointCensusClusterColor = EditorGUILayout.ColorField(jointCensusClusterColor);
 
             if (jointCensusClusterIndex != prevClusterIndex)
                 JointCensusGizmos.SelectClusterObjects(jointCensusClusterIndex);
@@ -201,12 +181,78 @@ public class GameRenderWindow : EditorWindow
                 MessageType.Info);
 
         if (EditorGUI.EndChangeCheck())
+        {
             SaveAll();
+            SceneView.RepaintAll();
+        }
 
         if (drawJoints && AddressableRendering.jointData.Count == 0)
             EditorGUILayout.HelpBox(
                 "No joint data found. Delete Assets/EditorCache/ and click Redraw to rebuild with joint data.",
                 MessageType.Warning);
+    }
+
+    static void Separator()
+    {
+        GUILayout.Space(6);
+        var rect = EditorGUILayout.GetControlRect(false, 1);
+        EditorGUI.DrawRect(rect, new Color(0.5f, 0.5f, 0.5f, 0.5f));
+        GUILayout.Space(6);
+    }
+
+    static Color ColorFieldFixed(GUIContent label, Color color) =>
+        EditorGUILayout.ColorField(label, color, true, true, false, GUILayout.Width(ColorColumnWidth));
+
+    // Label on the left, fixed-width color field flush right — matches the toggle rows' layout.
+    static Color LabeledColorFieldFixed(GUIContent label, Color color)
+    {
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label(label);
+        GUILayout.FlexibleSpace();
+        var result = ColorFieldFixed(GUIContent.none, color);
+        EditorGUILayout.EndHorizontal();
+        return result;
+    }
+
+    // Toggle on the left, its color field on the same row to the right — no separate label line.
+    static bool ToggleWithColor(bool value, string label, ref Color color) =>
+        ToggleWithColor(value, new GUIContent(label), ref color);
+
+    static bool ToggleWithColor(bool value, GUIContent label, ref Color color)
+    {
+        EditorGUILayout.BeginHorizontal();
+        var result = GUILayout.Toggle(value, label);
+        GUILayout.FlexibleSpace();
+        color = ColorFieldFixed(GUIContent.none, color);
+        EditorGUILayout.EndHorizontal();
+        return result;
+    }
+
+    // Two-way switch rendered as a horizontal toolbar toggle group — leftLabel selected means true.
+    // Uses a tinted background on the selected segment so the active side is unambiguous.
+    static bool DrawSwitch(bool leftSelected, string leftLabel, string rightLabel)
+    {
+        var selectedIndex = leftSelected ? 0 : 1;
+        var prevColor = GUI.backgroundColor;
+        EditorGUILayout.BeginHorizontal();
+        GUI.backgroundColor = selectedIndex == 0 ? new Color(0.3f, 0.6f, 1f, 1f) : prevColor;
+        if (GUILayout.Toggle(selectedIndex == 0, leftLabel, EditorStyles.miniButtonLeft)) selectedIndex = 0;
+        GUI.backgroundColor = selectedIndex == 1 ? new Color(0.3f, 0.6f, 1f, 1f) : prevColor;
+        if (GUILayout.Toggle(selectedIndex == 1, rightLabel, EditorStyles.miniButtonRight)) selectedIndex = 1;
+        GUI.backgroundColor = prevColor;
+        EditorGUILayout.EndHorizontal();
+        return selectedIndex == 0;
+    }
+
+    // Renders ◀ ▶ buttons flush against each other (no gap) that step `value` within [min, max].
+    static void DrawStepperArrows(ref int value, int min, int max)
+    {
+        GUI.enabled = value > min;
+        if (GUILayout.Button("◀", EditorStyles.miniButtonLeft, GUILayout.Width(StepperArrowWidth))) value--;
+        GUI.enabled = value < max;
+        if (GUILayout.Button("▶", EditorStyles.miniButtonRight, GUILayout.Width(StepperArrowWidth))) value++;
+        GUI.enabled = true;
+        value = Mathf.Clamp(value, min, max);
     }
 
     void SaveAll()
@@ -228,11 +274,9 @@ public class GameRenderWindow : EditorWindow
         SaveColor(K + "bakedJointColor",      bakedJointColor);
         EditorPrefs.SetBool(K + "drawJointCensus", drawJointCensus);
         EditorPrefs.SetBool(K + "drawJointCensusHull", drawJointCensusHull);
-        EditorPrefs.SetBool(K + "drawJointCensusWireframe", drawJointCensusWireframe);
         EditorPrefs.SetBool(K + "jointCensusShowByNeighborCount", jointCensusShowByNeighborCount);
         EditorPrefs.SetInt(K + "jointCensusNeighborIndex", jointCensusNeighborIndex);
         SaveColor(K + "jointCensusNeighborColor", jointCensusNeighborColor);
-        EditorPrefs.SetBool(K + "jointCensusGroupByCluster", jointCensusGroupByCluster);
         EditorPrefs.SetInt(K + "jointCensusClusterIndex", jointCensusClusterIndex);
         SaveColor(K + "jointCensusClusterColor", jointCensusClusterColor);
     }
