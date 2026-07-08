@@ -16,8 +16,8 @@ bl_info = {
 }
 
 # Colors for the two halves (RGBA)
-COLOR_TOP    = (0.2, 0.6, 1.0, 0.45)
-COLOR_BOTTOM = (1.0, 0.45, 0.1, 0.45)
+COLOR_TOP    = (0.2, 0.6, 1.0, 0.1)
+COLOR_BOTTOM = (1.0, 0.45, 0.1, 0.1)
 COLOR_PLANE  = (1.0, 1.0, 0.2, 0.25)
 
 
@@ -47,6 +47,42 @@ def _world_axis_bounds_multi(objects, axis_idx):
     if not vals:
         return 0.0, 1.0
     return min(vals), max(vals)
+
+
+def _clip_triangle(tri, axis_idx, cut_val, keep_above):
+    """Clip a single world-space triangle against the axis-aligned cut plane,
+    returning a list of triangles (0, 1, or 2) covering only the portion on
+    the requested side. Splits large faces exactly at the plane instead of
+    coloring the whole source triangle by its centroid."""
+    def side(v):
+        d = v[axis_idx] - cut_val
+        return d if keep_above else -d
+
+    signed = [side(v) for v in tri]
+    pos = [i for i in range(3) if signed[i] > 1e-9]
+    neg = [i for i in range(3) if signed[i] <= 1e-9]
+
+    if len(pos) == 3:
+        return [tri]
+    if len(neg) == 3:
+        return []
+
+    def intersect(i, j):
+        t = signed[i] / (signed[i] - signed[j])
+        return tri[i].lerp(tri[j], t)
+
+    if len(pos) == 1:
+        i = pos[0]
+        j, k = neg
+        pj = intersect(i, j)
+        pk = intersect(i, k)
+        return [(tri[i], pj, pk)]
+    else:  # len(pos) == 2
+        i, j = pos
+        k = neg[0]
+        pik = intersect(i, k)
+        pjk = intersect(j, k)
+        return [(tri[i], tri[j], pjk), (tri[i], pjk, pik)]
 
 
 def _build_plane_batch_multi(objects, axis_idx, cut_val):
@@ -216,11 +252,11 @@ class MESH_OT_bisect_interactive(bpy.types.Operator):
         verts_top = []
         verts_bot = []
         for tri_centers, tri_verts in self._obj_tris:
-            for center, tri in zip(tri_centers, tri_verts):
-                if center[axis_idx] >= cut_val:
-                    verts_top.extend(tri)
-                else:
-                    verts_bot.extend(tri)
+            for tri in tri_verts:
+                for clipped in _clip_triangle(tri, axis_idx, cut_val, keep_above=True):
+                    verts_top.extend(clipped)
+                for clipped in _clip_triangle(tri, axis_idx, cut_val, keep_above=False):
+                    verts_bot.extend(clipped)
 
         def make(verts):
             return batch_for_shader(shader, 'TRIS', {"pos": verts}) if verts else None
