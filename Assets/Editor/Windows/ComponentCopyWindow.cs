@@ -13,7 +13,7 @@ public class ComponentCopyWindow : EditorWindow
 
     // ── shared ───────────────────────────────────────────────────────────────
     int _tab;
-    readonly string[] _tabLabels = { "Components", "Material Shader" };
+    readonly string[] _tabLabels = { "Components", "Material Shader", "Assign by Name" };
 
     // ── Tab 0: Component diff ─────────────────────────────────────────────────
     GameObject   _compSrc;
@@ -104,6 +104,23 @@ public class ComponentCopyWindow : EditorWindow
     List<MatProp> _matProps = new List<MatProp>();
     bool _matDiffBuilt;
 
+    // ── Tab 2: Assign by Name ─────────────────────────────────────────────────
+    string  m_AssignSpGuid, m_AssignSpName, m_AssignSpSearch;
+    bool    m_AssignSpOpen;
+    Vector2 m_AssignSpScroll;
+
+    string  m_AssignBpGuid, m_AssignBpName, m_AssignBpSearch;
+    bool    m_AssignBpOpen;
+    Vector2 m_AssignBpScroll;
+
+    bool m_AssignSpPreviewOpen = true;
+    bool m_AssignBpPreviewOpen = true;
+    readonly Dictionary<string, Vector2> m_PreviewScrolls = new Dictionary<string, Vector2>();
+    readonly Dictionary<string, string> m_PreviewFilters = new Dictionary<string, string>();
+
+    static List<(string name, string guid)> s_AssignSpEntries;
+    static List<(string name, string guid)> s_AssignBpEntries;
+
     // ─────────────────────────────────────────────────────────────────────────
 
     void OnGUI()
@@ -111,8 +128,9 @@ public class ComponentCopyWindow : EditorWindow
         _tab = GUILayout.Toolbar(_tab, _tabLabels);
         EditorGUILayout.Space(4);
 
-        if (_tab == 0) DrawComponentTab();
-        else           DrawMaterialTab();
+        if (_tab == 0)      DrawComponentTab();
+        else if (_tab == 1) DrawMaterialTab();
+        else                DrawAssignByNameTab();
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -994,6 +1012,294 @@ public class ComponentCopyWindow : EditorWindow
         }
 
         return data;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Tab 2 — Assign by Name
+    // ══════════════════════════════════════════════════════════════════════════
+
+    void DrawAssignByNameTab()
+    {
+        EditorGUILayout.LabelField("Assign StructurePart / Blueprint by name", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Picks a known SP_Mat / BP_Mat by name and writes it into the target's ACL. " +
+            "No source GameObject required — use this when nothing existing already carries the component you want.",
+            MessageType.Info);
+
+        var targets = Selection.gameObjects;
+        string targetLabel = targets.Length == 0 ? "—"
+            : targets.Length == 1 ? targets[0].name
+            : $"{targets.Length} objects selected";
+        EditorGUILayout.LabelField("Target", targetLabel);
+
+        if (targets.Length == 0)
+        {
+            EditorGUILayout.HelpBox("Select one or more target GameObjects in the Hierarchy.", MessageType.Info);
+            return;
+        }
+
+        var missingAcl = targets.Where(t => FindAncestorAcl(t.transform) == null).ToArray();
+        if (missingAcl.Length > 0)
+        {
+            EditorGUILayout.HelpBox(
+                $"{missingAcl.Length} target(s) have no ancestor AddressableComponentLoader (e.g. '{missingAcl[0].name}') — cannot assign.",
+                MessageType.Error);
+            return;
+        }
+
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("StructurePart (SP_Mat)", EditorStyles.miniBoldLabel);
+        DrawRefOverride(ref m_AssignSpGuid, ref m_AssignSpName, ref m_AssignSpSearch,
+            ref m_AssignSpOpen, ref m_AssignSpScroll, GetAssignSpEntries);
+        DrawAssetPreview(m_AssignSpName, ref m_AssignSpPreviewOpen);
+
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Blueprint (BP_Mat)", EditorStyles.miniBoldLabel);
+        DrawRefOverride(ref m_AssignBpGuid, ref m_AssignBpName, ref m_AssignBpSearch,
+            ref m_AssignBpOpen, ref m_AssignBpScroll, GetAssignBpEntries);
+        DrawAssetPreview(m_AssignBpName, ref m_AssignBpPreviewOpen);
+
+        EditorGUILayout.Space(6);
+        bool anyChosen = !string.IsNullOrEmpty(m_AssignSpGuid) || !string.IsNullOrEmpty(m_AssignBpGuid);
+        GUI.enabled = anyChosen;
+        string applyLabel = targets.Length == 1
+            ? $"Assign to '{targets[0].name}'"
+            : $"Assign to {targets.Length} objects";
+        if (GUILayout.Button(applyLabel))
+            ApplyAssignByName(targets);
+        GUI.enabled = true;
+    }
+
+    void ApplyAssignByName(GameObject[] targets)
+    {
+        Undo.SetCurrentGroupName("Assign SP/BP by Name");
+        int group = Undo.GetCurrentGroup();
+
+        int applied = 0;
+        foreach (var go in targets)
+        {
+            var acl = FindAncestorAcl(go.transform);
+            if (acl == null) continue;
+
+            if (!string.IsNullOrEmpty(m_AssignSpGuid))
+            {
+                var sp = go.GetComponent<StructurePart>();
+                if (sp == null) { sp = go.AddComponent<StructurePart>(); Undo.RegisterCreatedObjectUndo(sp, "Assign SP/BP by Name"); }
+                AssignAclValue(acl, go, sp, "m_StructurePartAsset", m_AssignSpGuid);
+                applied++;
+            }
+
+            if (!string.IsNullOrEmpty(m_AssignBpGuid))
+            {
+                var bp = go.GetComponent<EntityBlueprintComponent>();
+                if (bp == null) { bp = go.AddComponent<EntityBlueprintComponent>(); Undo.RegisterCreatedObjectUndo(bp, "Assign SP/BP by Name"); }
+                AssignAclValue(acl, go, bp, "m_BlueprintAsset", m_AssignBpGuid);
+                applied++;
+            }
+
+            EditorUtility.SetDirty(acl);
+            EditorUtility.SetDirty(go);
+        }
+
+        Undo.CollapseUndoOperations(group);
+        Debug.Log($"[ComponentCopy] Assigned by name to {targets.Length} object(s), {applied} ACL entr{(applied == 1 ? "y" : "ies")} written.");
+    }
+
+    static void AssignAclValue(AddressableComponentLoader acl, GameObject go, Component comp, string field, string guid)
+    {
+        Undo.RecordObject(acl, "Assign SP/BP by Name");
+        string goName = StripCopySuffix(go.name);
+        acl.componentValues.RemoveAll(cv =>
+            cv.component != null &&
+            StripCopySuffix(cv.component.gameObject.name) == goName &&
+            cv.field == field &&
+            cv.component.GetType() == comp.GetType());
+        acl.componentValues.Add(new AddressableComponentValue { component = comp, field = field, address = guid });
+    }
+
+    static List<(string name, string guid)> GetAssignSpEntries()
+    {
+        if (s_AssignSpEntries != null) return s_AssignSpEntries;
+        s_AssignSpEntries = new List<(string, string)>();
+        if (LoadGameAssets.knownAssetMap == null) return s_AssignSpEntries;
+        foreach (var kv in LoadGameAssets.knownAssetMap)
+        {
+            if (!kv.Value.Contains("SP_Mat") || !kv.Value.EndsWith(".asset")) continue;
+            s_AssignSpEntries.Add((Path.GetFileNameWithoutExtension(kv.Value), kv.Key));
+        }
+        s_AssignSpEntries.Sort((a, b) => string.Compare(a.name, b.name, System.StringComparison.OrdinalIgnoreCase));
+        return s_AssignSpEntries;
+    }
+
+    static List<(string name, string guid)> GetAssignBpEntries()
+    {
+        if (s_AssignBpEntries != null) return s_AssignBpEntries;
+        s_AssignBpEntries = new List<(string, string)>();
+        if (LoadGameAssets.knownAssetMap == null) return s_AssignBpEntries;
+        foreach (var kv in LoadGameAssets.knownAssetMap)
+        {
+            if (!kv.Value.EndsWith(".asset")) continue;
+            string name = Path.GetFileNameWithoutExtension(kv.Value);
+            if (!name.StartsWith("BP_")) continue;
+            s_AssignBpEntries.Add((name, kv.Key));
+        }
+        s_AssignBpEntries.Sort((a, b) => string.Compare(a.name, b.name, System.StringComparison.OrdinalIgnoreCase));
+        return s_AssignBpEntries;
+    }
+
+    // ── Shared ref-override UI (searchable name dropdown) ───────────────────────
+
+    void DrawRefOverride(
+        ref string guid, ref string displayName,
+        ref string search, ref bool open, ref Vector2 scroll,
+        System.Func<List<(string name, string guid)>> getEntries)
+    {
+        var entries = getEntries();
+
+        EditorGUILayout.BeginHorizontal();
+
+        string btnLabel = string.IsNullOrEmpty(displayName) ? "(none)" : displayName;
+        if (GUILayout.Button(btnLabel, EditorStyles.popup))
+            open = !open;
+
+        if (!string.IsNullOrEmpty(guid))
+        {
+            if (GUILayout.Button("✕", GUILayout.Width(24)))
+            {
+                guid = ""; displayName = ""; open = false; search = "";
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        if (open)
+        {
+            search = EditorGUILayout.TextField("Search", search);
+            string filter = (search ?? "").ToLowerInvariant();
+
+            var filtered = new List<(string name, string guid)>();
+            foreach (var e in entries)
+                if (string.IsNullOrEmpty(filter) || e.name.ToLowerInvariant().Contains(filter))
+                    filtered.Add(e);
+
+            float rowH  = EditorGUIUtility.singleLineHeight + 2;
+            float maxH  = 200f;
+            float listH = Mathf.Min(maxH, filtered.Count * rowH + 4);
+            scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(listH));
+
+            foreach (var (eName, eGuid) in filtered)
+            {
+                bool selected = eGuid == guid;
+                var  style    = new GUIStyle(EditorStyles.label);
+                if (selected) style.fontStyle = FontStyle.Bold;
+                if (GUILayout.Button(eName, style, GUILayout.Height(rowH)))
+                {
+                    guid = eGuid; displayName = eName; open = false; search = "";
+                }
+            }
+
+            GUILayout.EndScrollView();
+        }
+
+        if (!string.IsNullOrEmpty(guid))
+            EditorGUILayout.HelpBox($"{displayName}\n{guid}", MessageType.None);
+    }
+
+    // SP_Mat/BP_Mat assets only exist inside the shipped game's asset bundles — there is no
+    // loose .asset file in this project to inspect. Instead, PartInfoLogger (the runtime mod)
+    // reflects over the live asset's fields in-game and writes sp_bp_fields.json next to
+    // known_assets_enriched.json. This reads that dump by asset name, keyed off the display
+    // name already resolved by GetAssignSpEntries/GetAssignBpEntries.
+    static Dictionary<string, Dictionary<string, object>> s_SpBpFields;
+    static System.DateTime s_SpBpFieldsMTime;
+
+    // Re-reads sp_bp_fields.json whenever its on-disk write time changes, instead of caching
+    // forever — PartInfoLogger rewrites this file every gameplay session, and a stale in-memory
+    // cache from an earlier (possibly file-not-found) load would otherwise hide new data until
+    // the Unity Editor process restarts.
+    static Dictionary<string, Dictionary<string, object>> LoadSpBpFields()
+    {
+        var path = Path.Combine(Application.dataPath, "..", "sp_bp_fields.json");
+        if (!File.Exists(path)) { s_SpBpFields = null; return null; }
+
+        var mtime = File.GetLastWriteTimeUtc(path);
+        if (s_SpBpFields != null && mtime == s_SpBpFieldsMTime) return s_SpBpFields;
+
+        try
+        {
+            s_SpBpFields = Newtonsoft.Json.JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, object>>>(File.ReadAllText(path));
+            s_SpBpFieldsMTime = mtime;
+        }
+        catch { s_SpBpFields = null; }
+        return s_SpBpFields;
+    }
+
+    void DrawAssetPreview(string displayName, ref bool open)
+    {
+        if (string.IsNullOrEmpty(displayName)) return;
+
+        var table = LoadSpBpFields();
+        if (table == null)
+        {
+            EditorGUILayout.HelpBox(
+                "sp_bp_fields.json not found in project root — run the game once with PartInfoLogger installed to generate it.",
+                MessageType.Info);
+            return;
+        }
+
+        if (!table.TryGetValue(displayName, out var fields) || fields == null || fields.Count == 0)
+        {
+            EditorGUILayout.HelpBox($"No captured fields for '{displayName}' yet — this asset hasn't been seen in-game by PartInfoLogger.", MessageType.Info);
+            return;
+        }
+
+        open = EditorGUILayout.Foldout(open, $"Preview captured fields ({fields.Count})", true);
+        if (!open) return;
+
+        var scrollKey = displayName;
+        if (!m_PreviewScrolls.TryGetValue(scrollKey, out var scroll)) scroll = Vector2.zero;
+        m_PreviewFilters.TryGetValue(scrollKey, out var filter);
+
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+        var newFilter = EditorGUILayout.TextField("Filter", filter ?? "");
+        if (newFilter != filter) m_PreviewFilters[scrollKey] = filter = newFilter;
+
+        IEnumerable<KeyValuePair<string, object>> shown = fields;
+        if (!string.IsNullOrEmpty(filter))
+            shown = fields.Where(kv => kv.Key.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0
+                                     || (kv.Value?.ToString().IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) ?? -1) >= 0);
+        var shownList = shown.OrderBy(kv => kv.Key, System.StringComparer.OrdinalIgnoreCase).ToList();
+
+        // Key names can be long (e.g. "Data.m_AudioMaterialAsset.Data.m_AudioMaterialAsset...") and a
+        // fixed-width side-by-side column truncates them with no way to read the rest. Stack key above
+        // value instead so the full key is always visible (word-wrapped). Height is a fraction of the
+        // window's current height (not a fixed px value) so it scales consistently as the window is
+        // resized, and stays bounded when both SP and BP previews are open at once.
+        var keyStyle = new GUIStyle(EditorStyles.wordWrappedLabel) { fontSize = 9, fontStyle = FontStyle.Normal };
+        var valStyleTrue  = new GUIStyle(EditorStyles.wordWrappedLabel) { fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.4f, 0.85f, 0.4f) } };
+        var valStyleFalse = new GUIStyle(EditorStyles.wordWrappedLabel) { fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.9f, 0.4f, 0.4f) } };
+        var valStyleOther = new GUIStyle(EditorStyles.wordWrappedLabel) { fontStyle = FontStyle.Bold };
+
+        float previewHeight = Mathf.Max(120f, position.height * 0.22f);
+        scroll = EditorGUILayout.BeginScrollView(scroll, GUILayout.Height(previewHeight));
+        foreach (var kv in shownList)
+        {
+            EditorGUILayout.LabelField(kv.Key, keyStyle);
+            string valStr = kv.Value?.ToString() ?? "null";
+            var valStyle = valStr == "True" ? valStyleTrue : valStr == "False" ? valStyleFalse : valStyleOther;
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(12);
+            EditorGUILayout.LabelField(valStr, valStyle);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(2);
+        }
+        if (shownList.Count == 0)
+            EditorGUILayout.LabelField("  No fields match filter.", EditorStyles.miniLabel);
+        EditorGUILayout.EndScrollView();
+
+        EditorGUILayout.EndVertical();
+
+        m_PreviewScrolls[scrollKey] = scroll;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
