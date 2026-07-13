@@ -1,0 +1,1409 @@
+{
+  "profileName": "test5",
+  "capturedAtUtc": "2026-07-10T20:53:56.9425104Z",
+  "playerActionTrackerHistory": {
+    "PAT_TUT_02_03_ShipCatalogueIntro": 3,
+    "PAT_TUT_02_03_OnShipCatEnter": 6,
+    "PAT_TUT_02_00_Rank2_VO": 1,
+    "PAT_TUT_01_12_Processor": 1,
+    "PAT_TUT_03_02_LookBarge": 1,
+    "PAT_SkipTutorial": 1,
+    "PAT_Rank02_Reached": 1,
+    "PAT_ShiftsRemainingTillRailgate": 0,
+    "PAT_STICKERS_EmployeeAdvancement_RankUp": 7,
+    "PAT_TUT_02_04_ReachRank3": 12,
+    "PAT_NumShiftsUntilNarrativeChatterPlayAttempt": 0,
+    "PAT_TUT_05_02_TutorialStarted": 0,
+    "PAT_TUT_04_07_EnterHab": 13,
+    "PAT_TUT_03_00_EnterHAB": 16,
+    "PAT_cmpScene_isPlaying_Tracker": 0,
+    "PAT_NewShip": 2,
+    "PAT_TUT_03_01_SelectShip": 2,
+    "PAT_CMP_Overall_ShiftTracker": 5,
+    "PAT_CMP_Rank03_ShiftTracker": 3,
+    "PAT_inHab": 1,
+    "PAT_CMP_NonSeq_NightSceneJustPlayed_Tracker": 0,
+    "PAT_TUT_01_05_Brakes": 165,
+    "PAT_TUT_01_10_RadialMenu": 47,
+    "PAT_TUT_03_XX_FireIntro": 12,
+    "PAT_Oxygen_Low": 4,
+    "PAT_TUT_03_04_KioskIntro": 4,
+    "PAT_Ach_BreatheInBreatheOut_RefillO2": 5,
+    "PAT_SalvageTierGained_Generic": 5,
+    "PAT_SalvageGoalComplete": 5,
+    "PAT_EndShift": 5,
+    "PAT_isDead": 0,
+    "PAT_Ach_LetsPatchThingsUp_UsePatchKit": 1,
+    "PAT_Certification_Level_Up": 1,
+    "PAT_Rank04_Reached": 5,
+    "PAT_TUT_02_01_HabIntro_OpenMessages": 1,
+    "PAT_TUT_02_02_ViewCertificationMessage": 1,
+    "PAT_CMP_Rank04_ShiftTracker": 2,
+    "PAT_TUT_04_XX_ElectricalIntro": 6,
+    "PAT_Ach_ADropInTheOcean_CollectCreditDrive": 1,
+    "PAT_STICKERS_BeerDialogue": 3,
+    "PAT_CMP_02_00_HABIntro_Night_Complete": 1,
+    "PAT_CMP_02_01_WeaverBackstory_Tracker": 1,
+    "PAT_CMP_04_01_LouHopes_Night_Complete": 1,
+    "PAT_CMP_05_01_LouUnionNewsletterSignup_Complete": 1,
+    "PAT_CMP_05_02_WeaverLouFriction_ScenePlayed": 1,
+    "PAT_Rank07_Reached": 1
+  },
+  "industrialActionShips": [
+    {
+      "name": "IndustrialAction_IndustrialActionShipAsset",
+      "alreadyGenerated": false,
+      "conditionAsset": "PATCon_CMP_A3_SC06_IndustrialActionIntro_ShipAvailable",
+      "conditions": [
+        {
+          "list": "m_All",
+          "pat": "PAT_CMP_A3_SC04_MessageFromLou_Read",
+          "requiredCount": 0,
+          "countIrrelevant": true,
+          "orGreater": false,
+          "actualCount": 0,
+          "met": false
+        },
+        {
+          "list": "m_None",
+          "pat": "PAT_CMP_A3_SC06_IndustrialActionIntroVO_Complete",
+          "requiredCount": 1,
+          "countIrrelevant": false,
+          "orGreater": true,
+          "actualCount": 0,
+          "met": false
+        }
+      ],
+      "allListSatisfied": false
+    }
+  ],
+  "narrativeMessages": [
+    {
+      "name": "NARCON_Message_FurnaceGod_04",
+      "inboxState": "read",
+      "subjectLineLocID": "38100",
+      "subjectText": "Automated Message: High Engagement Topic",
+      "senderLocID": "38096",
+      "senderText": "LYNX-Comms@LYNX.railmail",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_Ach_FurnaceGod_MsgRead",
+      "inboxMessageReadPAT_actualCount": 0
+    },
+    {
+      "name": "NARCON_Message_Lou_MessageFromLou",
+      "inboxState": "read",
+      "subjectLineLocID": "68805",
+      "subjectText": "GET BONE-STRENGTHENING METEOR-DUST NOW!!! Open for a FREE PRIZE!",
+      "senderLocID": "38121",
+      "senderText": "Sender_Undisclosed",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_CMP_A3_SC04_MessageFromLou_Read",
+      "inboxMessageReadPAT_actualCount": 0
+    },
+    {
+      "name": "NARCON_Message_FurnaceGod_03",
+      "inboxState": "read",
+      "subjectLineLocID": "38099",
+      "subjectText": "Maybe they're onto something...?",
+      "senderLocID": "38095",
+      "senderText": "Shipbreaker_2800-30@LYNX.railmail",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_Ach_FurnaceGod_MsgRead",
+      "inboxMessageReadPAT_actualCount": 0
+    },
+    {
+      "name": "NARCON_Message_Handbook_Certification",
+      "inboxState": "read",
+      "subjectLineLocID": "38227",
+      "subjectText": "Certification",
+      "senderLocID": "38021",
+      "senderText": "LYNX-Edu@LYNX.railmail",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_TUT_02_02_ViewCertificationMessage",
+      "inboxMessageReadPAT_actualCount": 1
+    },
+    {
+      "name": "NARCON_Message_FurnaceGod_01",
+      "inboxState": "read",
+      "subjectLineLocID": "38097",
+      "subjectText": "Have you felt the warmth??",
+      "senderLocID": "38093",
+      "senderText": "Shipbreaker_3591-20@LYNX.railmail",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_Ach_FurnaceGod_MsgRead",
+      "inboxMessageReadPAT_actualCount": 0
+    },
+    {
+      "name": "NARCON_Message_FurnaceGod_02",
+      "inboxState": "read",
+      "subjectLineLocID": "38098",
+      "subjectText": "Get back to work!",
+      "senderLocID": "38094",
+      "senderText": "Shipbreaker_5105-44@LYNX.railmail",
+      "isHabGreeting": false,
+      "inboxMessageReadPAT": "PAT_Ach_FurnaceGod_MsgRead",
+      "inboxMessageReadPAT_actualCount": 0
+    },
+    {
+      "name": "NARCON_Message_Handbook_Tethers",
+      "inboxState": "read",
+      "subjectLineLocID": "38023",
+      "subjectText": "Tools - Tethers",
+      "senderLocID": "38021",
+      "senderText": "LYNX-Edu@LYNX.railmail",
+      "isHabGreeting": true,
+      "habGreetingPopupReadPAT": "PAT_TUT_04_03_TethersPurchased",
+      "habGreetingPopupReadPAT_actualCount": 0
+    }
+  ],
+  "profileFieldDump": {
+    "<ProfileName>k__BackingField@field:String": "test5",
+    "<PlayerProfileType>k__BackingField@field:PlayerProfileType": "Career",
+    "<TutorialCompleted>k__BackingField@field:Boolean": true,
+    "<CurrentObjectiveGroupEntry>k__BackingField@field:ObjectiveGroupEntry": "<null>",
+    "<DebtPaidOff>k__BackingField@field:Boolean": false,
+    "<HasPendingShiftExpenses>k__BackingField@field:Boolean": true,
+    "<PreviousShiftEarnings>k__BackingField@field:Single": 2014620.75,
+    "mVoiceIndex@field:Int32": 0,
+    "mFoodChoice@field:LynxFoodOption": "PlasticFree",
+    "mPlayerController@field:Player@ref": "Player (Player)",
+    "<CurrencyController>k__BackingField@field:CurrencyController.mCreditsAsset@field:CurrencyAsset@ref": "Credits_CurrencyAsset (CurrencyAsset)",
+    "<CurrencyController>k__BackingField@field:CurrencyController.mCurrencyAssets@field:Dictionary`2@count": 15,
+    "<CurrencyController>k__BackingField@field:CurrencyController.mActiveCurrencies@field:Dictionary`2@count": 15,
+    "<CurrencyController>k__BackingField@field:CurrencyController.CreditsAsset@prop:CurrencyAsset@ref": "Credits_CurrencyAsset (CurrencyAsset)",
+    "<CurrencyController>k__BackingField@field:CurrencyController.CurrencyAssets@prop:Dictionary`2@count": 15,
+    "<CurrencyController>k__BackingField@field:CurrencyController.Currencies@prop:Dictionary`2@count": 15,
+    "<Inventory>k__BackingField@field:Inventory.mInventories@field:Dictionary`2@count": 8,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<NewMessagesCount>k__BackingField@field:Int32": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<CollectedUnidentifiedNarrativeEntries>k__BackingField@field:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<CollectedIdentifiedNarrativeEntries>k__BackingField@field:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<UnreadMessages>k__BackingField@field:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<ReadMessages>k__BackingField@field:Dictionary`2@count": 4,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.<ReconciledMessages>k__BackingField@field:List`1@count": 7,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.NewMessagesCount@prop:Int32": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.CollectedUnidentifiedNarrativeEntries@prop:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.CollectedIdentifiedNarrativeEntries@prop:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.UnreadMessages@prop:Dictionary`2@count": 0,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.ReadMessages@prop:Dictionary`2@count": 4,
+    "<NarrativeInventory>k__BackingField@field:NarrativeInventory.ReconciledMessages@prop:List`1@count": 7,
+    "<SpaceTruckState>k__BackingField@field:SpaceTruckState.SectionModifications@field:Dictionary`2@count": 8,
+    "<SpaceTruckState>k__BackingField@field:SpaceTruckState.CurrentStats@field:Dictionary`2@count": 3,
+    "<CurrentSpaceTruckLevel>k__BackingField@field:Int32": -1,
+    "<CurrentSpaceTruckLevelAsset>k__BackingField@field:SpaceTruckLevelAsset": "<null>",
+    "<SpaceTruckLevelInProgress>k__BackingField@field:Int32": 1,
+    "<SpaceTruckLevelInProgressAsset>k__BackingField@field:SpaceTruckLevelAsset@ref": "Level1_SpaceTruckLevelAsset (SpaceTruckLevelAsset)",
+    "<SpaceTruckCompleted>k__BackingField@field:Boolean": false,
+    "<CurrentCertificationRank>k__BackingField@field:Int32": 7,
+    "<CertificationTiers>k__BackingField@field:Dictionary`2@count": 7,
+    "<SavedCertificationProgress>k__BackingField@field:Dictionary`2@count": 0,
+    "PlayerActionTrackerHistory@field:Dictionary`2@count": 46,
+    "RandomSceneHistory@field:List`1@count": 0,
+    "StickerCollectionHistory@field:Dictionary`2@count": 64,
+    "StickerPlacements@field:Dictionary`2@count": 19,
+    "<UnlockedAbilities>k__BackingField@field:Dictionary`2@count": 27,
+    "<AppliedUpgrades>k__BackingField@field:HashSet`1@count": 5,
+    "<Upgrades>k__BackingField@field:HashSet`1@count": 5,
+    "<ShipClassToAvailablePreviewsMap>k__BackingField@field:Dictionary`2@count": 18,
+    "<ShipClassToLowerHazardLevelPreviewsMap>k__BackingField@field:Dictionary`2@count": 18,
+    "<RawLoadedAvailableShips>k__BackingField@field:List`1@count": 4,
+    "<RawLoadedLowerHazardLevelShips>k__BackingField@field:List`1@count": 0,
+    "<HigherRankShipIndicesToShow>k__BackingField@field:HashSet`1@count": 0,
+    "<RankUpsSinceLastBoardRefresh>k__BackingField@field:Int32": 0,
+    "<RemainingShiftsTillBoardRefresh>k__BackingField@field:Int32": 1,
+    "<IndustrialActionShips>k__BackingField@field:Dictionary`2@count": 0,
+    "<StoredDurabilityMap>k__BackingField@field:Dictionary`2@count": 5,
+    "mDifficultyMode@field:DifficultyModeAsset@ref": "Standard_DifficultyModeAsset (DifficultyModeAsset)",
+    "<ThrusterCharge>k__BackingField@field:Single": 55.3094063,
+    "<Tethers>k__BackingField@field:Int32": -1,
+    "<DemoCharges>k__BackingField@field:Int32": -1,
+    "<PendingFuelRefill>k__BackingField@field:Boolean": false,
+    "<PendingTetherRefill>k__BackingField@field:Boolean": false,
+    "<PendingDemoChargeRefill>k__BackingField@field:Boolean": false,
+    "<ShiftsUntilPolaris>k__BackingField@field:Int32": 3,
+    "XPTracker@field:PlayerXPTracker.<CurrentXP>k__BackingField@field:Single": 112.0,
+    "XPTracker@field:PlayerXPTracker.<PreviousXP>k__BackingField@field:Single": 112.0,
+    "XPTracker@field:PlayerXPTracker.<CurrentShipXP>k__BackingField@field:Single": 0.0,
+    "XPTracker@field:PlayerXPTracker.<CurrentShipCredits>k__BackingField@field:Single": 0.0,
+    "XPTracker@field:PlayerXPTracker.<BonusXPEntries>k__BackingField@field:List`1@count": 0,
+    "XPTracker@field:PlayerXPTracker.<MaxLevelReached>k__BackingField@field:Boolean": false,
+    "XPTracker@field:PlayerXPTracker.<LevelGainedLastShift>k__BackingField@field:Boolean": false,
+    "XPTracker@field:PlayerXPTracker.<PendingXP>k__BackingField@field:Single": 0.0,
+    "XPTracker@field:PlayerXPTracker.mXPMultiplier@field:Int32": -1,
+    "XPTracker@field:PlayerXPTracker.CurrentXP@prop:Single": 112.0,
+    "XPTracker@field:PlayerXPTracker.PreviousXP@prop:Single": 112.0,
+    "XPTracker@field:PlayerXPTracker.CurrentShipXP@prop:Single": 0.0,
+    "XPTracker@field:PlayerXPTracker.CurrentShipCredits@prop:Single": 0.0,
+    "XPTracker@field:PlayerXPTracker.BonusXPEntries@prop:List`1@count": 0,
+    "XPTracker@field:PlayerXPTracker.MaxLevelReached@prop:Boolean": false,
+    "XPTracker@field:PlayerXPTracker.LevelGainedLastShift@prop:Boolean": false,
+    "XPTracker@field:PlayerXPTracker.PendingXP@prop:Single": 0.0,
+    "ProfileCertGoals@field:List`1[]@count": 30,
+    "<ResetOnlineStatsRequired>k__BackingField@field:Boolean": false,
+    "<IgnoreOxygenDrain>k__BackingField@field:Boolean": false,
+    "<HabSavedPosters>k__BackingField@field:List`1@count": 7,
+    "<LockProfileSaving>k__BackingField@field:Boolean": false,
+    "ProfileName@prop:String": "test5",
+    "PlayerProfileType@prop:PlayerProfileType": "Career",
+    "TutorialCompleted@prop:Boolean": true,
+    "FTUECompleted@prop:Boolean": true,
+    "CurrentObjectiveGroupEntry@prop:ObjectiveGroupEntry": "<null>",
+    "DebtPaidOff@prop:Boolean": false,
+    "HasPendingShiftExpenses@prop:Boolean": true,
+    "PreviousShiftEarnings@prop:Single": 2014620.75,
+    "VoiceIndex@prop:Int32": 0,
+    "FoodChoice@prop:LynxFoodOption": "PlasticFree",
+    "PlayerEntity@prop:Entity.Index@field:Int32": 218,
+    "PlayerEntity@prop:Entity.Version@field:Int32": 1,
+    "CurrencyController@prop:CurrencyController.mCreditsAsset@field:CurrencyAsset@ref": "Credits_CurrencyAsset (CurrencyAsset)",
+    "CurrencyController@prop:CurrencyController.mCurrencyAssets@field:Dictionary`2@count": 15,
+    "CurrencyController@prop:CurrencyController.mActiveCurrencies@field:Dictionary`2@count": 15,
+    "CurrencyController@prop:CurrencyController.CreditsAsset@prop:CurrencyAsset@ref": "Credits_CurrencyAsset (CurrencyAsset)",
+    "CurrencyController@prop:CurrencyController.CurrencyAssets@prop:Dictionary`2@count": 15,
+    "CurrencyController@prop:CurrencyController.Currencies@prop:Dictionary`2@count": 15,
+    "Inventory@prop:Inventory.mInventories@field:Dictionary`2@count": 8,
+    "NarrativeInventory@prop:NarrativeInventory.<NewMessagesCount>k__BackingField@field:Int32": 0,
+    "NarrativeInventory@prop:NarrativeInventory.<CollectedUnidentifiedNarrativeEntries>k__BackingField@field:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.<CollectedIdentifiedNarrativeEntries>k__BackingField@field:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.<UnreadMessages>k__BackingField@field:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.<ReadMessages>k__BackingField@field:Dictionary`2@count": 4,
+    "NarrativeInventory@prop:NarrativeInventory.<ReconciledMessages>k__BackingField@field:List`1@count": 7,
+    "NarrativeInventory@prop:NarrativeInventory.NewMessagesCount@prop:Int32": 0,
+    "NarrativeInventory@prop:NarrativeInventory.CollectedUnidentifiedNarrativeEntries@prop:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.CollectedIdentifiedNarrativeEntries@prop:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.UnreadMessages@prop:Dictionary`2@count": 0,
+    "NarrativeInventory@prop:NarrativeInventory.ReadMessages@prop:Dictionary`2@count": 4,
+    "NarrativeInventory@prop:NarrativeInventory.ReconciledMessages@prop:List`1@count": 7,
+    "SpaceTruckState@prop:SpaceTruckState.SectionModifications@field:Dictionary`2@count": 8,
+    "SpaceTruckState@prop:SpaceTruckState.CurrentStats@field:Dictionary`2@count": 3,
+    "CurrentSpaceTruckLevel@prop:Int32": -1,
+    "CurrentSpaceTruckLevelAsset@prop:SpaceTruckLevelAsset": "<null>",
+    "SpaceTruckLevelInProgress@prop:Int32": 1,
+    "SpaceTruckLevelInProgressAsset@prop:SpaceTruckLevelAsset@ref": "Level1_SpaceTruckLevelAsset (SpaceTruckLevelAsset)",
+    "SpaceTruckCompleted@prop:Boolean": false,
+    "CurrentCertificationRank@prop:Int32": 7,
+    "CertificationTiers@prop:Dictionary`2@count": 7,
+    "SavedCertificationProgress@prop:Dictionary`2@count": 0,
+    "UnlockedAbilities@prop:Dictionary`2@count": 27,
+    "AppliedUpgrades@prop:HashSet`1@count": 5,
+    "Upgrades@prop:HashSet`1@count": 5,
+    "ShipClassToAvailablePreviewsMap@prop:Dictionary`2@count": 18,
+    "ShipClassToLowerHazardLevelPreviewsMap@prop:Dictionary`2@count": 18,
+    "RawLoadedAvailableShips@prop:List`1@count": 4,
+    "RawLoadedLowerHazardLevelShips@prop:List`1@count": 0,
+    "HigherRankShipIndicesToShow@prop:HashSet`1@count": 0,
+    "RankUpsSinceLastBoardRefresh@prop:Int32": 0,
+    "RemainingShiftsTillBoardRefresh@prop:Int32": 1,
+    "IndustrialActionShips@prop:Dictionary`2@count": 0,
+    "StoredDurabilityMap@prop:Dictionary`2@count": 5,
+    "DifficultyMode@prop:DifficultyModeAsset@ref": "Standard_DifficultyModeAsset (DifficultyModeAsset)",
+    "ThrusterCharge@prop:Single": 55.3094063,
+    "Tethers@prop:Int32": -1,
+    "DemoCharges@prop:Int32": -1,
+    "PendingFuelRefill@prop:Boolean": false,
+    "PendingTetherRefill@prop:Boolean": false,
+    "PendingDemoChargeRefill@prop:Boolean": false,
+    "NumberOfDeaths@prop:Int32": 0,
+    "NumberOfShifts@prop:Int32": 5,
+    "NumberOfSalvageGoals@prop:Int32": 5,
+    "NumberOfShipsStarted@prop:Int32": 2,
+    "ShiftsUntilPolaris@prop:Int32": 3,
+    "ResetOnlineStatsRequired@prop:Boolean": false,
+    "IgnoreOxygenDrain@prop:Boolean": false,
+    "HabSavedPosters@prop:List`1@count": 7,
+    "LockProfileSaving@prop:Boolean": false
+  },
+  "collectionContents": {
+    "CurrencyController.Currencies": [
+      {
+        "key": {
+          "AssetID": "int4(1767263882, -1306253195, 24986842, -827914073)",
+          "IsValid": true,
+          "AssetGUID": "69564e8a2875b224da447d01a708a7ce"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "LocID:554",
+          "mValue": "4118543",
+          "mSpentValue": "2204013",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "LocID:554",
+          "Amount": 4118542.75,
+          "SpentAmount": 2204013.0,
+          "Percent": 0.49999997,
+          "AmountString": "4118543.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(1237448047, 724833044, -1278927352, 1388137561)",
+          "IsValid": true,
+          "AssetGUID": "49c1f56f13142b34081ec5b3594cbd52"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "LocID:30",
+          "mValue": "68",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": true,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "LocID:30",
+          "Amount": 68.0,
+          "SpentAmount": 0.0,
+          "Percent": 6.8E-07,
+          "AmountString": "68",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(522621474, 459560613, -1645485414, 1085635969)",
+          "IsValid": true,
+          "AssetGUID": "1f26922256a51b649ae2eb9d817db540"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "LocID:281",
+          "mValue": "5",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": true,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "LocID:281",
+          "Amount": 5.0,
+          "SpentAmount": 0.0,
+          "Percent": 5E-08,
+          "AmountString": "5",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(2012375078, 2136234948, -277776198, -1095306093)",
+          "IsValid": true,
+          "AssetGUID": "77f268265bc47f54ba7871ef93f4b6be"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "LocID:85",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": true,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "LocID:85",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(-713703836, -1427851580, 791987979, -1064277940)",
+          "IsValid": true,
+          "AssetGUID": "d575be64b6c4aae40bc7342f4c6890c0"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3901",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3901",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(152350269, -1061940403, -1054407749, -1747700546)",
+          "IsValid": true,
+          "AssetGUID": "0914ae3d134dc0b4bb0327c1be34d497"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3903",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3903",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(1096830082, 194295403, 1620638987, 2125532422)",
+          "IsValid": true,
+          "AssetGUID": "41604c82b66b0b940bfd9860060db17e"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3915",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3915",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(1164982774, -388735730, -1087623031, -1368488139)",
+          "IsValid": true,
+          "AssetGUID": "457039f65d0ee8d489302cbf35876eae"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3909",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3909",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(-1853332561, 1886701857, 280238506, 282325590)",
+          "IsValid": true,
+          "AssetGUID": "918863afc9217074aa19b41056f2d310"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3905",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3905",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(1354949378, -493610026, -1682897799, -1647898377)",
+          "IsValid": true,
+          "AssetGUID": "50c2e3021bd6e2947904b19bf710c79d"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3913",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3913",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(628499015, 1338270310, 1817225403, -448292555)",
+          "IsValid": true,
+          "AssetGUID": "2576224762664fc4bba8506c359947e5"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3911",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3911",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(-1213210163, 404014934, -693719352, -1223487460)",
+          "IsValid": true,
+          "AssetGUID": "b7afe1cdc7561814c8aea6d61c1013b7"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3907",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3907",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(1203868732, 95731045, -1196135592, -259166811)",
+          "IsValid": true,
+          "AssetGUID": "47c1943cbd6505b4586bb4b8a56d8df0"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3917",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3917",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(-376585332, -1294679157, -824581077, -344970275)",
+          "IsValid": true,
+          "AssetGUID": "e98dc38cc38bb2d42be4d9cedd2b70eb"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "3919",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "3919",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      },
+      {
+        "key": {
+          "AssetID": "int4(-675108569, -591098830, 157065017, -247997989)",
+          "IsValid": true,
+          "AssetGUID": "d7c2a9278c32dcc4399f5c09dbd937f1"
+        },
+        "value": {
+          "mCurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "mName": "70363",
+          "mValue": "0",
+          "mSpentValue": "0",
+          "mRange": "BBI.Unity.Core.Utility.RangeDefinition",
+          "mRoundToInt": false,
+          "CurrencyAssetID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+          "Name": "70363",
+          "Amount": 0.0,
+          "SpentAmount": 0.0,
+          "Percent": 0.0,
+          "AmountString": "0.00",
+          "Range": "BBI.Unity.Core.Utility.RangeDefinition"
+        }
+      }
+    ],
+    "DifficultyMode.Debt": {
+      "DifficultyModeAssetName": "Standard_DifficultyModeAsset",
+      "StartingDebtAmount": 1252594441.92,
+      "DebtInterestAsset.Data.Currency": {
+        "Data": "BBI.Unity.Game.CurrencyAsset+CurrencyData",
+        "ID": "BBI.Unity.Game.AssetTypeID`1[[BBI.Unity.Game.CurrencyAsset, BBI.Unity.Game, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+        "AssetGUID": "69564e8a2875b224da447d01a708a7ce",
+        "name": "Credits_CurrencyAsset",
+        "hideFlags": "None"
+      }
+    },
+    "UnlockedAbilities": {
+      "CutterScalpel": true,
+      "CutterShatter": false,
+      "CutterBoneSaw": true,
+      "GrappleTethers": false,
+      "GrappleHazardManagement": false,
+      "GrappleResistanceShielding": false,
+      "GrapplePush": true,
+      "GrappleChargedPush": false,
+      "ThrustersTravelMode": false,
+      "ScannerValuables": false,
+      "ScannerHazards": false,
+      "ScannerStructure": true,
+      "ScannerSystems": false,
+      "ScannerObjects": false,
+      "HelmetLight": false,
+      "HelmetHUDUpgrade": false,
+      "OxygenTankRecharge": false,
+      "GrappleRentalCost": false,
+      "CutterRentalCost": false,
+      "ScannerRentalCost": false,
+      "SuitRentalCost": false,
+      "ThrusterRentalCost": false,
+      "HelmetRentalCost": false,
+      "DemoChargeRentalCost": false,
+      "DemoCharge": false,
+      "DemoChargeRemovableGrip": false,
+      "DemoChargeAutoDeploy": false
+    },
+    "Upgrades": [
+      "UnlockScalpel_UpgradeAsset",
+      "UnlockBoneSaw_UpgradeAsset",
+      "UnlockGrapplingHook_UpgradeAsset",
+      "UnlockPush_UpgradeAsset",
+      "ScannerMode_Structure_UpgradeAsset"
+    ],
+    "AppliedUpgrades": [
+      "UnlockScalpel_UpgradeAsset",
+      "UnlockBoneSaw_UpgradeAsset",
+      "UnlockGrapplingHook_UpgradeAsset",
+      "UnlockPush_UpgradeAsset",
+      "ScannerMode_Structure_UpgradeAsset"
+    ],
+    "StoredDurabilityMap": {
+      "Cutter": {
+        "ToolType": "Cutter",
+        "WwiseShortRawObjectID": 158990906,
+        "PreviousDurability": 88.89982,
+        "CurrentDurability": 88.7798157,
+        "MaxDurability": 100.0
+      },
+      "DemoCharge": {
+        "ToolType": "DemoCharge",
+        "WwiseShortRawObjectID": 3000013994,
+        "PreviousDurability": 100.0,
+        "CurrentDurability": 100.0,
+        "MaxDurability": 100.0
+      },
+      "Grapple": {
+        "ToolType": "Grapple",
+        "WwiseShortRawObjectID": 1938140580,
+        "PreviousDurability": 87.91972,
+        "CurrentDurability": 87.87972,
+        "MaxDurability": 100.0
+      },
+      "Thrusters": {
+        "ToolType": "Thrusters",
+        "WwiseShortRawObjectID": 1815295896,
+        "PreviousDurability": 89.56074,
+        "CurrentDurability": 89.55574,
+        "MaxDurability": 100.0
+      },
+      "Scanner": {
+        "ToolType": "Scanner",
+        "WwiseShortRawObjectID": 4180112015,
+        "PreviousDurability": 90.60014,
+        "CurrentDurability": 90.500145,
+        "MaxDurability": 100.0
+      }
+    },
+    "HabSavedPosters": [
+      1,
+      2,
+      3,
+      5,
+      2,
+      3,
+      4
+    ],
+    "StickerCollectionHistory": {
+      "Salvager_Reactor_Class_1_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Reactor_Class_1_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Reactor_Class_2_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Reactor_Class_2_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Aluminum_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 4068.55884,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Aluminum_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Nanocarbon_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 19687.1543,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Nanocarbon_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_DataDrives_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_DataDrives_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Airlock_StickerAsset": {
+        "CollectedObjectCount": 1,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Airlock_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Antenna_HighGrade_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Antenna_HighGrade_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_ECU_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_ECU_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_IonRing_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_IonRing_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_PowerGenerator_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_PowerGenerator_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Thruster_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Thruster_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_ElectricCableWires_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_ElectricCableWires_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Nacelle_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 1,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Nacelle_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Rocks_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Rocks_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Credits_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 6322556.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "Salvager_Credits_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_TutorialComplete_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 1,
+        "HasNew": true
+      },
+      "EmployeeAdvancement_Rank10_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 11,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 1,
+        "HasNew": true
+      },
+      "EmployeeAdvancement_Rank15_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 11,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_10Spares_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_10Spares_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_Rank25_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 11,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_FurnaceGod_StickersAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_FurnaceGod_Shiny_StickersAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "EmployeeAdvancement_ContractGoalsComplete_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Bottles_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Bottles__Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_FoodPacks_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_FoodPacks_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Posters_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Posters_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_BeerDialogue_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 1,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 1,
+        "HasNew": true
+      },
+      "DetailOriented_PerfectSalvage_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_PerfectSalvage_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Velocity_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "DetailOriented_Velocity_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_Helmet_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_Helmet_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_AI_Node_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_AI_Node_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_MachineGod_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "GhostShip_MachineGod_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Mackerel_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Mackerel_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Atlas_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Atlas_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Javelin_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Javelin_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Gecko_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      },
+      "ShipSpecialist_Gecko_Shiny_StickerAsset": {
+        "CollectedObjectCount": 0,
+        "CollectedCategoryObjectCount": 0,
+        "CollectedCategoryMassCount": 0.0,
+        "PlayerActionCount": 0,
+        "CurrencyCount": 0.0,
+        "CollectedStickerCount": 0,
+        "HasNew": false
+      }
+    },
+    "StickerPlacements": {
+      "StickerSlot_Cutter_00": "<null>",
+      "StickerSlot_Cutter_01": "<null>",
+      "StickerSlot_Cutter_02": "<null>",
+      "StickerSlot_Cutter_03": "<null>",
+      "StickerSlot_Cutter_04": "<null>",
+      "StickerSlot_Cutter_05": "<null>",
+      "StickerSlot_Cutter_06": "<null>",
+      "StickerSlot_Cutter_07": "<null>",
+      "StickerSlot_Grapple_00": "<null>",
+      "StickerSlot_Grapple_01": "<null>",
+      "StickerSlot_Grapple_02": "<null>",
+      "StickerSlot_Grapple_03": "<null>",
+      "StickerSlot_Grapple_04": "<null>",
+      "StickerSlot_Grapple_05": "<null>",
+      "StickerSlot_Grapple_06": "<null>",
+      "StickerSlot_Grapple_07": "<null>",
+      "StickerSlot_Grapple_08": "<null>",
+      "StickerSlot_Grapple_09": "<null>",
+      "StickerSlot_Grapple_10": "<null>"
+    },
+    "RawLoadedAvailableShips": [
+      {
+        "ClassAsset": "ShipGrade3_ShipClassAsset",
+        "MCAssetRef": "[82a1edb7df47e36438f97962bc2219de]",
+        "Seed": 645035409,
+        "DaysRemaining": 1,
+        "Rewards": "System.Collections.Generic.List`1[BBI.Unity.Game.RewardTiersAsset+SelectedRewards]"
+      },
+      {
+        "ClassAsset": "ShipGrade3_ShipClassAsset",
+        "MCAssetRef": "[a488d3b761075ca44a3c5afaf63484db]",
+        "Seed": 559397270,
+        "DaysRemaining": 1,
+        "Rewards": "System.Collections.Generic.List`1[BBI.Unity.Game.RewardTiersAsset+SelectedRewards]"
+      },
+      {
+        "ClassAsset": "ShipGrade3_ShipClassAsset",
+        "MCAssetRef": "[64a1a1f3e77574f468b15c16dfe0229f]",
+        "Seed": 1592726617,
+        "DaysRemaining": 1,
+        "Rewards": "System.Collections.Generic.List`1[BBI.Unity.Game.RewardTiersAsset+SelectedRewards]"
+      },
+      {
+        "ClassAsset": "ShipGrade3_ShipClassAsset",
+        "MCAssetRef": "[ffe15ab63fd88174786869d70ce973c3]",
+        "Seed": 1697641603,
+        "DaysRemaining": 1,
+        "Rewards": "System.Collections.Generic.List`1[BBI.Unity.Game.RewardTiersAsset+SelectedRewards]"
+      }
+    ],
+    "SpaceTruckState.CurrentStats": {
+      "Comfort_SpaceTruckStatAsset": 2.0,
+      "Handling_SpaceTruckStatAsset": 6.0,
+      "Speed_SpaceTruckStatAsset": 4.0
+    },
+    "SpaceTruckState.SectionModifications": {
+      "Dashboard_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "Engine_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "AirFilter_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "ECU_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "FuelLine_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "IgnitionSystem_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "Pipes_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      },
+      "Thrusters_SpaceTruckSectionAsset": {
+        "PartsAddedList": "System.Collections.Generic.Dictionary`2[BBI.Unity.Game.SpaceTruckPartCurrencyAsset,System.Single]"
+      }
+    }
+  }
+}
