@@ -546,6 +546,24 @@ public class CustomPartWizard : EditorWindow
                         segMeshes.Add(fm);
                 }
 
+                // The importer already wires correct per-submesh materials (via
+                // CustomMeshPostprocessor.OnAssignMaterialModel) onto MeshRenderers in the
+                // imported FBX's GameObject hierarchy — read them from there instead of
+                // assuming one material per mesh, and reuse the source GO's name.
+                var fbxRoot = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
+                var meshToRenderer = new Dictionary<Mesh, MeshRenderer>();
+                var meshToName     = new Dictionary<Mesh, string>();
+                if (fbxRoot != null)
+                {
+                    foreach (var mf in fbxRoot.GetComponentsInChildren<MeshFilter>(true))
+                    {
+                        if (mf.sharedMesh == null || meshToRenderer.ContainsKey(mf.sharedMesh)) continue;
+                        var mr = mf.GetComponent<MeshRenderer>();
+                        if (mr != null) meshToRenderer[mf.sharedMesh] = mr;
+                        meshToName[mf.sharedMesh] = mf.gameObject.name;
+                    }
+                }
+
                 // Ensure Read/Write is enabled on the FBX — game reads mesh vertices for volume/mass
                 var modelImporter = AssetImporter.GetAtPath(fbxPath) as ModelImporter;
                 if (modelImporter != null && !modelImporter.isReadable)
@@ -590,20 +608,38 @@ public class CustomPartWizard : EditorWindow
                 // Children: each segment = full self-contained salvageable GO
                 for (int i = 0; i < segMeshes.Count; i++)
                 {
-                    if (segMeshes[i] == null) continue;
-                    var segGO = new GameObject($"{m_PartName}_{i:D2}");
+                    var segMesh = segMeshes[i];
+                    if (segMesh == null) continue;
+
+                    string segName = meshToName.TryGetValue(segMesh, out var srcName)
+                        ? srcName : $"{m_PartName}_{i:D2}";
+                    var segGO = new GameObject(segName);
                     segGO.transform.SetParent(root.transform, false);
 
                     var mf        = segGO.AddComponent<MeshFilter>();
-                    mf.sharedMesh = segMeshes[i];
+                    mf.sharedMesh = segMesh;
 
                     var mr = segGO.AddComponent<MeshRenderer>();
-                    if (resolvedMaterial != null)
-                        mr.sharedMaterials = new[] { resolvedMaterial };
+                    // Build a materials array matching the mesh's submesh count so every
+                    // submesh renders — a single fallback material otherwise leaves any
+                    // submesh beyond index 0 with no material assigned (invisible in HDRP).
+                    int subMeshCount = Mathf.Max(1, segMesh.subMeshCount);
+                    var segMaterials = new Material[subMeshCount];
+                    Material[] sourceMaterials = null;
+                    if (meshToRenderer.TryGetValue(segMesh, out var srcRenderer) && srcRenderer != null)
+                        sourceMaterials = srcRenderer.sharedMaterials;
+                    for (int m = 0; m < subMeshCount; m++)
+                    {
+                        Material candidate = null;
+                        if (sourceMaterials != null && m < sourceMaterials.Length)
+                            candidate = sourceMaterials[m];
+                        segMaterials[m] = candidate != null ? candidate : resolvedMaterial;
+                    }
+                    mr.sharedMaterials = segMaterials;
 
                     var mc        = segGO.AddComponent<MeshCollider>();
                     mc.convex     = true;
-                    mc.sharedMesh = segMeshes[i];
+                    mc.sharedMesh = segMesh;
 
                     segGO.AddComponent(typeof(BBI.Unity.Game.StructurePart));
                     var ebc = segGO.AddComponent(typeof(BBI.Unity.Game.EntityBlueprintComponent)) as MonoBehaviour;

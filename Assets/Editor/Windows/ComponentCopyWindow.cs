@@ -8,12 +8,12 @@ using UnityEngine;
 
 public class ComponentCopyWindow : EditorWindow
 {
-    [MenuItem("Shipbuilder/Component Copy Window", priority = 122)]
-    public static void Open() => GetWindow<ComponentCopyWindow>("Component Copy").Show();
+    [MenuItem("Shipbuilder/Components", priority = 122)]
+    public static void Open() => GetWindow<ComponentCopyWindow>("Components").Show();
 
     // ── shared ───────────────────────────────────────────────────────────────
     int _tab;
-    readonly string[] _tabLabels = { "Components", "Material Shader", "Assign by Name" };
+    readonly string[] _tabLabels = { "Copy", "Material Shader", "SP/BP" };
 
     // ── Tab 0: Component diff ─────────────────────────────────────────────────
     GameObject   _compSrc;
@@ -120,6 +120,8 @@ public class ComponentCopyWindow : EditorWindow
 
     static List<(string name, string guid)> s_AssignSpEntries;
     static List<(string name, string guid)> s_AssignBpEntries;
+
+    GameObject[] _assignLastSel = new GameObject[0];
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1038,6 +1040,12 @@ public class ComponentCopyWindow : EditorWindow
             return;
         }
 
+        if (!targets.SequenceEqual(_assignLastSel))
+        {
+            _assignLastSel = targets;
+            AutoPopulateAssignFromSelection(targets);
+        }
+
         var missingAcl = targets.Where(t => FindAncestorAcl(t.transform) == null).ToArray();
         if (missingAcl.Length > 0)
         {
@@ -1068,6 +1076,60 @@ public class ComponentCopyWindow : EditorWindow
         if (GUILayout.Button(applyLabel))
             ApplyAssignByName(targets);
         GUI.enabled = true;
+    }
+
+    // Pre-fills the SP_Mat / BP_Mat pickers from whatever is already assigned on the
+    // selected target(s), so the tab shows current state instead of always starting blank.
+    // Only populates when every target agrees on the same asset — if they differ, Apply
+    // would otherwise silently overwrite all of them to a single value, so leave blank instead.
+    void AutoPopulateAssignFromSelection(GameObject[] targets)
+    {
+        m_AssignSpGuid = ""; m_AssignSpName = ""; m_AssignSpOpen = false; m_AssignSpSearch = "";
+        m_AssignBpGuid = ""; m_AssignBpName = ""; m_AssignBpOpen = false; m_AssignBpSearch = "";
+
+        string spGuid = null, bpGuid = null;
+        bool spAgree = true, bpAgree = true;
+
+        foreach (var go in targets)
+        {
+            var acl = FindAncestorAcl(go.transform);
+            if (acl == null) continue;
+            string goName = StripCopySuffix(go.name);
+
+            var sp = go.GetComponent<StructurePart>();
+            var spCv = sp != null ? acl.componentValues.FirstOrDefault(cv =>
+                cv.component != null &&
+                StripCopySuffix(cv.component.gameObject.name) == goName &&
+                cv.field == "m_StructurePartAsset" &&
+                cv.component.GetType() == typeof(StructurePart)) : null;
+            string thisSp = spCv?.address;
+            if (spGuid == null && thisSp != null) spGuid = thisSp;
+            else if (thisSp != null && thisSp != spGuid) spAgree = false;
+
+            var bp = go.GetComponent<EntityBlueprintComponent>();
+            var bpCv = bp != null ? acl.componentValues.FirstOrDefault(cv =>
+                cv.component != null &&
+                StripCopySuffix(cv.component.gameObject.name) == goName &&
+                cv.field == "m_BlueprintAsset" &&
+                cv.component.GetType() == typeof(EntityBlueprintComponent)) : null;
+            string thisBp = bpCv?.address;
+            if (bpGuid == null && thisBp != null) bpGuid = thisBp;
+            else if (thisBp != null && thisBp != bpGuid) bpAgree = false;
+        }
+
+        if (spAgree && !string.IsNullOrEmpty(spGuid))
+        {
+            var entry = GetAssignSpEntries().FirstOrDefault(e => e.guid == spGuid);
+            m_AssignSpGuid = spGuid;
+            m_AssignSpName = entry.name ?? AddressToAssetName(spGuid);
+        }
+
+        if (bpAgree && !string.IsNullOrEmpty(bpGuid))
+        {
+            var entry = GetAssignBpEntries().FirstOrDefault(e => e.guid == bpGuid);
+            m_AssignBpGuid = bpGuid;
+            m_AssignBpName = entry.name ?? AddressToAssetName(bpGuid);
+        }
     }
 
     void ApplyAssignByName(GameObject[] targets)

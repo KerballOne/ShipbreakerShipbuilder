@@ -37,14 +37,15 @@ public class CustomMeshPostprocessor : AssetPostprocessor
             AssetDatabase.CreateFolder(parent, leaf);
         }
 
-        // Mat is named after the texture set (sidecar key), not the Blender material name.
-        // This ensures all parts sharing the same texture atlas reuse one material.
+        // Mat is named after the texture set (sidecar key matching this Blender material),
+        // not the Blender material name itself. This ensures all parts sharing the same
+        // texture atlas reuse one material.
         var texFolder  = GetTextureFolder(assetPath);
         var sidecar    = ReadSidecar(assetPath);
         var texSetName = material.name; // fallback
         System.Collections.Generic.Dictionary<string, string> texMap = null;
-        if (sidecar != null)
-            foreach (var kv in sidecar) { texSetName = kv.Key; texMap = kv.Value; break; }
+        if (sidecar != null && sidecar.TryGetValue(material.name, out texMap))
+            texSetName = material.name;
 
         var matPath  = $"{matFolder}/{texSetName}.mat";
         var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
