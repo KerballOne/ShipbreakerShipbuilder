@@ -1186,7 +1186,7 @@ public class ComponentCopyWindow : EditorWindow
         if (LoadGameAssets.knownAssetMap == null) return s_AssignSpEntries;
         foreach (var kv in LoadGameAssets.knownAssetMap)
         {
-            if (!kv.Value.Contains("SP_Mat") || !kv.Value.EndsWith(".asset")) continue;
+            if (!kv.Value.Contains("/StructurePartAsset/") || !kv.Value.EndsWith(".asset")) continue;
             s_AssignSpEntries.Add((Path.GetFileNameWithoutExtension(kv.Value), kv.Key));
         }
         s_AssignSpEntries.Sort((a, b) => string.Compare(a.name, b.name, System.StringComparison.OrdinalIgnoreCase));
@@ -1235,12 +1235,13 @@ public class ComponentCopyWindow : EditorWindow
 
         if (open)
         {
-            search = EditorGUILayout.TextField("Search", search);
-            string filter = (search ?? "").ToLowerInvariant();
+            search = EditorGUILayout.TextField(
+                new GUIContent("Search", "Space-separated terms, all must match. Prefix a term with - to exclude it, e.g. \"panel -aft\"."),
+                search);
 
             var filtered = new List<(string name, string guid)>();
             foreach (var e in entries)
-                if (string.IsNullOrEmpty(filter) || e.name.ToLowerInvariant().Contains(filter))
+                if (MatchesSearch(e.name, search))
                     filtered.Add(e);
 
             float rowH  = EditorGUIUtility.singleLineHeight + 2;
@@ -1421,6 +1422,29 @@ public class ComponentCopyWindow : EditorWindow
         if (field.EndsWith("Asset")) field = field.Substring(0, field.Length - 5);
         return field;
     }
+
+    // Space-separated search terms, all must match (AND); a term prefixed with "-" must NOT
+    // match instead (e.g. "panel -aft" finds names containing "panel" but not "aft").
+    // Underscores/spaces are stripped from both the name and each term before comparing, so
+    // "fuelxl" matches "SP_Element_Fuel_XL" without needing exact underscore placement.
+    static bool MatchesSearch(string name, string search)
+    {
+        if (string.IsNullOrEmpty(search)) return true;
+        string lname = NormalizeForSearch(name);
+        foreach (var raw in search.Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries))
+        {
+            bool exclude = raw.Length > 1 && raw[0] == '-';
+            string term = NormalizeForSearch(exclude ? raw.Substring(1) : raw);
+            if (term.Length == 0) continue;
+            bool contains = lname.Contains(term);
+            if (exclude && contains) return false;
+            if (!exclude && !contains) return false;
+        }
+        return true;
+    }
+
+    static string NormalizeForSearch(string s) =>
+        s.ToLowerInvariant().Replace("_", "").Replace(" ", "");
 
     static string Truncate(string s, int max) =>
         s != null && s.Length > max ? s.Substring(0, max) + "…" : s ?? "";
