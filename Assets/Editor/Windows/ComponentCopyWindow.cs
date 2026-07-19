@@ -122,6 +122,13 @@ public class ComponentCopyWindow : EditorWindow
     static List<(string name, string guid)> s_AssignBpEntries;
 
     GameObject[] _assignLastSel = new GameObject[0];
+    Vector2 _assignScroll;
+
+    // Built lazily (not in a field initializer) since EditorStyles isn't safe to touch before
+    // the editor's GUI skin is set up.
+    static GUIStyle s_SectionTitleStyleBacking;
+    static GUIStyle s_SectionTitleStyle =>
+        s_SectionTitleStyleBacking ?? (s_SectionTitleStyleBacking = new GUIStyle(EditorStyles.boldLabel) { fontSize = 13 });
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1034,9 +1041,15 @@ public class ComponentCopyWindow : EditorWindow
             : $"{targets.Length} objects selected";
         EditorGUILayout.LabelField("Target", targetLabel);
 
+        // Unlike tabs 0/1, this tab's content isn't wrapped in a scroll view — with both SP
+        // and BP preview foldouts expanded, the BP foldout header can be pushed below the
+        // window's bottom edge, making it unclickable (looks like "can't collapse").
+        _assignScroll = EditorGUILayout.BeginScrollView(_assignScroll);
+
         if (targets.Length == 0)
         {
             EditorGUILayout.HelpBox("Select one or more target GameObjects in the Hierarchy.", MessageType.Info);
+            EditorGUILayout.EndScrollView();
             return;
         }
 
@@ -1052,27 +1065,30 @@ public class ComponentCopyWindow : EditorWindow
             EditorGUILayout.HelpBox(
                 $"{missingAcl.Length} target(s) have no ancestor AddressableComponentLoader (e.g. '{missingAcl[0].name}') — cannot assign.",
                 MessageType.Error);
+            EditorGUILayout.EndScrollView();
             return;
         }
 
         EditorGUILayout.Space(6);
-        EditorGUILayout.LabelField("StructurePart (SP_Mat)", EditorStyles.miniBoldLabel);
-        EditorGUILayout.HelpBox(
+        EditorGUILayout.LabelField(new GUIContent("StructurePart (SP_Mat)",
             "Governs physical/cutting properties: cut grade/stage (CuttingTargetable), mass density and " +
             "rigidbody behavior, joint behavior and room/atmosphere sealing (JointSetup), and " +
-            "vaporize/yank-on-cut (BreakableJoint).",
-            MessageType.None);
+            "vaporize/yank-on-cut (BreakableJoint)."),
+            s_SectionTitleStyle);
         DrawRefOverride(ref m_AssignSpGuid, ref m_AssignSpName, ref m_AssignSpSearch,
             ref m_AssignSpOpen, ref m_AssignSpScroll, GetAssignSpEntries);
         DrawSpBpSummary(m_AssignSpName, isBlueprint: false);
         DrawAssetPreview(m_AssignSpName, ref m_AssignSpPreviewOpen);
 
         EditorGUILayout.Space(6);
-        EditorGUILayout.LabelField("Blueprint (BP_Mat)", EditorStyles.miniBoldLabel);
-        EditorGUILayout.HelpBox(
+        var bpLineRect = EditorGUILayout.GetControlRect(false, 1f);
+        EditorGUI.DrawRect(bpLineRect, new Color(0.35f, 0.35f, 0.35f, 1f));
+        EditorGUILayout.Space(6);
+
+        EditorGUILayout.LabelField(new GUIContent("Blueprint (BP_Mat)",
             "Governs ECS entity setup: fuel/coolant network membership, salvage destination " +
-            "(Furnace/Barge/Processor), pressure explosion logic, vitality/health, and scanner HUD entry.",
-            MessageType.None);
+            "(Furnace/Barge/Processor), pressure explosion logic, vitality/health, and scanner HUD entry."),
+            s_SectionTitleStyle);
         DrawRefOverride(ref m_AssignBpGuid, ref m_AssignBpName, ref m_AssignBpSearch,
             ref m_AssignBpOpen, ref m_AssignBpScroll, GetAssignBpEntries);
         DrawSpBpSummary(m_AssignBpName, isBlueprint: true);
@@ -1115,6 +1131,8 @@ public class ComponentCopyWindow : EditorWindow
             SetDisplayNameWizard.OpenForSceneParts(parts, existing, dataFolder);
         }
         GUI.enabled = true;
+
+        EditorGUILayout.EndScrollView();
     }
 
     // Pre-fills the SP_Mat / BP_Mat pickers from whatever is already assigned on the
