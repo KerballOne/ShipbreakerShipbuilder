@@ -18,6 +18,11 @@ public class JointAssistWindow : EditorWindow
     int pickingSnapFace; // 0 = none, 1 = A, 2 = B
     float overlapAmount = 0f;
 
+    // Which geometry Face Snap picks/aligns against: the render mesh (MeshFilter.sharedMesh) can
+    // have concave/pointed details the convex MeshCollider hull doesn't — jointing physics reads
+    // the collider, so "flush" against the render mesh can still leave real hull overlap.
+    bool snapUseColliderHull = false;
+
     // Persistent crosshair hit points in world space (set on click, cleared with faces)
     bool snapHitAValid, snapHitBValid;
     Vector3 snapHitA, snapHitB;
@@ -75,8 +80,9 @@ public class JointAssistWindow : EditorWindow
     List<Vector3[]> jointPolygons;
 
     // Joint overlap highlight (PCH-style, scene-view only) — for each coplanar triangle pair,
-    // only the actual overlapping region (not the whole face), colored by how far apart the
-    // two triangles' planes are (green/yellow/red bands against Collision Threshold).
+    // only the actual overlapping region (not the whole face), colored by plane separation:
+    // green/yellow scale by |gap or overlap| against Collision Threshold, but red is reserved
+    // for penetration beyond 2x the threshold (deep enough overlap to cause a physics impulse).
     struct JointFaceHighlight { public Vector3[] poly; public float planeDist; }
     List<JointFaceHighlight> jointFaces;
 
@@ -150,6 +156,10 @@ public class JointAssistWindow : EditorWindow
 
         // ── Face Snapping ─────────────────────────────────────────────────────
         EditorGUILayout.LabelField("Face Snapping", EditorStyles.boldLabel);
+        EditorGUILayout.Space(4);
+
+        snapUseColliderHull = GUILayout.Toolbar(snapUseColliderHull ? 1 : 0,
+            new[] { "Mesh Renderer", "Convex Hull" }) == 1;
         EditorGUILayout.Space(4);
 
         var activeColor  = new Color(0.3f, 0.6f, 1f);
@@ -226,7 +236,8 @@ public class JointAssistWindow : EditorWindow
             "Used to gather coplanar joint polygons/faces and to inflate each mesh's bounds for the quick-reject test."),
             compatCoplanarThreshold);
         compatCollisionThreshold = EditorGUILayout.FloatField(new GUIContent("Collision Threshold (m)",
-            "Controls the overlay's color bands: green within this distance (gap or overlap), yellow within 2x, red beyond. " +
+            "Controls the overlay's color bands: green within this distance (gap or overlap), yellow beyond it. " +
+            "Red is reserved for penetration deeper than 2x this value — overlap severe enough to cause a physics impulse. " +
             "Also the minimum penetration depth for a sub-triangle to count as a real collision."),
             compatCollisionThreshold);
 
@@ -1109,7 +1120,7 @@ public class JointAssistWindow : EditorWindow
                         {
                             poly = poly,
                             // Signed plane separation: positive = gap, negative = penetration.
-                            // Coloring bands on |planeDist| against compatCollisionThreshold.
+                            // Red band only triggers on penetration beyond 2x Collision Threshold.
                             planeDist = sdAvg
                         });
                     }
@@ -1411,6 +1422,23 @@ public class JointAssistWindow : EditorWindow
         const float normalTol = 0.15f;
         const float distTol   = 0.01f;
 
+        if (snapUseColliderHull)
+        {
+            // No queryable triangle list for the baked convex hull (Unity doesn't expose PhysX's
+            // internal hull geometry at edit-time) — draw a normal-oriented disc + arrow at the
+            // picked point instead of a fabricated coplanar patch, so the overlay doesn't imply
+            // precision it doesn't have.
+            var prevColor = Handles.color;
+            float size = HandleUtility.GetHandleSize(f.point) * 0.15f;
+            Handles.color = fill;
+            Handles.DrawSolidDisc(f.point, wn, size);
+            Handles.color = outline;
+            Handles.DrawWireDisc(f.point, wn, size);
+            Handles.ArrowHandleCap(0, f.point, Quaternion.LookRotation(wn), size * 2f, EventType.Repaint);
+            Handles.color = prevColor;
+            return;
+        }
+
         foreach (var mf in f.source.GetComponentsInChildren<MeshFilter>())
         {
             if (mf.sharedMesh == null) continue;
@@ -1450,8 +1478,10 @@ public class JointAssistWindow : EditorWindow
     void OnSceneGUI(SceneView sv)
     {
         // Draw joint overlap highlights (PCH-style) — only the actual overlapping region
-        // between coplanar triangle pairs, banded by |plane separation| (gap or penetration)
-        // against the Collision Threshold: green within it, yellow within 2x, red beyond.
+        // between coplanar triangle pairs, banded by plane separation (gap or penetration)
+        // against the Collision Threshold: green/yellow scale with |distance| either way
+        // (gap or overlap), but red is reserved for penetration beyond 2x the threshold —
+        // a wide gap should never read as red, only overlap deep enough to cause an impulse.
         if (showOverlay && jointFaces != null)
         {
             var prevColor = Handles.color;
@@ -1459,9 +1489,10 @@ public class JointAssistWindow : EditorWindow
             {
                 if (f.poly == null || f.poly.Length < 3) continue;
                 float absDist = Mathf.Abs(f.planeDist);
-                Color c = absDist <= compatCollisionThreshold      ? new Color(0.2f, 1f, 0.4f)
-                        : absDist <= compatCollisionThreshold * 2f ? new Color(1f, 0.85f, 0.2f)
-                                                                    : new Color(1f, 0.2f, 0.2f);
+                bool tooMuchOverlap = f.planeDist < -compatCollisionThreshold * 2f;
+                Color c = tooMuchOverlap ? new Color(1f, 0.2f, 0.2f)
+                        : absDist <= compatCollisionThreshold ? new Color(0.2f, 1f, 0.4f)
+                                                                : new Color(1f, 0.85f, 0.2f);
                 Handles.color = new Color(c.r, c.g, c.b, 0.35f);
                 Handles.DrawAAConvexPolygon(f.poly);
                 Handles.color = new Color(c.r, c.g, c.b, 1f);
@@ -1527,7 +1558,26 @@ public class JointAssistWindow : EditorWindow
             bool hit = false;
             Vector3 hitPoint = Vector3.zero, hitNormal = Vector3.up;
 
-            if (picked != null)
+            if (picked != null && snapUseColliderHull)
+            {
+                // Query PhysX directly against the live MeshCollider(s) — for a convex collider
+                // this hits the actual baked convex hull the game's physics/jointing sees, which
+                // can bulge outward past concave/pointed render-mesh details. Cast against every
+                // collider under picked and keep the closest hit, mirroring the render-mesh path's
+                // "closest triangle across all MeshFilters" behavior.
+                float bestDist = float.MaxValue;
+                foreach (var col in picked.GetComponentsInChildren<Collider>())
+                {
+                    if (col.isTrigger) continue;
+                    if (!col.Raycast(ray, out var rayHit, float.MaxValue)) continue;
+                    if (rayHit.distance >= bestDist) continue;
+                    bestDist  = rayHit.distance;
+                    hitPoint  = rayHit.point;
+                    hitNormal = rayHit.normal;
+                }
+                hit = bestDist < float.MaxValue;
+            }
+            else if (picked != null)
             {
                 float bestDist = float.MaxValue;
                 foreach (var mf in picked.GetComponentsInChildren<MeshFilter>())
@@ -1733,7 +1783,10 @@ public class JointAssistWindow : EditorWindow
 
     Vector3 GetFacePoint(PickedFace face, bool centerMode)
     {
-        if (!centerMode) return face.point;
+        // Collider-hull mode has no queryable triangle list (Unity doesn't expose the baked
+        // PhysX convex hull geometry at edit-time) — Center of Face averaging isn't possible,
+        // so fall back to the raw click point.
+        if (!centerMode || snapUseColliderHull) return face.point;
         // Center of face: find all coplanar triangles with the same normal and average their centers
         Vector3 faceSum = Vector3.zero;
         int triCount = 0;
