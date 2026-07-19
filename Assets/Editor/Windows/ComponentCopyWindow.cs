@@ -1249,12 +1249,18 @@ public class ComponentCopyWindow : EditorWindow
             float listH = Mathf.Min(maxH, filtered.Count * rowH + 4);
             scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(listH));
 
+            var capturedTable = LoadSpBpFields();
+
             foreach (var (eName, eGuid) in filtered)
             {
-                bool selected = eGuid == guid;
-                var  style    = new GUIStyle(EditorStyles.label);
+                bool selected  = eGuid == guid;
+                bool captured  = capturedTable != null && capturedTable.TryGetValue(eName, out var f) && f != null && f.Count > 0;
+                var  style     = new GUIStyle(EditorStyles.label);
                 if (selected) style.fontStyle = FontStyle.Bold;
-                if (GUILayout.Button(eName, style, GUILayout.Height(rowH)))
+                if (captured) style.normal.textColor = style.onNormal.textColor = new Color(0.4f, 0.85f, 0.4f);
+
+                string label = captured ? $"{eName}  ✓" : eName;
+                if (GUILayout.Button(label, style, GUILayout.Height(rowH)))
                 {
                     guid = eGuid; displayName = eName; open = false; search = "";
                 }
