@@ -211,10 +211,15 @@ def _plane_quad_lines(plane_co, plane_no, half_size=0.3):
 
 
 def _bisect_clear_side(obj, plane_co_world, plane_no_world, keep_towards_world):
-    """Cut obj's mesh with the world-space plane and delete geometry on the
-    side that does NOT contain keep_towards_world (a point known to lie in
-    this object's own bulk, e.g. its world-space centroid) — i.e. clear the
-    half that encroaches on the neighbouring panel."""
+    """Flatten obj's mesh onto the world-space miter plane instead of cutting
+    it: any vertex on the side that does NOT contain keep_towards_world (a
+    point known to lie in this object's own bulk, e.g. its world-space
+    centroid) — i.e. the side that encroaches on the neighbouring panel — is
+    projected straight onto the plane. No geometry is deleted or created, so
+    every original face/edge/UV survives untouched; only vertex positions on
+    the offending side move. Avoids bisect_plane + holes_fill, which used to
+    delete the encroaching faces and cap the hole with brand-new faces that
+    had no UV data (a visible texture break on the seam)."""
     mat = obj.matrix_world
     mat_inv = mat.inverted()
     rot_inv = mat.to_3x3().inverted()
@@ -223,28 +228,25 @@ def _bisect_clear_side(obj, plane_co_world, plane_no_world, keep_towards_world):
     plane_no_local = (rot_inv @ plane_no_world).normalized()
     keep_point_local = mat_inv @ keep_towards_world
 
-    # bisect_plane's clear_inner removes verts on the -normal side (the side
-    # plane_no points away from). We want to KEEP the side containing
-    # keep_point_local, so if that point is on the -normal side, flip the
-    # plane normal so clear_inner removes the other (unwanted) side instead.
+    # We want to KEEP the side containing keep_point_local. Orient plane_no
+    # so it points TOWARD that side, i.e. dot(keep_point - plane_co, normal) > 0
+    # — vertices on the opposite (negative) side are the ones being clamped
+    # onto the plane below.
     to_point = keep_point_local - plane_co_local
     if plane_no_local.dot(to_point) < 0:
         plane_no_local = -plane_no_local
 
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    bm.faces.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
 
-    geom = list(bm.verts) + list(bm.edges) + list(bm.faces)
-    bmesh.ops.bisect_plane(
-        bm,
-        geom=geom,
-        plane_co=plane_co_local,
-        plane_no=plane_no_local,
-        clear_outer=False,
-        clear_inner=True,
-    )
-    bmesh.ops.holes_fill(bm, edges=[e for e in bm.edges if e.is_boundary])
+    for v in bm.verts:
+        dist = (v.co - plane_co_local).dot(plane_no_local)
+        if dist < 0:
+            # Project onto the plane: move only along the normal by the
+            # (negative) signed distance, so the vertex lands exactly on
+            # plane_co_local's plane without disturbing its in-plane position.
+            v.co -= plane_no_local * dist
 
     bm.to_mesh(obj.data)
     bm.free()
