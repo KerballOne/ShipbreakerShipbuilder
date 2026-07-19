@@ -1,9 +1,42 @@
 using UnityEngine;
 using UnityEditor;
 using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 
 public class CustomMeshPostprocessor : AssetPostprocessor
 {
+    // Auto-recenter-on-reimport (see AutoRecenterOnReimport.cs). Uses Recenter's default
+    // compensatePosition: false, so it only shifts mesh vertices back to origin and never touches
+    // transform.position — safe even when multiple GameObjects share one mesh asset.
+    const bool AutoRecenterOnReimportEnabled = true;
+
+    // Fires once per import batch (e.g. once per Blender re-export detected by Unity's file
+    // watcher). For every reimported FBX under /_CustomShips/, re-runs Recenter Mesh Origin on
+    // every GameObject (open scenes + prefab assets) whose MeshFilter references one of that
+    // FBX's sub-meshes — so parts stay centered without a manual re-run after each re-export.
+    static void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets,
+        string[] movedAssets, string[] movedFromAssetPaths)
+    {
+        if (!AutoRecenterOnReimportEnabled)
+            return;
+
+        var fbxPaths = importedAssets
+            .Where(p => p.Contains("/_CustomShips/") && p.EndsWith(".fbx", System.StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (fbxPaths.Count == 0)
+            return;
+
+        foreach (var fbxPath in fbxPaths)
+        {
+            Debug.Log($"[CustomMeshPostprocessor] Detected FBX reimport: '{fbxPath}' — scheduling auto-recenter.");
+            // Defer: mutating scenes/prefabs via PrefabUtility.SaveAsPrefabAsset while still inside
+            // the asset-import pipeline is unsafe. Run after this import batch fully completes.
+            var path = fbxPath;
+            EditorApplication.delayCall += () => AutoRecenterOnReimport.Run(path);
+        }
+    }
+
     void OnPreprocessModel()
     {
         if (!assetPath.Contains("/_CustomShips/"))
@@ -15,6 +48,12 @@ public class CustomMeshPostprocessor : AssetPostprocessor
         {
             importer.materialName = ModelImporterMaterialName.BasedOnMaterialName;
         }
+
+        // Always readable, set here (during preprocess, before the reimport completes) so
+        // AutoRecenterOnReimport never needs to trigger a second SaveAndReimport() of its own —
+        // that would re-enter OnPostprocessAllAssets and reschedule itself.
+        if (!importer.isReadable)
+            importer.isReadable = true;
     }
 
     Material OnAssignMaterialModel(Material material, Renderer renderer)

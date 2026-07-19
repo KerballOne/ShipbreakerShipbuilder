@@ -178,6 +178,7 @@ public class CustomPartWizard : EditorWindow
             if (m_FbxSource != null)
             {
                 m_SourceObject = null;
+                AutoPopulatePartName(m_FbxSource.name);
                 AutoPopulateFromFbx(AssetDatabase.GetAssetPath(m_FbxSource));
             }
         }
@@ -207,7 +208,10 @@ public class CustomPartWizard : EditorWindow
         // Mesh — root visual + trigger collider. Mutually exclusive with Copy Mesh From.
         // Can be combined with Model to add convex collider children.
         var meshLabel = m_FbxSource != null ? "Single Mesh" : "Mesh";
-        m_Mesh = (Mesh)EditorGUILayout.ObjectField(meshLabel, m_Mesh, typeof(Mesh), false);
+        var newMesh = (Mesh)EditorGUILayout.ObjectField(meshLabel, m_Mesh, typeof(Mesh), false);
+        if (newMesh != m_Mesh && newMesh != null && m_FbxSource == null)
+            AutoPopulatePartName(newMesh.name);
+        m_Mesh = newMesh;
         if (m_FbxSource != null) m_Mesh = null;
         else if (m_Mesh != null) m_SourceObject = null;
 
@@ -220,6 +224,8 @@ public class CustomPartWizard : EditorWindow
         {
             m_SourceObject = newSourceObject;
             EditorPrefs.SetInt(PrefSourceObjectID, m_SourceObject != null ? m_SourceObject.GetInstanceID() : 0);
+            if (m_SourceObject != null)
+                AutoPopulatePartName(m_SourceObject.name);
         }
         if (m_SourceObject != null) { m_Mesh = null; m_FbxSource = null; }
 
@@ -749,10 +755,12 @@ public class CustomPartWizard : EditorWindow
             // RecenterChildren) can have a Blender-authored origin far from their own geometry,
             // which makes cut/explosion FX spawn away from the visible mesh at runtime (FX reads
             // the GameObject's transform.position, which tracks the origin, not the render bounds).
+            // compensatePosition: true — each segment mesh here is freshly baked and unshared
+            // (see RecenterMeshOriginContextMenu.cs for why the manual command defaults to false).
             // See RecenterMeshOriginContextMenu.cs for the full explanation and the manual version
             // of this same fix.
             foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
-                RecenterMeshOriginContextMenu.Recenter(mf.gameObject);
+                RecenterMeshOriginContextMenu.Recenter(mf.gameObject, compensatePosition: true);
         }
 
         // Apply texture overrides to the duplicated material
@@ -939,6 +947,15 @@ public class CustomPartWizard : EditorWindow
             if (so.FindProperty("componentValues") != null) return mb;
         }
         return null;
+    }
+
+    // Fills Part Name from the selected Model/Mesh asset's name whenever the selection changes.
+    void AutoPopulatePartName(string assetName)
+    {
+        m_PartName = assetName;
+        // Part Name field is drawn earlier in OnGUI than the Model/Mesh fields that call this,
+        // so the TextField already rendered with the old value this frame — force a redraw.
+        Repaint();
     }
 
     void AutoPopulateFromFbx(string fbxAssetPath)

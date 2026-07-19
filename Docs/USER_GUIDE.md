@@ -722,23 +722,30 @@ The most frequently needed context menu item. After duplicating or adding a GO u
 
 Same as above — bakes transform scale into mesh geometry for the selected GO and descendants.
 
-#### `GameObject / Shipbuilder / Recenter Mesh Origin to Geometry (Keep World Position)`
+#### `GameObject / Shipbuilder / Recenter Mesh to Origin`
 
-Right-click a **leaf** part GO (mesh + collider + `StructurePart`/`EntityBlueprintComponent` all on the same node, no children — e.g. a plain mesh assigned SP/BP via Component Copy Window rather than baked through the Import Game Part Wizard) → recenters that part's own origin onto its mesh's geometric bounds center, without moving it in the editor or in-game.
+Right-click a **leaf** part GO (mesh + collider + `StructurePart`/`EntityBlueprintComponent` all on the same node, no children — e.g. a plain mesh assigned SP/BP via Component Copy Window rather than baked through the Import Game Part Wizard) → moves the **mesh** to the GameObject's existing origin, in place. The GameObject's `transform.position` is never touched.
 
 **Symptom this fixes:** cut/explosion FX spawning far away from the visible mesh instead of at the cut location. Root cause: the mesh's Blender-authored object origin sits far from its own geometry (e.g. down near an unrelated part of the ship), so while the renderer draws the mesh where its vertices are, the GameObject's actual `transform.position` — and the game's FX spawn point, which reads that transform — sit wherever the bad origin is. Parts baked through the Import Game Part Wizard never hit this because that pipeline always recenters automatically (`RecenterChildren`); parts added via Component Copy Window / "Assign StructurePart/Blueprint by name" onto a raw imported mesh do not.
 
 **How it works:**
 1. Computes the mesh's bounding-box center as the offset.
-2. Clones the mesh asset (never edits the source FBX sub-mesh in place — that would be silently wiped on the FBX's next reimport) and shifts every vertex by `-offset`. The clone is saved to a sibling `_Recentered_Meshes` folder next to the source mesh's asset.
-3. Reassigns both `MeshFilter.sharedMesh` and `MeshCollider.sharedMesh` to the clone.
-4. Moves the GameObject's `transform.position` by `+offset` in world space to compensate — the mesh does not move on screen.
+2. Mutates the mesh asset's vertices **in place** (no clone) — shifts every vertex by `-offset` so the geometry is now centered on the mesh's own local origin.
+3. `transform.position` is left untouched by default, since the GameObject is presumed already correctly placed (e.g. re-fixing a part after a Blender re-export) — this run only pulls the mesh back to where the origin already is.
 
-**How to tell if a part needs this:** if a baked/scene-authored part's cut/explosion FX consistently spawns at the wrong spot, open its source mesh in Blender and check whether the object's origin (the orange dot / gizmo) sits near its own geometry or far away near an unrelated part of the ship. If it's far away, run this tool on the corresponding GO in Unity — no changes to Blender or the FBX are needed.
+**Caveat — mutates a shared asset, not a clone:** because this edits the mesh asset directly rather than cloning it, if the same mesh sub-asset is referenced by more than one GameObject (e.g. repeated tower/leg instances baked from one FBX), only the *first* `Recenter()` call actually shifts vertices — later calls on sibling GOs see it already centered and no-op. That's fine since position is never touched here, but it means running this on one instance affects every GameObject sharing that mesh.
 
-**Caveat:** not durable against a future re-export/reimport of the same FBX — if a later Component Copy Window pass or reimport resets `MeshFilter`/`MeshCollider` back to the original FBX sub-asset, re-run this tool. This is a manual, per-part fix, not wired into any automatic import pipeline.
+**Not durable across reimport:** editing an FBX sub-mesh's vertices in memory doesn't survive Unity's next reimport of that FBX — sub-meshes are rebuilt from the file each time. See "Auto-Recenter on FBX Reimport" below for the automatic version of this same fix that reruns after every Blender re-export.
 
-**Related but different:** `GameObject / Shipbuilder / Recenter Pivot to Mesh (Keep World Position)` does the same job for a **parent** GO by shifting its **children's** local positions — it requires the target to have child Renderers and cannot fix a leaf part with no children (like the case above).
+**CustomPartWizard's internal use is different:** when CPW bakes a brand-new part for the first time, it calls this same underlying function but *with* position compensation (moves the GameObject's origin to match the mesh, preserving the original Blender-authored world placement) — appropriate there because each freshly baked mesh is not yet shared with any other GameObject. That compensating variant is not exposed as a menu command; it only runs automatically inside CPW's bake pass.
+
+**Related but different:** `GameObject / Shipbuilder / Recenter Pivot to Mesh (Keep World Position)` does the opposite job for a **parent** GO — it moves the **origin** to the mesh by shifting the parent's **children's** local positions and compensating the parent's world position so nothing visually moves. It requires the target to have child Renderers and cannot fix a leaf part with no children (like the case above).
+
+#### Auto-Recenter on FBX Reimport
+
+Whenever an `.fbx` under `Assets/_CustomShips/` reimports (e.g. after a Blender re-export), Unity automatically re-runs the mesh-to-origin recenter above on every GameObject — in all open scenes and in prefab assets under `_CustomShips` — whose `MeshFilter` references one of that FBX's sub-meshes. No manual step needed after a re-export; check the Console for `[CustomMeshPostprocessor] Detected FBX reimport...` and `[AutoRecenterOnReimport] ...` log lines confirming what was touched.
+
+Controlled by a single flag, `CustomMeshPostprocessor.AutoRecenterOnReimportEnabled` (`Assets/Editor/CustomMeshPostprocessor.cs`) — flip to `false` to disable if it ever needs to be turned off.
 
 ---
 
