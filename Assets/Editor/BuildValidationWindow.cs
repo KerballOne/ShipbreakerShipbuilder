@@ -87,8 +87,19 @@ public class BuildValidationWindow : EditorWindow
             i.Kind == ShipValidator.ErrorKind.UnregisteredSP ||
             i.Kind == ShipValidator.ErrorKind.UnregisteredEBC);
 
+        bool hasCleanable = _issues.Any(i => i.Kind == ShipValidator.ErrorKind.NullAclEntry);
+
         EditorGUILayout.BeginHorizontal();
         GUILayout.FlexibleSpace();
+
+        using (new EditorGUI.DisabledScope(!hasCleanable))
+        {
+            if (GUILayout.Button("Clean ACLs", GUILayout.Width(100)))
+            {
+                Close();
+                CleanAll(_issues);
+            }
+        }
 
         using (new EditorGUI.DisabledScope(!hasRegisterable))
         {
@@ -184,5 +195,19 @@ public class BuildValidationWindow : EditorWindow
             p = p.parent;
         }
         return null;
+    }
+
+    static void CleanAll(List<ShipValidator.ValidationIssue> issues)
+    {
+        var acls = new HashSet<AddressableComponentLoader>();
+        foreach (var issue in issues)
+        {
+            if (issue.Kind != ShipValidator.ErrorKind.NullAclEntry || issue.Transform == null) continue;
+            var acl = issue.Transform.GetComponent<AddressableComponentLoader>();
+            if (acl != null) acls.Add(acl);
+        }
+
+        foreach (var acl in acls)
+            AclCleanContextMenu.Run(acl);
     }
 }

@@ -1087,6 +1087,34 @@ public class ComponentCopyWindow : EditorWindow
         if (GUILayout.Button(applyLabel))
             ApplyAssignByName(targets);
         GUI.enabled = true;
+
+        EditorGUILayout.Space(6);
+        var lineRect = EditorGUILayout.GetControlRect(false, 1f);
+        EditorGUI.DrawRect(lineRect, new Color(0.35f, 0.35f, 0.35f, 1f));
+        EditorGUILayout.Space(6);
+
+        var parts = new List<StructurePart>();
+        foreach (var go in targets)
+            foreach (var sp in go.GetComponentsInChildren<StructurePart>(true))
+                if (!parts.Contains(sp)) parts.Add(sp);
+
+        GUI.enabled = parts.Count > 0;
+        if (GUILayout.Button("Set Display Name…"))
+        {
+            string existing = "";
+            foreach (var sp in parts)
+            {
+                var so = new SerializedObject(sp);
+                if (so.FindProperty("m_ObjectInfoAssetOverride")?.objectReferenceValue is ObjectInfoAsset oi)
+                {
+                    existing = new SerializedObject(oi).FindProperty("m_Data.m_ObjectName")?.stringValue ?? "";
+                    if (!string.IsNullOrEmpty(existing)) break;
+                }
+            }
+            var dataFolder = SetBakedPartDisplayName.FindShipDataFolder(parts);
+            SetDisplayNameWizard.OpenForSceneParts(parts, existing, dataFolder);
+        }
+        GUI.enabled = true;
     }
 
     // Pre-fills the SP_Mat / BP_Mat pickers from whatever is already assigned on the
@@ -1233,7 +1261,18 @@ public class ComponentCopyWindow : EditorWindow
 
         string btnLabel = string.IsNullOrEmpty(displayName) ? "(none)" : displayName;
         if (GUILayout.Button(btnLabel, EditorStyles.popup))
+        {
             open = !open;
+            if (open)
+            {
+                // The search TextField's IMGUI control state (keyboard focus / recycled editor
+                // text) can persist across the field disappearing and reappearing, showing stale
+                // text even though `search` itself was already cleared — force focus away so the
+                // field re-reads the current `search` value fresh on reopen.
+                GUIUtility.keyboardControl = 0;
+                EditorGUIUtility.editingTextField = false;
+            }
+        }
 
         if (!string.IsNullOrEmpty(guid))
         {
@@ -1273,7 +1312,9 @@ public class ComponentCopyWindow : EditorWindow
                 string label = captured ? $"{eName}  ✓" : eName;
                 if (GUILayout.Button(label, style, GUILayout.Height(rowH)))
                 {
-                    guid = eGuid; displayName = eName; open = false; search = "";
+                    // Search term is intentionally preserved across a pick — reopening the
+                    // dropdown should show the same filtered list again, not reset to blank.
+                    guid = eGuid; displayName = eName; open = false;
                 }
             }
 
@@ -1335,6 +1376,7 @@ public class ComponentCopyWindow : EditorWindow
             AddRow(rows, fields, "Room sealing", "Data.m_JointSetupAsset.m_CanSealRoom", "Data.m_JointSetupAsset.CanSealRoom");
             AddRow(rows, fields, "Vaporize on cut", "Data.m_ShatterableComponentAsset.Data.m_VaporizationOverrideAsset@ref");
             AddRow(rows, fields, "Yank lock on start", "Data.m_BreakableJointAsset.Data.m_YankLockOnStart");
+            AddFlagContainsRow(rows, fields, "Breakable by grapple", "Data.m_BreakableJointAsset.Data.m_BreakableBy", "Grapple");
         }
         else
         {
@@ -1345,12 +1387,24 @@ public class ComponentCopyWindow : EditorWindow
 
         if (rows.Count == 0) return;
 
+        var valStyleTrue     = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.4f, 0.85f, 0.4f) } };
+        var valStyleFalse    = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.9f, 0.4f, 0.4f) } };
+        var valStyleFurnace  = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.9f, 0.4f, 0.4f) } };
+        var valStyleProcessor= new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.4f, 0.85f, 0.9f) } };
+        var valStyleBarge    = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.4f, 0.85f, 0.4f) } };
+
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         foreach (var (label, value) in rows)
         {
+            GUIStyle valStyle = value == "True" ? valStyleTrue
+                : value == "False" ? valStyleFalse
+                : label == "Salvage destination" && value == "Furnace" ? valStyleFurnace
+                : label == "Salvage destination" && value == "Processor" ? valStyleProcessor
+                : label == "Salvage destination" && value == "Barge" ? valStyleBarge
+                : EditorStyles.boldLabel;
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(130));
-            EditorGUILayout.LabelField(value, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(value, valStyle);
             EditorGUILayout.EndHorizontal();
         }
         EditorGUILayout.EndVertical();
@@ -1378,6 +1432,15 @@ public class ComponentCopyWindow : EditorWindow
             if (key.EndsWith(suffix, System.StringComparison.Ordinal))
                 return key;
         return null;
+    }
+
+    // m_BreakableBy is a flags enum captured as a comma-separated string (e.g. "Tether, Grapple,
+    // GrappleThrow"), not a bool — show it as a true/false row for a single flag of interest.
+    static void AddFlagContainsRow(List<(string, string)> rows, Dictionary<string, object> fields, string label, string key, string flagName)
+    {
+        if (!fields.TryGetValue(key, out var val) || val == null) return;
+        bool has = val.ToString().Split(',').Any(f => f.Trim().Equals(flagName, System.StringComparison.OrdinalIgnoreCase));
+        rows.Add((label, has ? "True" : "False"));
     }
 
     void DrawAssetPreview(string displayName, ref bool open)

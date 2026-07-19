@@ -539,7 +539,7 @@ public static class AclCleanContextMenu
     [MenuItem(ShipMenuPath, false, priority = 121)]
     static void ExecuteShip() => Run(SelectedAcl());
 
-    static void Run(AddressableComponentLoader acl)
+    public static void Run(AddressableComponentLoader acl)
     {
         if (acl == null) return;
 
