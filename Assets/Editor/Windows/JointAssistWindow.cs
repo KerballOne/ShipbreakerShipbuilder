@@ -61,10 +61,30 @@ public class JointAssistWindow : EditorWindow
     CompatResult compatMJC    = new CompatResult { state = CompatResult.State.None };
     CompatResult compatMesh   = new CompatResult { state = CompatResult.State.None };
 
-    // Joint polygons (green) and collision triangles (red)
-    bool                     showJointPolygons = false;
+    // Master visibility toggle for the scene-view overlay (both jointFaces and collisionTris
+    // below). Set true automatically after a Check that finds anything to show; can be
+    // toggled off/on manually via the "Hide/Show Overlay" button without re-running Check.
+    bool showOverlay = false;
+
+    // Exact clipped joint polygons from CollectJointPolys/CheckMeshJoints — mirrors the game's
+    // TryFindJointPolygonsJob for correctness. Drives the Mesh check's pass/fail and total
+    // overlap-area (m²) message; NOT drawn directly in the scene view (superseded visually by
+    // jointFaces below, which shows the same kind of overlap at finer per-triangle-pair
+    // granularity). Kept separate so the pass/fail check stays exact even if the overlay's
+    // coarser per-triangle test is later tuned differently.
     List<Vector3[]> jointPolygons;
-    List<Vector3[]>          collisionTris; // world-space triangles from interpenetrating SPs
+
+    // Joint overlap highlight (PCH-style, scene-view only) — for each coplanar triangle pair,
+    // only the actual overlapping region (not the whole face), colored by how far apart the
+    // two triangles' planes are (green/yellow/red bands against Collision Threshold).
+    struct JointFaceHighlight { public Vector3[] poly; public float planeDist; }
+    List<JointFaceHighlight> jointFaces;
+
+    // Collision (interpenetration) highlight — candidate triangles recursively subdivided and
+    // culled down to only the sub-triangles whose centroid is actually inside the other mesh,
+    // colored by penetration depth (green/yellow/red bands against Collision Threshold).
+    struct CollisionSubTri { public Vector3 v0, v1, v2; public float depth; }
+    List<CollisionSubTri> collisionTris;
 
     // jsa_compat.json: key = "JsaName1|JsaName2" (sorted), value = true/false
     Dictionary<string, bool> jsaCompatTable;
@@ -201,8 +221,14 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.Space(4);
 
-        compatCoplanarThreshold  = EditorGUILayout.FloatField("Coplanar Threshold (m)",  compatCoplanarThreshold);
-        compatCollisionThreshold = EditorGUILayout.FloatField("Collision Threshold (m)", compatCollisionThreshold);
+        compatCoplanarThreshold  = EditorGUILayout.FloatField(new GUIContent("Coplanar Threshold (m)",
+            "How far apart two faces' planes can be and still be considered a candidate mating pair. " +
+            "Used to gather coplanar joint polygons/faces and to inflate each mesh's bounds for the quick-reject test."),
+            compatCoplanarThreshold);
+        compatCollisionThreshold = EditorGUILayout.FloatField(new GUIContent("Collision Threshold (m)",
+            "Controls the overlay's color bands: green within this distance (gap or overlap), yellow within 2x, red beyond. " +
+            "Also the minimum penetration depth for a sub-triangle to count as a real collision."),
+            compatCollisionThreshold);
 
         int compatSel = Selection.gameObjects.Length;
         EditorGUILayout.BeginHorizontal();
@@ -211,16 +237,16 @@ public class JointAssistWindow : EditorWindow
             if (GUILayout.Button($"Check  ({compatSel})", GUILayout.Height(28), GUILayout.MinWidth(0)))
                 RunCompatibilityCheck();
         }
-        if (jointPolygons != null)
+        if (jointFaces != null)
         {
             var prevBG = GUI.backgroundColor;
-            GUI.backgroundColor = showJointPolygons ? new Color(0.2f, 0.8f, 0.4f) : GUI.backgroundColor;
-            string polyLabel = showJointPolygons
-                ? $"Hide Polygons  ({jointPolygons.Count})"
-                : $"Show Polygons  ({jointPolygons.Count})";
-            if (GUILayout.Button(polyLabel, GUILayout.Height(28), GUILayout.ExpandWidth(false)))
+            GUI.backgroundColor = showOverlay ? new Color(0.2f, 0.8f, 0.4f) : GUI.backgroundColor;
+            string overlayLabel = showOverlay
+                ? $"Hide Overlay  ({jointFaces.Count})"
+                : $"Show Overlay  ({jointFaces.Count})";
+            if (GUILayout.Button(overlayLabel, GUILayout.Height(28), GUILayout.ExpandWidth(false)))
             {
-                showJointPolygons = !showJointPolygons;
+                showOverlay = !showOverlay;
                 SceneView.RepaintAll();
             }
             GUI.backgroundColor = prevBG;
@@ -491,8 +517,9 @@ public class JointAssistWindow : EditorWindow
         if (sel.Length < 2) return;
 
         jointPolygons = null;
+        jointFaces    = null;
         collisionTris = null;
-        showJointPolygons = false;
+        showOverlay = false;
         // Re-read data files each check so in-game updates are picked up without reopening the window
         enrichedJsaMap = null;
         spMatJsaMap    = null;
@@ -507,9 +534,21 @@ public class JointAssistWindow : EditorWindow
 
         // ── #3  Mesh joint polygons ───────────────────────────────────────────
         (compatMesh, jointPolygons) = CheckMeshJoints(sel);
-        if (jointPolygons != null && jointPolygons.Count > 0)
+
+        // ── #3b  Joint overlap highlight (PCH-style, scene-view visualization) ──
+        if (sel.Length >= 2)
         {
-            showJointPolygons = true;
+            var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
+            if (sidesFilters.Count >= 2 && sidesFilters[0].Count > 0 && sidesFilters[1].Count > 0)
+            {
+                jointFaces = new List<JointFaceHighlight>();
+                CollectJointFaces(sidesFilters[0].Select(p => p.mf).ToList(), sidesFilters[1].Select(p => p.mf).ToList(), jointFaces);
+                CollectJointFaces(sidesFilters[1].Select(p => p.mf).ToList(), sidesFilters[0].Select(p => p.mf).ToList(), jointFaces);
+            }
+        }
+        if (jointFaces != null && jointFaces.Count > 0)
+        {
+            showOverlay = true;
             SceneView.RepaintAll();
         }
 
@@ -853,7 +892,8 @@ public class JointAssistWindow : EditorWindow
     // For each SP pair (A, B): collect vertices of A that are within coplanarThreshold
     // of B's plane AND whose normals are codirectional with B's normal, and vice versa.
     // Project each set onto the shared plane, compute their convex hulls, clip them.
-    // Any pair with a non-zero intersection polygon is a qualifying joint.
+    // Any pair with a non-zero intersection polygon is a qualifying joint; the check reports
+    // total overlap area (sum of clipped polygon areas) rather than a raw polygon count.
     (CompatResult result, List<Vector3[]> polys) CheckMeshJoints(GameObject[] sel)
     {
         var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
@@ -861,29 +901,30 @@ public class JointAssistWindow : EditorWindow
             return (new CompatResult { state = CompatResult.State.Warn,
                 message = "Mesh: No StructurePart MeshFilters found on one or both sides." }, null);
 
-        var polys   = new List<Vector3[]>();
-        var polyBuf = new List<Vector2>(32);
-        var ptsA2D  = new List<Vector2>(64);
-        var ptsB2D  = new List<Vector2>(64);
+        var polys    = new List<Vector3[]>();
+        var polyBuf  = new List<Vector2>(32);
+        var ptsA2D   = new List<Vector2>(64);
+        var ptsB2D   = new List<Vector2>(64);
+        var areaSum  = new float[1];
 
         // Run both directions so every triangle on either side gets a chance
         // to be the reference plane — catches cases where only B's triangles
         // face the right way toward A.
-        CollectJointPolys(sidesFilters[0].Select(p => p.mf).ToList(), sidesFilters[1].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D);
-        CollectJointPolys(sidesFilters[1].Select(p => p.mf).ToList(), sidesFilters[0].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D);
+        CollectJointPolys(sidesFilters[0].Select(p => p.mf).ToList(), sidesFilters[1].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D, areaSum);
+        CollectJointPolys(sidesFilters[1].Select(p => p.mf).ToList(), sidesFilters[0].Select(p => p.mf).ToList(), polys, polyBuf, ptsA2D, ptsB2D, areaSum);
 
         if (polys.Count == 0)
             return (new CompatResult { state = CompatResult.State.Fail,
                 message = "Mesh: No joint polygons found — parts will not auto-joint." }, null);
 
         return (new CompatResult { state = CompatResult.State.Pass,
-            message = $"Mesh: {polys.Count} joint polygon{(polys.Count == 1 ? "" : "s")} found." }, polys);
+            message = $"Mesh: {areaSum[0]:0.####} m² of overlap found ({polys.Count} joint polygon{(polys.Count == 1 ? "" : "s")})." }, polys);
     }
 
     // Use triangles of listA as reference planes, collect coplanar verts from both sides,
     // compute convex hulls, clip — store any non-zero intersection polygon.
     void CollectJointPolys(List<MeshFilter> listA, List<MeshFilter> listB,
-        List<Vector3[]> polys, List<Vector2> polyBuf, List<Vector2> ptsA2D, List<Vector2> ptsB2D)
+        List<Vector3[]> polys, List<Vector2> polyBuf, List<Vector2> ptsA2D, List<Vector2> ptsB2D, float[] areaSum)
     {
         foreach (var mfA in listA)
         {
@@ -956,12 +997,122 @@ public class JointAssistWindow : EditorWindow
                     var hullB = ConvexHull2D(ptsB2D);
                     if (hullA.Count < 3 || hullB.Count < 3) continue;
 
-                    if (ClipPolygons(hullA, hullB, polyBuf) <= 1e-6f) continue;
+                    float clipArea = ClipPolygons(hullA, hullB, polyBuf);
+                    if (clipArea <= 1e-6f) continue;
+                    areaSum[0] += clipArea;
 
                     var poly = new Vector3[polyBuf.Count];
                     for (int pi = 0; pi < polyBuf.Count; pi++)
                         poly[pi] = planeOrigin + polyBuf[pi].x * tan + polyBuf[pi].y * bitan;
                     polys.Add(poly);
+                }
+            }
+        }
+    }
+
+    // PCH-style highlight pass: for each coplanar triangle pair (A, B) within
+    // compatCoplanarThreshold, clip A against B in A's tangent plane and record only the
+    // actual overlapping region (not the whole face), colored by how far apart the two
+    // triangles' planes are. Reuses the same box-extrapolation quick reject as CollectJointPolys.
+    void CollectJointFaces(List<MeshFilter> listA, List<MeshFilter> listB, List<JointFaceHighlight> faces)
+    {
+        var polyBuf = new List<Vector2>(8);
+        var ptsA2D  = new List<Vector2>(3);
+        var ptsB2D  = new List<Vector2>(3);
+
+        foreach (var mfA in listA)
+        {
+            if (mfA.sharedMesh == null) continue;
+            var meshA  = mfA.sharedMesh;
+            var vertsA = meshA.vertices;
+            var normsA = meshA.normals;
+            var mA     = mfA.transform.localToWorldMatrix;
+            var boundsA = TransformBoundsToWorld(mA, meshA.bounds);
+
+            var wVertsA = new Vector3[vertsA.Length];
+            var wNormsA = new Vector3[vertsA.Length];
+            for (int i = 0; i < vertsA.Length; i++)
+            {
+                wVertsA[i] = mA.MultiplyPoint3x4(vertsA[i]);
+                wNormsA[i] = mA.MultiplyVector(normsA.Length > 0 ? normsA[i] : Vector3.up).normalized;
+            }
+
+            foreach (var mfB in listB)
+            {
+                if (mfB.sharedMesh == null) continue;
+                var meshB  = mfB.sharedMesh;
+                var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, meshB.bounds);
+                // Same box-extrapolation quick reject as CollectJointPolys — inflate A's box
+                // by the coplanar threshold ("extrapolate the plane into a box") before testing.
+                var expandedA = new Bounds(boundsA.center, boundsA.size + Vector3.one * compatCoplanarThreshold * 2f);
+                if (!expandedA.Intersects(boundsB)) continue;
+                var vertsB = meshB.vertices;
+                var mB     = mfB.transform.localToWorldMatrix;
+
+                var wVertsB = new Vector3[vertsB.Length];
+                for (int i = 0; i < vertsB.Length; i++)
+                    wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
+
+                var trisA = meshA.triangles;
+                var trisB = meshB.triangles;
+                for (int ia = 0; ia < trisA.Length; ia += 3)
+                {
+                    Vector3 wa0 = wVertsA[trisA[ia]], wa1 = wVertsA[trisA[ia+1]], wa2 = wVertsA[trisA[ia+2]];
+                    Vector3 geomNorm = Vector3.Cross(wa1 - wa0, wa2 - wa0);
+                    if (geomNorm.sqrMagnitude < 1e-10f) continue;
+                    Vector3 faceNorm    = ((wNormsA[trisA[ia]] + wNormsA[trisA[ia+1]] + wNormsA[trisA[ia+2]]) / 3f).normalized;
+                    Vector3 planeOrigin = (wa0 + wa1 + wa2) / 3f;
+
+                    // Triangle must itself be (near-)coplanar — all three verts within threshold
+                    // of their own average plane — otherwise it's not a flat mating face.
+                    if (Mathf.Abs(Vector3.Dot(wa0 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+                    if (Mathf.Abs(Vector3.Dot(wa1 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+                    if (Mathf.Abs(Vector3.Dot(wa2 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+
+                    Vector3 tan   = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+                    Vector3 bitan = Vector3.Cross(faceNorm, tan).normalized;
+
+                    ptsA2D.Clear();
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa0 - planeOrigin, tan), Vector3.Dot(wa0 - planeOrigin, bitan)));
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa1 - planeOrigin, tan), Vector3.Dot(wa1 - planeOrigin, bitan)));
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa2 - planeOrigin, tan), Vector3.Dot(wa2 - planeOrigin, bitan)));
+                    // ClipPolygons (Sutherland-Hodgman) requires the clip polygon to be CCW —
+                    // tan/bitan handedness doesn't track the triangle's own winding, so force it.
+                    if (SignedArea2D(ptsA2D) < 0f) ptsA2D.Reverse();
+
+                    for (int ib = 0; ib < trisB.Length; ib += 3)
+                    {
+                        Vector3 wb0 = wVertsB[trisB[ib]], wb1 = wVertsB[trisB[ib+1]], wb2 = wVertsB[trisB[ib+2]];
+
+                        float sd0 = Vector3.Dot(wb0 - planeOrigin, faceNorm);
+                        float sd1 = Vector3.Dot(wb1 - planeOrigin, faceNorm);
+                        float sd2 = Vector3.Dot(wb2 - planeOrigin, faceNorm);
+                        // Only require the triangle's average plane to be within threshold —
+                        // matching CollectJointPolys's per-vertex gather, requiring all three
+                        // verts individually within threshold is too strict and misses most
+                        // real mating triangles whose plane is close but not vertex-perfect.
+                        float sdAvg = (sd0 + sd1 + sd2) / 3f;
+                        if (Mathf.Abs(sdAvg) > compatCoplanarThreshold) continue;
+
+                        ptsB2D.Clear();
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb0 - planeOrigin, tan), Vector3.Dot(wb0 - planeOrigin, bitan)));
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb1 - planeOrigin, tan), Vector3.Dot(wb1 - planeOrigin, bitan)));
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb2 - planeOrigin, tan), Vector3.Dot(wb2 - planeOrigin, bitan)));
+
+                        if (ClipPolygons(ptsA2D, ptsB2D, polyBuf) <= 1e-9f) continue;
+
+                        var poly = new Vector3[polyBuf.Count];
+                        for (int pi = 0; pi < polyBuf.Count; pi++)
+                            poly[pi] = planeOrigin + polyBuf[pi].x * tan + polyBuf[pi].y * bitan;
+
+                        faces.Add(new JointFaceHighlight
+                        {
+                            poly = poly,
+                            // Signed plane separation: positive = gap, negative = penetration.
+                            // Coloring bands on |planeDist| against compatCollisionThreshold.
+                            planeDist = sdAvg
+                        });
+                    }
                 }
             }
         }
@@ -1058,6 +1209,14 @@ public class JointAssistWindow : EditorWindow
 
     static float Cross2D(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
 
+    static float SignedArea2D(List<Vector2> poly)
+    {
+        float area = 0f;
+        for (int i = 0; i < poly.Count; i++)
+        { Vector2 p = poly[i], q = poly[(i + 1) % poly.Count]; area += p.x * q.y - q.x * p.y; }
+        return area * 0.5f;
+    }
+
     static Vector2 LineIntersect2D(Vector2 p1, Vector2 p2, Vector2 p3, Vector2 p4)
     {
         Vector2 d1 = p2 - p1, d2 = p4 - p3;
@@ -1067,11 +1226,19 @@ public class JointAssistWindow : EditorWindow
         return p1 + t * d1;
     }
 
-    // For each SP pair across the two sides whose bounds intersect, collect all
-    // triangles from A whose centroid is inside B's bounds, and vice versa.
-    List<Vector3[]> FindCollisionTris(GameObject[] sel)
+    // Max sub-triangle edge length when subdividing candidate collision triangles — bounds
+    // how closely the highlighted area can hug the true (unknown, no 3D boolean available)
+    // overlap boundary, and bounds the subdivision cost (4x tris per halving).
+    const float kCollisionSubdivEdge = 0.02f;
+    const int   kCollisionSubdivMaxDepth = 5;
+
+    // For each SP pair across the two sides whose bounds intersect, collect subdivided
+    // sub-triangles from A whose centroid is inside B's mesh beyond Collision Threshold
+    // (and vice versa) — approximates the true overlap boundary without a full 3D mesh
+    // boolean (Unity has no built-in equivalent to Blender's Boolean INTERSECT solver).
+    List<CollisionSubTri> FindCollisionTris(GameObject[] sel)
     {
-        var result = new List<Vector3[]>();
+        var result = new List<CollisionSubTri>();
         var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
         if (sidesFilters.Count < 2) return result;
 
@@ -1107,7 +1274,7 @@ public class JointAssistWindow : EditorWindow
                     Vector3 c = (w0 + w1 + w2) / 3f;
                     if (!boundsB.Contains(c)) continue;
                     if (PointMeshDepth(c, wVertsB, trisB) > compatCollisionThreshold)
-                        result.Add(new Vector3[] { w0, w1, w2 });
+                        SubdivideAndCullTri(w0, w1, w2, wVertsB, trisB, 0, result);
                 }
 
                 for (int i = 0; i < trisB.Length; i += 3)
@@ -1116,11 +1283,34 @@ public class JointAssistWindow : EditorWindow
                     Vector3 c = (w0 + w1 + w2) / 3f;
                     if (!boundsA.Contains(c)) continue;
                     if (PointMeshDepth(c, wVertsA, trisA) > compatCollisionThreshold)
-                        result.Add(new Vector3[] { w0, w1, w2 });
+                        SubdivideAndCullTri(w0, w1, w2, wVertsA, trisA, 0, result);
                 }
             }
         }
         return result;
+    }
+
+    // Recursively splits a triangle at its edge midpoints (4-way subdivision) until edges are
+    // below kCollisionSubdivEdge or max depth is reached, keeping only leaf sub-triangles whose
+    // centroid still tests as inside otherWVerts/otherTris beyond Collision Threshold — this
+    // trims the highlighted area down toward the true overlap boundary.
+    static void SubdivideAndCullTri(Vector3 v0, Vector3 v1, Vector3 v2,
+        Vector3[] otherWVerts, int[] otherTris, int depth, List<CollisionSubTri> result)
+    {
+        float maxEdge = Mathf.Max((v1 - v0).magnitude, (v2 - v1).magnitude, (v0 - v2).magnitude);
+        if (depth >= kCollisionSubdivMaxDepth || maxEdge <= kCollisionSubdivEdge)
+        {
+            Vector3 c = (v0 + v1 + v2) / 3f;
+            float d = PointMeshDepth(c, otherWVerts, otherTris);
+            if (d > 0f) result.Add(new CollisionSubTri { v0 = v0, v1 = v1, v2 = v2, depth = d });
+            return;
+        }
+
+        Vector3 m01 = (v0 + v1) * 0.5f, m12 = (v1 + v2) * 0.5f, m20 = (v2 + v0) * 0.5f;
+        SubdivideAndCullTri(v0, m01, m20, otherWVerts, otherTris, depth + 1, result);
+        SubdivideAndCullTri(m01, v1, m12, otherWVerts, otherTris, depth + 1, result);
+        SubdivideAndCullTri(m20, m12, v2, otherWVerts, otherTris, depth + 1, result);
+        SubdivideAndCullTri(m01, m12, m20, otherWVerts, otherTris, depth + 1, result);
     }
 
     // Returns (MeshFilter, ownerGO) pairs. ownerGO is the AddressableLoader GO for fake-child
@@ -1259,35 +1449,44 @@ public class JointAssistWindow : EditorWindow
 
     void OnSceneGUI(SceneView sv)
     {
-        // Draw all joint polygons from the last compatibility check
-        if (showJointPolygons && jointPolygons != null)
+        // Draw joint overlap highlights (PCH-style) — only the actual overlapping region
+        // between coplanar triangle pairs, banded by |plane separation| (gap or penetration)
+        // against the Collision Threshold: green within it, yellow within 2x, red beyond.
+        if (showOverlay && jointFaces != null)
         {
             var prevColor = Handles.color;
-            foreach (var poly in jointPolygons)
+            foreach (var f in jointFaces)
             {
-                if (poly == null || poly.Length < 3) continue;
-                Handles.color = new Color(0.2f, 1f, 0.4f, 0.35f);
-                Handles.DrawAAConvexPolygon(poly);
-                Handles.color = new Color(0.2f, 1f, 0.4f, 1f);
-                for (int i = 0; i < poly.Length; i++)
-                    Handles.DrawLine(poly[i], poly[(i + 1) % poly.Length]);
+                if (f.poly == null || f.poly.Length < 3) continue;
+                float absDist = Mathf.Abs(f.planeDist);
+                Color c = absDist <= compatCollisionThreshold      ? new Color(0.2f, 1f, 0.4f)
+                        : absDist <= compatCollisionThreshold * 2f ? new Color(1f, 0.85f, 0.2f)
+                                                                    : new Color(1f, 0.2f, 0.2f);
+                Handles.color = new Color(c.r, c.g, c.b, 0.35f);
+                Handles.DrawAAConvexPolygon(f.poly);
+                Handles.color = new Color(c.r, c.g, c.b, 1f);
+                for (int i = 0; i < f.poly.Length; i++)
+                    Handles.DrawLine(f.poly[i], f.poly[(i + 1) % f.poly.Length]);
             }
             Handles.color = prevColor;
         }
 
-        // Draw collision triangles (red) — triangles from each SP that are inside the other's bounds
-        if (showJointPolygons && collisionTris != null && collisionTris.Count > 0)
+        // Draw collision sub-triangles — subdivided-and-culled interpenetration region,
+        // banded by penetration depth against Collision Threshold: green/yellow/red.
+        if (showOverlay && collisionTris != null && collisionTris.Count > 0)
         {
             var prevColor = Handles.color;
-            Handles.color = new Color(1f, 0.15f, 0.15f, 0.4f);
-            foreach (var tri in collisionTris)
-                Handles.DrawAAConvexPolygon(tri);
-            Handles.color = new Color(1f, 0.15f, 0.15f, 0.8f);
             foreach (var tri in collisionTris)
             {
-                Handles.DrawLine(tri[0], tri[1]);
-                Handles.DrawLine(tri[1], tri[2]);
-                Handles.DrawLine(tri[2], tri[0]);
+                Color c = tri.depth <= compatCollisionThreshold      ? new Color(0.2f, 1f, 0.4f)
+                        : tri.depth <= compatCollisionThreshold * 2f ? new Color(1f, 0.85f, 0.2f)
+                                                                      : new Color(1f, 0.2f, 0.2f);
+                Handles.color = new Color(c.r, c.g, c.b, 0.4f);
+                Handles.DrawAAConvexPolygon(tri.v0, tri.v1, tri.v2);
+                Handles.color = new Color(c.r, c.g, c.b, 0.8f);
+                Handles.DrawLine(tri.v0, tri.v1);
+                Handles.DrawLine(tri.v1, tri.v2);
+                Handles.DrawLine(tri.v2, tri.v0);
             }
             Handles.color = prevColor;
         }
