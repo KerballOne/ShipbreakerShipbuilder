@@ -1057,14 +1057,25 @@ public class ComponentCopyWindow : EditorWindow
 
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("StructurePart (SP_Mat)", EditorStyles.miniBoldLabel);
+        EditorGUILayout.HelpBox(
+            "Governs physical/cutting properties: cut grade/stage (CuttingTargetable), mass density and " +
+            "rigidbody behavior, joint behavior and room/atmosphere sealing (JointSetup), and " +
+            "vaporize/yank-on-cut (BreakableJoint).",
+            MessageType.None);
         DrawRefOverride(ref m_AssignSpGuid, ref m_AssignSpName, ref m_AssignSpSearch,
             ref m_AssignSpOpen, ref m_AssignSpScroll, GetAssignSpEntries);
+        DrawSpBpSummary(m_AssignSpName, isBlueprint: false);
         DrawAssetPreview(m_AssignSpName, ref m_AssignSpPreviewOpen);
 
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("Blueprint (BP_Mat)", EditorStyles.miniBoldLabel);
+        EditorGUILayout.HelpBox(
+            "Governs ECS entity setup: fuel/coolant network membership, salvage destination " +
+            "(Furnace/Barge/Processor), pressure explosion logic, vitality/health, and scanner HUD entry.",
+            MessageType.None);
         DrawRefOverride(ref m_AssignBpGuid, ref m_AssignBpName, ref m_AssignBpSearch,
             ref m_AssignBpOpen, ref m_AssignBpScroll, GetAssignBpEntries);
+        DrawSpBpSummary(m_AssignBpName, isBlueprint: true);
         DrawAssetPreview(m_AssignBpName, ref m_AssignBpPreviewOpen);
 
         EditorGUILayout.Space(6);
@@ -1300,6 +1311,73 @@ public class ComponentCopyWindow : EditorWindow
         }
         catch { s_SpBpFields = null; }
         return s_SpBpFields;
+    }
+
+    // Always-visible compact summary of the fields called out in the SP/BP HelpBox descriptions
+    // above — pulled from the same sp_bp_fields.json PartInfoLogger dump DrawAssetPreview uses,
+    // but surfaced without needing to expand "Preview captured fields". Field key names confirmed
+    // against actual captured data (SP: CuttingTargetable/IRigidbodyAsset/JointSetup/BreakableJoint;
+    // BP: MachinePartAsset fuel/cryo control, SalvageableComponentAsset options — room sealing and
+    // rigidbody type only ever appear on SP assets, never BP, so they're SP-only rows here).
+    void DrawSpBpSummary(string displayName, bool isBlueprint)
+    {
+        if (string.IsNullOrEmpty(displayName)) return;
+        var table = LoadSpBpFields();
+        if (table == null || !table.TryGetValue(displayName, out var fields) || fields == null) return;
+
+        var rows = new List<(string label, string value)>();
+
+        if (!isBlueprint)
+        {
+            AddRow(rows, fields, "Cut grade/stage", "Data.m_CuttingTargetableAsset.Data.m_PowerRating");
+            AddRow(rows, fields, "Mass density", "Data.m_IRigidbodyAsset.Data.m_DensityOrMass");
+            AddRow(rows, fields, "Joint setup", "Data.m_JointSetupAsset@ref", "Data.m_JointSetupAsset.name");
+            AddRow(rows, fields, "Room sealing", "Data.m_JointSetupAsset.m_CanSealRoom", "Data.m_JointSetupAsset.CanSealRoom");
+            AddRow(rows, fields, "Vaporize on cut", "Data.m_ShatterableComponentAsset.Data.m_VaporizationOverrideAsset@ref");
+            AddRow(rows, fields, "Yank lock on start", "Data.m_BreakableJointAsset.Data.m_YankLockOnStart");
+        }
+        else
+        {
+            AddRow(rows, fields, "Fuel control", FindKeyContaining(fields, "m_FuelControl"));
+            AddRow(rows, fields, "Cryo control", FindKeyContaining(fields, "m_CryoControl"));
+            AddRow(rows, fields, "Salvage destination", FindKeyContaining(fields, "m_PossibleSalvageableOptions"));
+        }
+
+        if (rows.Count == 0) return;
+
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        foreach (var (label, value) in rows)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(130));
+            EditorGUILayout.LabelField(value, EditorStyles.boldLabel);
+            EditorGUILayout.EndHorizontal();
+        }
+        EditorGUILayout.EndVertical();
+    }
+
+    // Tries each candidate key in order, using the first one present in fields.
+    static void AddRow(List<(string, string)> rows, Dictionary<string, object> fields, string label, params string[] candidateKeys)
+    {
+        foreach (var key in candidateKeys)
+        {
+            if (key == null) continue;
+            if (fields.TryGetValue(key, out var val) && val != null)
+            {
+                rows.Add((label, val.ToString()));
+                return;
+            }
+        }
+    }
+
+    // Some captured field paths carry array indices that vary per asset (e.g.
+    // "m_ComponentDataAssets[6].Data.m_FuelControl") — match by suffix instead of exact key.
+    static string FindKeyContaining(Dictionary<string, object> fields, string suffix)
+    {
+        foreach (var key in fields.Keys)
+            if (key.EndsWith(suffix, System.StringComparison.Ordinal))
+                return key;
+        return null;
     }
 
     void DrawAssetPreview(string displayName, ref bool open)

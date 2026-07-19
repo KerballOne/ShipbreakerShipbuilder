@@ -87,8 +87,10 @@ public class CustomPartWizard : EditorWindow
     bool   m_KeepOpening      = false;
     bool   m_CopySpToChildren = true;
     string m_DisplayName      = "";
-    int    m_MatTemplate      = 0;
-    bool   m_TexturesFoldout  = false;
+    int    m_MatTemplate         = 0;
+    bool   m_TexturesFoldout     = false;
+    bool   m_OverridesFoldout    = false;
+    bool   m_AddressablesFoldout = false;
 
     Vector2 m_Scroll;
 
@@ -258,19 +260,6 @@ public class CustomPartWizard : EditorWindow
             EditorGUILayout.HelpBox($"Material: {matName}", MessageType.None);
         }
 
-        // Textures — collapsible
-        EditorGUILayout.Space(2);
-        m_TexturesFoldout = EditorGUILayout.Foldout(m_TexturesFoldout, "Textures (optional)", true);
-        if (m_TexturesFoldout)
-        {
-            EditorGUI.indentLevel++;
-            EditorGUILayout.HelpBox("Assigned to the resolved material via HDRP slot names.  Mask: R=Metallic  G=AO  B=Detail  A=Smoothness", MessageType.None);
-            m_BaseColorMap = (Texture2D)EditorGUILayout.ObjectField("Base Color (_BaseColorMap)", m_BaseColorMap, typeof(Texture2D), false);
-            m_NormalMap    = (Texture2D)EditorGUILayout.ObjectField("Normal Map  (_NormalMap)",   m_NormalMap,    typeof(Texture2D), false);
-            m_MaskMap      = (Texture2D)EditorGUILayout.ObjectField("Mask Map    (_MaskMap)",     m_MaskMap,      typeof(Texture2D), false);
-            EditorGUI.indentLevel--;
-        }
-
         // ── SP Material ───────────────────────────────────────────────────────
         EditorGUILayout.Space(6);
         EditorGUILayout.LabelField("SP Material", EditorStyles.boldLabel);
@@ -294,37 +283,72 @@ public class CustomPartWizard : EditorWindow
             EditorGUILayout.HelpBox($"Loader source: {m_LoaderSourceObject.name}  [{loaderName}]", MessageType.None);
         }
 
-        EditorGUILayout.Space(4);
-        EditorGUILayout.LabelField("SP Material Override", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            "Governs physical/salvage properties: cut grade, salvage destination (Furnace/Barge/Processor), " +
-            "mass density, joint behavior, vaporize/yank on cut, and the orange glow (CuttingTargetable). " +
-            "Leave blank to inherit from template.",
-            MessageType.None);
-        DrawRefOverride(
-            ref m_SpMatOverrideGuid, ref m_SpMatOverrideName,
-            ref m_SpMatSearchFilter, ref m_SpMatDropdownOpen, ref m_SpMatScroll,
-            GetSpMatEntries);
-
-        EditorGUILayout.Space(4);
-        EditorGUILayout.LabelField("Blueprint Override", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            "Governs ECS entity setup: fuel/coolant network membership, pressure explosion logic, " +
-            "vitality/health, scanner HUD entry, physics rigidbody type, and room/atmosphere sealing. " +
-            "Leave blank to inherit from template.",
-            MessageType.None);
-        DrawRefOverride(
-            ref m_BpOverrideGuid, ref m_BpOverrideName,
-            ref m_BpSearchFilter, ref m_BpDropdownOpen, ref m_BpScroll,
-            GetBpEntries);
-
-        // ── Addressables ──────────────────────────────────────────────────────
+        // ── Textures (optional, collapsed by default) ───────────────────────────
         EditorGUILayout.Space(6);
-        EditorGUILayout.LabelField("Addressables (Optional)", EditorStyles.boldLabel);
-        EditorGUILayout.Separator();
+        int texCount = (m_BaseColorMap != null ? 1 : 0) + (m_NormalMap != null ? 1 : 0) + (m_MaskMap != null ? 1 : 0);
+        string texturesLabel = texCount > 0 ? $"Textures ({texCount} selected)" : "Textures (optional)";
+        m_TexturesFoldout = EditorGUILayout.Foldout(m_TexturesFoldout, texturesLabel, true);
+        if (m_TexturesFoldout)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox("Assigned to the resolved material via HDRP slot names.  Mask: R=Metallic  G=AO  B=Detail  A=Smoothness", MessageType.None);
 
-        m_AddressableGroup = EditorGUILayout.TextField("Group Name", m_AddressableGroup);
-        EditorGUILayout.HelpBox("Leave blank to skip registration. The group must already exist.", MessageType.None);
+            float prevLabelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = 90f;
+            m_BaseColorMap = (Texture2D)EditorGUILayout.ObjectField(
+                new GUIContent("Base Color", "_BaseColorMap"), m_BaseColorMap, typeof(Texture2D), false);
+            m_NormalMap = (Texture2D)EditorGUILayout.ObjectField(
+                new GUIContent("Normal Map", "_NormalMap"), m_NormalMap, typeof(Texture2D), false);
+            m_MaskMap = (Texture2D)EditorGUILayout.ObjectField(
+                new GUIContent("Mask Map", "_MaskMap"), m_MaskMap, typeof(Texture2D), false);
+            EditorGUIUtility.labelWidth = prevLabelWidth;
+
+            EditorGUI.indentLevel--;
+        }
+
+        // ── Overrides (optional, collapsed by default) ──────────────────────────
+        EditorGUILayout.Space(4);
+        m_OverridesFoldout = EditorGUILayout.Foldout(m_OverridesFoldout, "SP Material & Blueprint Overrides (optional)", true);
+        if (m_OverridesFoldout)
+        {
+            EditorGUI.indentLevel++;
+
+            EditorGUILayout.LabelField("SP Material Override", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Governs physical/cutting properties: cut grade/stage (CuttingTargetable), mass density and " +
+                "rigidbody behavior, joint behavior and room/atmosphere sealing (JointSetup), and " +
+                "vaporize/yank-on-cut (BreakableJoint). Leave blank to inherit from template.",
+                MessageType.None);
+            DrawRefOverride(
+                ref m_SpMatOverrideGuid, ref m_SpMatOverrideName,
+                ref m_SpMatSearchFilter, ref m_SpMatDropdownOpen, ref m_SpMatScroll,
+                GetSpMatEntries);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Blueprint Override", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Governs ECS entity setup: fuel/coolant network membership, salvage destination " +
+                "(Furnace/Barge/Processor), pressure explosion logic, vitality/health, and scanner HUD entry. " +
+                "Leave blank to inherit from template.",
+                MessageType.None);
+            DrawRefOverride(
+                ref m_BpOverrideGuid, ref m_BpOverrideName,
+                ref m_BpSearchFilter, ref m_BpDropdownOpen, ref m_BpScroll,
+                GetBpEntries);
+
+            EditorGUI.indentLevel--;
+        }
+
+        // ── Addressables (optional, collapsed by default) ───────────────────────
+        EditorGUILayout.Space(4);
+        m_AddressablesFoldout = EditorGUILayout.Foldout(m_AddressablesFoldout, "Addressables (optional)", true);
+        if (m_AddressablesFoldout)
+        {
+            EditorGUI.indentLevel++;
+            m_AddressableGroup = EditorGUILayout.TextField("Group Name", m_AddressableGroup);
+            EditorGUILayout.HelpBox("Leave blank to skip registration. The group must already exist.", MessageType.None);
+            EditorGUI.indentLevel--;
+        }
 
         // ── Advanced ──────────────────────────────────────────────────────────
         EditorGUILayout.Space(6);
@@ -719,6 +743,16 @@ public class CustomPartWizard : EditorWindow
                 if (!string.IsNullOrEmpty(m_BpOverrideGuid))
                     SetLoaderRef(root, 1, m_BpOverrideGuid);
             }
+
+            // Auto-recenter every mesh's origin to its own geometry (root and any segment/copied
+            // children) — parts assigned a mesh directly (not baked through ImportGamePartWizard's
+            // RecenterChildren) can have a Blender-authored origin far from their own geometry,
+            // which makes cut/explosion FX spawn away from the visible mesh at runtime (FX reads
+            // the GameObject's transform.position, which tracks the origin, not the render bounds).
+            // See RecenterMeshOriginContextMenu.cs for the full explanation and the manual version
+            // of this same fix.
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
+                RecenterMeshOriginContextMenu.Recenter(mf.gameObject);
         }
 
         // Apply texture overrides to the duplicated material
@@ -956,9 +990,6 @@ public class CustomPartWizard : EditorWindow
         m_BaseColorMap = FindTexFromSidecar(texMap, "BaseColor", texFolder);
         m_NormalMap    = FindTexFromSidecar(texMap, "Normal",    texFolder);
         m_MaskMap      = FindTexFromSidecar(texMap, "MaskMap",   texFolder);
-
-        if (m_BaseColorMap != null || m_NormalMap != null || m_MaskMap != null)
-            m_TexturesFoldout = true;
     }
 
     static Texture2D FindTexFromSidecar(

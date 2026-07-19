@@ -68,9 +68,11 @@ public static class RecenterMeshOriginContextMenu
         EditorUtility.DisplayDialog("Recenter Mesh Origin", msg, "OK");
     }
 
-    enum Result { Recentered, NoMesh, AlreadyCentered }
+    public enum Result { Recentered, NoMesh, AlreadyCentered }
 
-    static Result Recenter(GameObject go)
+    // Exposed for CustomPartWizard.cs to auto-recenter each mesh it creates. Same behavior as
+    // the context menu action — clones the mesh, shifts vertices, compensates the transform.
+    public static Result Recenter(GameObject go)
     {
         var mf = go.GetComponent<MeshFilter>();
         var sourceMesh = mf != null ? mf.sharedMesh : null;
