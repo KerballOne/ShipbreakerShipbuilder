@@ -722,6 +722,24 @@ The most frequently needed context menu item. After duplicating or adding a GO u
 
 Same as above — bakes transform scale into mesh geometry for the selected GO and descendants.
 
+#### `GameObject / Shipbuilder / Recenter Mesh Origin to Geometry (Keep World Position)`
+
+Right-click a **leaf** part GO (mesh + collider + `StructurePart`/`EntityBlueprintComponent` all on the same node, no children — e.g. a plain mesh assigned SP/BP via Component Copy Window rather than baked through the Import Game Part Wizard) → recenters that part's own origin onto its mesh's geometric bounds center, without moving it in the editor or in-game.
+
+**Symptom this fixes:** cut/explosion FX spawning far away from the visible mesh instead of at the cut location. Root cause: the mesh's Blender-authored object origin sits far from its own geometry (e.g. down near an unrelated part of the ship), so while the renderer draws the mesh where its vertices are, the GameObject's actual `transform.position` — and the game's FX spawn point, which reads that transform — sit wherever the bad origin is. Parts baked through the Import Game Part Wizard never hit this because that pipeline always recenters automatically (`RecenterChildren`); parts added via Component Copy Window / "Assign StructurePart/Blueprint by name" onto a raw imported mesh do not.
+
+**How it works:**
+1. Computes the mesh's bounding-box center as the offset.
+2. Clones the mesh asset (never edits the source FBX sub-mesh in place — that would be silently wiped on the FBX's next reimport) and shifts every vertex by `-offset`. The clone is saved to a sibling `_Recentered_Meshes` folder next to the source mesh's asset.
+3. Reassigns both `MeshFilter.sharedMesh` and `MeshCollider.sharedMesh` to the clone.
+4. Moves the GameObject's `transform.position` by `+offset` in world space to compensate — the mesh does not move on screen.
+
+**How to tell if a part needs this:** if a baked/scene-authored part's cut/explosion FX consistently spawns at the wrong spot, open its source mesh in Blender and check whether the object's origin (the orange dot / gizmo) sits near its own geometry or far away near an unrelated part of the ship. If it's far away, run this tool on the corresponding GO in Unity — no changes to Blender or the FBX are needed.
+
+**Caveat:** not durable against a future re-export/reimport of the same FBX — if a later Component Copy Window pass or reimport resets `MeshFilter`/`MeshCollider` back to the original FBX sub-asset, re-run this tool. This is a manual, per-part fix, not wired into any automatic import pipeline.
+
+**Related but different:** `GameObject / Shipbuilder / Recenter Pivot to Mesh (Keep World Position)` does the same job for a **parent** GO by shifting its **children's** local positions — it requires the target to have child Renderers and cannot fix a leaf part with no children (like the case above).
+
 ---
 
 ### 2.3 Assets Panel
