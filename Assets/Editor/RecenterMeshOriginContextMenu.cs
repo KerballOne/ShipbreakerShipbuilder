@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -37,13 +38,14 @@ public static class RecenterMeshOriginContextMenu
     const string GOMenuPath   = "GameObject/Shipbuilder/Recenter Mesh to Origin";
     const string ShipMenuPath = "Shipbuilder/Recenter Mesh to Origin";
 
+    // Selection can be a leaf part itself, or a parent GO — in the parent case this runs on
+    // every descendant MeshFilter, as if each had been selected individually. Scope is always
+    // exactly the explicitly selected object(s) and their descendants — never anything else in
+    // the scene/project.
     static bool Validate() =>
         Selection.gameObjects.Length > 0 &&
-        Selection.gameObjects.All(go =>
-        {
-            var mf = go.GetComponent<MeshFilter>();
-            return mf != null && mf.sharedMesh != null;
-        });
+        Selection.gameObjects.All(go => go.GetComponentsInChildren<MeshFilter>(true)
+            .Any(mf => mf.sharedMesh != null));
 
     [MenuItem(GOMenuPath, true)]
     static bool ValidateGO() => Validate();
@@ -77,7 +79,16 @@ public static class RecenterMeshOriginContextMenu
     {
         int recentered = 0, skippedNoMesh = 0, skippedAlreadyCentered = 0;
 
+        // Expand each selected GO to every descendant MeshFilter (including itself if it has
+        // one), so selecting a parent recenters all its leaf-mesh children. Dedupe in case a
+        // selected parent and one of its selected children both resolve to the same GO. This
+        // only ever touches descendants of what was explicitly selected — no project-wide scan.
+        var targets = new HashSet<GameObject>();
         foreach (var go in Selection.gameObjects)
+            foreach (var mf in go.GetComponentsInChildren<MeshFilter>(true))
+                targets.Add(mf.gameObject);
+
+        foreach (var go in targets)
         {
             var result = Recenter(go);
             switch (result)

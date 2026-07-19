@@ -80,6 +80,13 @@ The Blender scripts live in `Blender/blender_scripts/startup/` and are registere
 
 If scale is not applied, the FBX exporter bakes the transform scale into the export and the geometry arrives in Unity at the wrong size.
 
+**Prerequisite — recenter each object's origin before exporting (fixes cut/explosion FX spawning away from the visible mesh):**
+1. Select the object(s), `Object → Set Origin → Origin to Geometry`
+
+Do this for any part whose Blender-authored origin sits far from its own geometry — root cause of cut/explosion FX spawning at the wrong location in-game, since the game reads the GameObject's `transform.position` (which tracks the origin) for FX spawn points, not the render bounds. Do **not** follow this with `Object → Apply → All Transforms` — that re-bakes the object's Location back toward zero and moves the origin back to roughly where it was before, undoing the fix. (Apply All Transforms is still the correct, normal step whenever you've manually moved/rotated/scaled a part and want that baked into its mesh data — that's unrelated to this specific origin-centering step.)
+
+This requires `CustomPartWizard.cs`'s FBX-submesh bake to read each sub-mesh's own node transform from the FBX (not just its vertex data) — confirmed 2026-07-19. Earlier CPW versions placed every segment at identity transform under a shared root, which only produced correctly-assembled parts by coincidence, when every sub-object in the FBX happened to share one Blender origin. Once each part gets its own individually recentered origin via Origin to Geometry, each sub-mesh's vertex data is expressed relative to a *different* local origin — reading only vertex data and ignoring the node's own transform then misassembles the parts (they collapse toward one shared location instead of their correct relative positions). CPW now reads and applies each node's `localPosition`/`localRotation`/`localScale`, so this reassembles correctly.
+
 **Remembers the last export directory** across Blender restarts (saved to `export_collection_prefs.json` next to the script).
 
 ---
@@ -724,6 +731,8 @@ Same as above — bakes transform scale into mesh geometry for the selected GO a
 
 #### `GameObject / Shipbuilder / Recenter Mesh to Origin`
 
+**Manual fallback only — the real fix is a combination of a one-time Blender habit and a CPW code fix, both already in place.** See the "recenter each object's origin before exporting" prerequisite in [§1.1](#11-export-to-unity-fbx) (Set Origin to Geometry — do **not** follow with Apply All Transforms). Parts exported that way, baked through Custom Part Wizard, arrive in Unity already correctly assembled — this tool should rarely be needed. Use it by hand only on a part someone forgot to fix in Blender before export.
+
 Right-click a **leaf** part GO (mesh + collider + `StructurePart`/`EntityBlueprintComponent` all on the same node, no children — e.g. a plain mesh assigned SP/BP via Component Copy Window rather than baked through the Import Game Part Wizard) → moves the **mesh** to the GameObject's existing origin, in place. The GameObject's `transform.position` is never touched.
 
 **Symptom this fixes:** cut/explosion FX spawning far away from the visible mesh instead of at the cut location. Root cause: the mesh's Blender-authored object origin sits far from its own geometry (e.g. down near an unrelated part of the ship), so while the renderer draws the mesh where its vertices are, the GameObject's actual `transform.position` — and the game's FX spawn point, which reads that transform — sit wherever the bad origin is. Parts baked through the Import Game Part Wizard never hit this because that pipeline always recenters automatically (`RecenterChildren`); parts added via Component Copy Window / "Assign StructurePart/Blueprint by name" onto a raw imported mesh do not.
@@ -731,21 +740,21 @@ Right-click a **leaf** part GO (mesh + collider + `StructurePart`/`EntityBluepri
 **How it works:**
 1. Computes the mesh's bounding-box center as the offset.
 2. Mutates the mesh asset's vertices **in place** (no clone) — shifts every vertex by `-offset` so the geometry is now centered on the mesh's own local origin.
-3. `transform.position` is left untouched by default, since the GameObject is presumed already correctly placed (e.g. re-fixing a part after a Blender re-export) — this run only pulls the mesh back to where the origin already is.
+3. `transform.position` is left untouched, since the GameObject is presumed already correctly placed — this run only pulls the mesh back to where the origin already is.
 
 **Caveat — mutates a shared asset, not a clone:** because this edits the mesh asset directly rather than cloning it, if the same mesh sub-asset is referenced by more than one GameObject (e.g. repeated tower/leg instances baked from one FBX), only the *first* `Recenter()` call actually shifts vertices — later calls on sibling GOs see it already centered and no-op. That's fine since position is never touched here, but it means running this on one instance affects every GameObject sharing that mesh.
 
-**Not durable across reimport:** editing an FBX sub-mesh's vertices in memory doesn't survive Unity's next reimport of that FBX — sub-meshes are rebuilt from the file each time. See "Auto-Recenter on FBX Reimport" below for the automatic version of this same fix that reruns after every Blender re-export.
+**Works on a parent GO too:** select a parent object (e.g. a whole assembly) instead of a single leaf part, and the command expands to every descendant `MeshFilter`, recentering each one as if it had been selected individually. Scope is always exactly the selected object(s) and their descendants — it never touches anything else in the scene.
 
-**CustomPartWizard's internal use is different:** when CPW bakes a brand-new part for the first time, it calls this same underlying function but *with* position compensation (moves the GameObject's origin to match the mesh, preserving the original Blender-authored world placement) — appropriate there because each freshly baked mesh is not yet shared with any other GameObject. That compensating variant is not exposed as a menu command; it only runs automatically inside CPW's bake pass.
+**Not durable across reimport:** editing an FBX sub-mesh's vertices in memory doesn't survive Unity's next reimport of that FBX — sub-meshes are rebuilt from the file each time. Re-run this manually after a re-export if a part still needs it. There is **no automatic version of this anymore** — an on-reimport auto-trigger was built, tested, and then deliberately deleted (not just disabled) once the real root cause was found and fixed in `CustomPartWizard.cs` (see below); automating this in Unity had already proven fragile and wasn't needed once the underlying bug was actually fixed.
 
 **Related but different:** `GameObject / Shipbuilder / Recenter Pivot to Mesh (Keep World Position)` does the opposite job for a **parent** GO — it moves the **origin** to the mesh by shifting the parent's **children's** local positions and compensating the parent's world position so nothing visually moves. It requires the target to have child Renderers and cannot fix a leaf part with no children (like the case above).
 
-#### Auto-Recenter on FBX Reimport
+#### Why parts used to misassemble after Origin to Geometry (fixed in CPW)
 
-Whenever an `.fbx` under `Assets/_CustomShips/` reimports (e.g. after a Blender re-export), Unity automatically re-runs the mesh-to-origin recenter above on every GameObject — in all open scenes and in prefab assets under `_CustomShips` — whose `MeshFilter` references one of that FBX's sub-meshes. No manual step needed after a re-export; check the Console for `[CustomMeshPostprocessor] Detected FBX reimport...` and `[AutoRecenterOnReimport] ...` log lines confirming what was touched.
+Custom Part Wizard's FBX-submesh bake mode used to place every segment GameObject at **identity local transform**, reading only each sub-mesh's raw vertex data and ignoring the source FBX node's own transform entirely. That happened to work as long as every part in a ship's FBX shared one common Blender-scene origin — but the moment a part got its own individually-recentered origin (via Origin to Geometry, above), its vertex data became relative to a *different* local origin than its siblings, and CPW's identity-transform assumption broke: parts would collapse toward each other in Unity instead of assembling at their correct relative positions.
 
-Controlled by a single flag, `CustomMeshPostprocessor.AutoRecenterOnReimportEnabled` (`Assets/Editor/CustomMeshPostprocessor.cs`) — flip to `false` to disable if it ever needs to be turned off.
+Fixed: CPW now also reads each sub-mesh's own `localPosition`/`localRotation`/`localScale` from the imported FBX hierarchy and applies it to the corresponding segment GameObject. This is what makes the Blender-side Origin to Geometry habit actually work end to end — do both, not just one or the other.
 
 ---
 

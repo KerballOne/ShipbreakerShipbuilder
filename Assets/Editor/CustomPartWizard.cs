@@ -580,9 +580,19 @@ public class CustomPartWizard : EditorWindow
                 // CustomMeshPostprocessor.OnAssignMaterialModel) onto MeshRenderers in the
                 // imported FBX's GameObject hierarchy — read them from there instead of
                 // assuming one material per mesh, and reuse the source GO's name.
+                //
+                // Also read each node's own local transform (position/rotation/scale) here.
+                // Every mesh sub-asset's vertex data is expressed relative to that node's own
+                // local origin — NOT a shared scene-wide frame — so placing every segment at
+                // identity transform (as this code used to) only produces correctly-assembled
+                // geometry when every source object happens to share one origin. Once a part's
+                // origin is individually recentered in Blender (Object > Set Origin > Origin to
+                // Geometry — see USER_GUIDE.md §1.1), each object's own origin differs, and only
+                // reading its transform alongside its mesh reassembles the parts correctly.
                 var fbxRoot = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
                 var meshToRenderer = new Dictionary<Mesh, MeshRenderer>();
                 var meshToName     = new Dictionary<Mesh, string>();
+                var meshToTransform = new Dictionary<Mesh, Transform>();
                 if (fbxRoot != null)
                 {
                     foreach (var mf in fbxRoot.GetComponentsInChildren<MeshFilter>(true))
@@ -591,6 +601,7 @@ public class CustomPartWizard : EditorWindow
                         var mr = mf.GetComponent<MeshRenderer>();
                         if (mr != null) meshToRenderer[mf.sharedMesh] = mr;
                         meshToName[mf.sharedMesh] = mf.gameObject.name;
+                        meshToTransform[mf.sharedMesh] = mf.transform;
                     }
                 }
 
@@ -645,6 +656,15 @@ public class CustomPartWizard : EditorWindow
                         ? srcName : $"{m_PartName}_{i:D2}";
                     var segGO = new GameObject(segName);
                     segGO.transform.SetParent(root.transform, false);
+
+                    // Apply the source FBX node's own local transform — see comment above
+                    // meshToTransform's declaration for why this can no longer be skipped.
+                    if (meshToTransform.TryGetValue(segMesh, out var srcTransform) && srcTransform != null)
+                    {
+                        segGO.transform.localPosition = srcTransform.localPosition;
+                        segGO.transform.localRotation = srcTransform.localRotation;
+                        segGO.transform.localScale    = srcTransform.localScale;
+                    }
 
                     var mf        = segGO.AddComponent<MeshFilter>();
                     mf.sharedMesh = segMesh;
@@ -750,17 +770,6 @@ public class CustomPartWizard : EditorWindow
                     SetLoaderRef(root, 1, m_BpOverrideGuid);
             }
 
-            // Auto-recenter every mesh's origin to its own geometry (root and any segment/copied
-            // children) — parts assigned a mesh directly (not baked through ImportGamePartWizard's
-            // RecenterChildren) can have a Blender-authored origin far from their own geometry,
-            // which makes cut/explosion FX spawn away from the visible mesh at runtime (FX reads
-            // the GameObject's transform.position, which tracks the origin, not the render bounds).
-            // compensatePosition: true — each segment mesh here is freshly baked and unshared
-            // (see RecenterMeshOriginContextMenu.cs for why the manual command defaults to false).
-            // See RecenterMeshOriginContextMenu.cs for the full explanation and the manual version
-            // of this same fix.
-            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
-                RecenterMeshOriginContextMenu.Recenter(mf.gameObject, compensatePosition: true);
         }
 
         // Apply texture overrides to the duplicated material
