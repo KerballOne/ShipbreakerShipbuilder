@@ -65,6 +65,7 @@ public class JointAssistWindow : EditorWindow
     CompatResult compatSPMat  = new CompatResult { state = CompatResult.State.None };
     CompatResult compatMJC    = new CompatResult { state = CompatResult.State.None };
     CompatResult compatMesh   = new CompatResult { state = CompatResult.State.None };
+    CompatResult compatHull   = new CompatResult { state = CompatResult.State.None };
 
     // Master visibility toggle for the scene-view overlay (both jointFaces and collisionTris
     // below). Set true automatically after a Check that finds anything to show; can be
@@ -83,6 +84,9 @@ public class JointAssistWindow : EditorWindow
     // only the actual overlapping region (not the whole face), colored by plane separation:
     // green/yellow scale by |gap or overlap| against Collision Threshold, but red is reserved
     // for penetration beyond 2x the threshold (deep enough overlap to cause a physics impulse).
+    // Sourced from the render mesh normally, or from each part's baked convex hull (via
+    // GetBakedConvexHull/CollectJointFacesHull) when snapUseColliderHull is on — same algorithm
+    // either way, just different vertex/triangle data feeding it.
     struct JointFaceHighlight { public Vector3[] poly; public float planeDist; }
     List<JointFaceHighlight> jointFaces;
 
@@ -272,6 +276,7 @@ public class JointAssistWindow : EditorWindow
         DrawSeparator();
         EditorGUILayout.Space(4);
         DrawCompatMeshResult(compatMesh, jsaMjcBothFail);
+        DrawCompatMeshResult(compatHull, jsaMjcBothFail);
 
         // ── Section break ─────────────────────────────────────────────────────
         GUILayout.Space(12);
@@ -531,6 +536,7 @@ public class JointAssistWindow : EditorWindow
         jointFaces    = null;
         collisionTris = null;
         showOverlay = false;
+        ClearHullBakeCache();
         // Re-read data files each check so in-game updates are picked up without reopening the window
         enrichedJsaMap = null;
         spMatJsaMap    = null;
@@ -545,16 +551,30 @@ public class JointAssistWindow : EditorWindow
 
         // ── #3  Mesh joint polygons ───────────────────────────────────────────
         (compatMesh, jointPolygons) = CheckMeshJoints(sel);
+        compatHull = CheckMeshJointsPhysics(sel);
 
-        // ── #3b  Joint overlap highlight (PCH-style, scene-view visualization) ──
+        // ── #3b  Joint overlap highlight (scene-view visualization) ──
+        // Matches whichever geometry source Face Snap/Auto-Detect are using: baked convex hull
+        // (via Physics.BakeMesh — real PhysX hull geometry, same shape the collider gizmo draws
+        // in green) when the toggle is on, otherwise the render-mesh per-triangle-pair regions.
         if (sel.Length >= 2)
         {
             var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
             if (sidesFilters.Count >= 2 && sidesFilters[0].Count > 0 && sidesFilters[1].Count > 0)
             {
                 jointFaces = new List<JointFaceHighlight>();
-                CollectJointFaces(sidesFilters[0].Select(p => p.mf).ToList(), sidesFilters[1].Select(p => p.mf).ToList(), jointFaces);
-                CollectJointFaces(sidesFilters[1].Select(p => p.mf).ToList(), sidesFilters[0].Select(p => p.mf).ToList(), jointFaces);
+                var mfsA = sidesFilters[0].Select(p => p.mf).ToList();
+                var mfsB = sidesFilters[1].Select(p => p.mf).ToList();
+                if (snapUseColliderHull)
+                {
+                    CollectJointFacesHull(mfsA, mfsB, jointFaces);
+                    CollectJointFacesHull(mfsB, mfsA, jointFaces);
+                }
+                else
+                {
+                    CollectJointFaces(mfsA, mfsB, jointFaces);
+                    CollectJointFaces(mfsB, mfsA, jointFaces);
+                }
             }
         }
         if (jointFaces != null && jointFaces.Count > 0)
@@ -932,6 +952,87 @@ public class JointAssistWindow : EditorWindow
             message = $"Mesh: {areaSum[0]:0.####} m² of overlap found ({polys.Count} joint polygon{(polys.Count == 1 ? "" : "s")})." }, polys);
     }
 
+    // #3c: Physics.ComputePenetration between the actual live MeshColliders — the render-mesh
+    // coplanar check above can Pass even when the baked convex hull (what the game's jointing
+    // physics actually simulates) doesn't meaningfully overlap, or can miss real hull overlap a
+    // render-mesh test wouldn't see (concave/pointed detail vs. the hull that bulges past it).
+    // This is a real PhysX query, not an approximation, so it's the more physically accurate
+    // signal — reported alongside, not replacing, the polygon-clip check.
+    CompatResult CheckMeshJointsPhysics(GameObject[] sel)
+    {
+        var sidesFilters = sel.Select(go => CollectSPMeshFilters(go)).ToList();
+        if (sidesFilters.Count < 2 || sidesFilters[0].Count == 0 || sidesFilters[1].Count == 0)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = "Hull: No StructurePart MeshFilters found on one or both sides." };
+
+        var colsA = sidesFilters[0].Select(p => p.mf.GetComponent<MeshCollider>()).Where(c => c != null && !c.isTrigger).ToList();
+        var colsB = sidesFilters[1].Select(p => p.mf.GetComponent<MeshCollider>()).Where(c => c != null && !c.isTrigger).ToList();
+        if (colsA.Count == 0 || colsB.Count == 0)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = "Hull: No solid MeshCollider found on one or both sides." };
+
+        int nonConvex = colsA.Concat(colsB).Count(c => !c.convex);
+        if (nonConvex > 0)
+            return new CompatResult { state = CompatResult.State.Warn,
+                message = $"Hull: {nonConvex} MeshCollider(s) are non-convex — Physics.ComputePenetration requires convex colliders, skipped." };
+
+        float maxDepth = 0f;
+        int overlapCount = 0;
+        int touchingCount = 0;
+        float minGap = float.MaxValue;
+        foreach (var colA in colsA)
+        {
+            foreach (var colB in colsB)
+            {
+                // Expand by whichever tolerance is larger so the quick-reject can't discard a
+                // pair before the near-touch (Collision Threshold) check below gets to see it.
+                float margin = Mathf.Max(compatCoplanarThreshold, compatCollisionThreshold) * 2f;
+                var boundsA = colA.bounds; boundsA.Expand(margin);
+                if (!boundsA.Intersects(colB.bounds)) continue;
+
+                bool overlapped = Physics.ComputePenetration(
+                    colA, colA.transform.position, colA.transform.rotation,
+                    colB, colB.transform.position, colB.transform.rotation,
+                    out _, out float dist);
+                if (overlapped)
+                {
+                    overlapCount++;
+                    if (dist > maxDepth) maxDepth = dist;
+                    continue;
+                }
+
+                // ComputePenetration only reports true interpenetration — a flush, zero-gap
+                // pair of convex hulls (the ideal jointing case) has no separating-axis
+                // penetration to resolve, so it reports false here even though the game
+                // will happily joint it. Physics.ClosestPoint distinguishes "just touching"
+                // from "actually far apart" so a flush pair isn't wrongly reported as Fail.
+                // Collision Threshold (not Coplanar Threshold) is the right tolerance here —
+                // it's the same "acceptable gap or overlap" band used for the overlay's
+                // green/yellow/red banding elsewhere in this window.
+                Vector3 onB = Physics.ClosestPoint(colA.bounds.center, colB, colB.transform.position, colB.transform.rotation);
+                Vector3 onA = Physics.ClosestPoint(onB, colA, colA.transform.position, colA.transform.rotation);
+                float gap = Vector3.Distance(onA, onB);
+                if (gap < minGap) minGap = gap;
+                if (gap <= compatCollisionThreshold) touchingCount++;
+            }
+        }
+
+        if (overlapCount == 0 && touchingCount == 0)
+            return new CompatResult { state = CompatResult.State.Fail,
+                message = minGap == float.MaxValue
+                    ? "Hull: No convex-hull pair within range — parts will not auto-joint (physics)."
+                    : $"Hull: Nearest hulls are {minGap:0.####} m apart — parts will not auto-joint (physics)." };
+
+        if (overlapCount == 0)
+            return new CompatResult { state = CompatResult.State.Pass,
+                message = $"Hull: {touchingCount} collider pair(s) flush/near-flush (no penetration, within {compatCollisionThreshold:0.####} m)." };
+
+        bool tooDeep = maxDepth > compatCollisionThreshold * 2f;
+        return new CompatResult { state = tooDeep ? CompatResult.State.Warn : CompatResult.State.Pass,
+            message = $"Hull: {overlapCount} collider pair(s) overlap, max depth {maxDepth:0.####} m" +
+                (tooDeep ? " — may exceed impulse-safe depth." : ".") };
+    }
+
     // Use triangles of listA as reference planes, collect coplanar verts from both sides,
     // compute convex hulls, clip — store any non-zero intersection polygon.
     void CollectJointPolys(List<MeshFilter> listA, List<MeshFilter> listB,
@@ -1123,6 +1224,126 @@ public class JointAssistWindow : EditorWindow
                             // Red band only triggers on penetration beyond 2x Collision Threshold.
                             planeDist = sdAvg
                         });
+                    }
+                }
+            }
+        }
+    }
+
+    // Per-Check cache of baked convex hulls, keyed by source mesh instance ID — Physics.BakeMesh
+    // is a real (if somewhat slow) PhysX cook, so avoid re-baking the same mesh for every
+    // triangle-pair test within one Check pass. Cleared at the start of RunCompatibilityCheck.
+    Dictionary<int, Mesh> hullBakeCache;
+
+    // Physics.BakeMesh(id, convex: true) mutates the mesh IN PLACE — never call it on a real
+    // asset's instance ID. This duplicates meshA into a throwaway Mesh, bakes THAT instance's
+    // convex hull, and returns the duplicate (now containing the actual hull's vertices/
+    // triangles — the same shape the collider gizmo draws in green, which the render mesh does
+    // not: it can bulge outward past concave/pointed detail). Cached per source mesh per Check.
+    Mesh GetBakedConvexHull(Mesh sourceMesh)
+    {
+        hullBakeCache ??= new Dictionary<int, Mesh>();
+        int key = sourceMesh.GetInstanceID();
+        if (hullBakeCache.TryGetValue(key, out var cached)) return cached;
+
+        var dup = Object.Instantiate(sourceMesh);
+        Physics.BakeMesh(dup.GetInstanceID(), true);
+        hullBakeCache[key] = dup;
+        return dup;
+    }
+
+    void ClearHullBakeCache()
+    {
+        if (hullBakeCache == null) return;
+        foreach (var m in hullBakeCache.Values)
+            if (m != null) Object.DestroyImmediate(m);
+        hullBakeCache.Clear();
+    }
+
+    // Same coplanar-triangle-pair clip as CollectJointFaces, but sourced from each MeshFilter's
+    // baked convex hull (via GetBakedConvexHull) instead of MeshFilter.sharedMesh — so the
+    // overlap region matches what the game's physics/jointing actually sees (a convex hull can
+    // bulge past concave/pointed render-mesh detail, same reason Face Snap's Convex Hull mode
+    // exists). Hull meshes have no normals, so faceNorm comes from triangle winding instead.
+    void CollectJointFacesHull(List<MeshFilter> listA, List<MeshFilter> listB, List<JointFaceHighlight> faces)
+    {
+        var polyBuf = new List<Vector2>(8);
+        var ptsA2D  = new List<Vector2>(3);
+        var ptsB2D  = new List<Vector2>(3);
+
+        foreach (var mfA in listA)
+        {
+            var colA = mfA.GetComponent<MeshCollider>();
+            if (colA == null || colA.sharedMesh == null || !colA.convex || colA.isTrigger) continue;
+            var meshA  = GetBakedConvexHull(colA.sharedMesh);
+            var vertsA = meshA.vertices;
+            var mA     = mfA.transform.localToWorldMatrix;
+            var boundsA = TransformBoundsToWorld(mA, meshA.bounds);
+
+            var wVertsA = new Vector3[vertsA.Length];
+            for (int i = 0; i < vertsA.Length; i++)
+                wVertsA[i] = mA.MultiplyPoint3x4(vertsA[i]);
+
+            foreach (var mfB in listB)
+            {
+                var colB = mfB.GetComponent<MeshCollider>();
+                if (colB == null || colB.sharedMesh == null || !colB.convex || colB.isTrigger) continue;
+                var meshB  = GetBakedConvexHull(colB.sharedMesh);
+                var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, meshB.bounds);
+                var expandedA = new Bounds(boundsA.center, boundsA.size + Vector3.one * compatCoplanarThreshold * 2f);
+                if (!expandedA.Intersects(boundsB)) continue;
+                var vertsB = meshB.vertices;
+                var mB     = mfB.transform.localToWorldMatrix;
+
+                var wVertsB = new Vector3[vertsB.Length];
+                for (int i = 0; i < vertsB.Length; i++)
+                    wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
+
+                var trisA = meshA.triangles;
+                var trisB = meshB.triangles;
+                for (int ia = 0; ia < trisA.Length; ia += 3)
+                {
+                    Vector3 wa0 = wVertsA[trisA[ia]], wa1 = wVertsA[trisA[ia+1]], wa2 = wVertsA[trisA[ia+2]];
+                    Vector3 faceNorm = Vector3.Cross(wa1 - wa0, wa2 - wa0);
+                    if (faceNorm.sqrMagnitude < 1e-10f) continue;
+                    faceNorm.Normalize();
+                    Vector3 planeOrigin = (wa0 + wa1 + wa2) / 3f;
+
+                    if (Mathf.Abs(Vector3.Dot(wa0 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+                    if (Mathf.Abs(Vector3.Dot(wa1 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+                    if (Mathf.Abs(Vector3.Dot(wa2 - planeOrigin, faceNorm)) > compatCoplanarThreshold) continue;
+
+                    Vector3 tan   = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+                    Vector3 bitan = Vector3.Cross(faceNorm, tan).normalized;
+
+                    ptsA2D.Clear();
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa0 - planeOrigin, tan), Vector3.Dot(wa0 - planeOrigin, bitan)));
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa1 - planeOrigin, tan), Vector3.Dot(wa1 - planeOrigin, bitan)));
+                    ptsA2D.Add(new Vector2(Vector3.Dot(wa2 - planeOrigin, tan), Vector3.Dot(wa2 - planeOrigin, bitan)));
+                    if (SignedArea2D(ptsA2D) < 0f) ptsA2D.Reverse();
+
+                    for (int ib = 0; ib < trisB.Length; ib += 3)
+                    {
+                        Vector3 wb0 = wVertsB[trisB[ib]], wb1 = wVertsB[trisB[ib+1]], wb2 = wVertsB[trisB[ib+2]];
+
+                        float sd0 = Vector3.Dot(wb0 - planeOrigin, faceNorm);
+                        float sd1 = Vector3.Dot(wb1 - planeOrigin, faceNorm);
+                        float sd2 = Vector3.Dot(wb2 - planeOrigin, faceNorm);
+                        float sdAvg = (sd0 + sd1 + sd2) / 3f;
+                        if (Mathf.Abs(sdAvg) > compatCoplanarThreshold) continue;
+
+                        ptsB2D.Clear();
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb0 - planeOrigin, tan), Vector3.Dot(wb0 - planeOrigin, bitan)));
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb1 - planeOrigin, tan), Vector3.Dot(wb1 - planeOrigin, bitan)));
+                        ptsB2D.Add(new Vector2(Vector3.Dot(wb2 - planeOrigin, tan), Vector3.Dot(wb2 - planeOrigin, bitan)));
+
+                        if (ClipPolygons(ptsA2D, ptsB2D, polyBuf) <= 1e-9f) continue;
+
+                        var poly = new Vector3[polyBuf.Count];
+                        for (int pi = 0; pi < polyBuf.Count; pi++)
+                            poly[pi] = planeOrigin + polyBuf[pi].x * tan + polyBuf[pi].y * bitan;
+
+                        faces.Add(new JointFaceHighlight { poly = poly, planeDist = sdAvg });
                     }
                 }
             }
@@ -1827,13 +2048,24 @@ public class JointAssistWindow : EditorWindow
 
         return triCount > 0 ? faceSum / triCount : face.point;
     }
-
+ 
     void AutoDetectFaces()
     {
         var sel = Selection.gameObjects;
         if (sel.Length != 2) return;
+        AutoDetectFacesBetween(sel[0], sel[1]);
+        statusMessage = $"Auto-detected faces: '{sel[0].name}' → '{sel[1].name}'.";
+        statusType    = MessageType.Info;
+        Repaint();
+    }
 
-        Bounds bA = GetBounds(sel[0]), bB = GetBounds(sel[1]);
+    // Core of AutoDetectFaces, factored out so ApplyFaceSnap can re-run it on the same two
+    // objects after a snap moves them — the picked points/normals are derived fresh from each
+    // object's CURRENT bounds, so this resets the stale indicators without touching any of the
+    // snap's own position/rotation/scale math.
+    void AutoDetectFacesBetween(GameObject a, GameObject b)
+    {
+        Bounds bA = GetBounds(a), bB = GetBounds(b);
         Vector3 dir = GetDirection(bA, bB); // direction from A toward B
 
         // Face center on A: the face pointing toward B
@@ -1841,13 +2073,9 @@ public class JointAssistWindow : EditorWindow
         // Face center on B: the face pointing toward A
         Vector3 faceBPoint = bB.center - dir * ReachInDir(bB, dir);
 
-        snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = sel[0], localNormal = sel[0].transform.worldToLocalMatrix.MultiplyVector(dir) };
-        snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = sel[1], localNormal = sel[1].transform.worldToLocalMatrix.MultiplyVector(-dir) };
+        snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = a, localNormal = a.transform.worldToLocalMatrix.MultiplyVector(dir) };
+        snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = b, localNormal = b.transform.worldToLocalMatrix.MultiplyVector(-dir) };
         ResetAncestorDepth();
-
-        statusMessage = $"Auto-detected faces: '{sel[0].name}' → '{sel[1].name}'.";
-        statusType    = MessageType.Info;
-        Repaint();
     }
 
     void ApplyFaceSnap(float overlap)
@@ -1973,6 +2201,24 @@ public class JointAssistWindow : EditorWindow
 
         statusMessage = $"Snapped '{moveRoot.name}' to face on '{(fB.source != null ? fB.source.name : "?")}' ({overlap * 100f:F1} cm {(overlap > 0 ? "gap" : overlap < 0 ? "overlap" : "flush")}).";
         statusType    = MessageType.Info;
+
+        // Face A's stored .point/.normal are never updated after the snap moves/rotates it, so
+        // repeated Snap presses kept re-deriving the delta from stale pre-snap data and
+        // compounding the move each click. Re-running full auto-detection (confirmed correct
+        // by manual testing: pressing "Auto-Detect Faces" between each Snap works as expected)
+        // fixes it — rotation is typically free, so keeping the old normal fixed (as an earlier
+        // attempt did) goes stale the moment rotation actually changes anything.
+        //
+        // Physics.SyncTransforms() is required here: GetBounds/AutoDetectFacesBetween read
+        // Renderer.bounds/Collider.bounds, and those caches were confirmed (via logging) to lag
+        // one call behind the moveRoot.position/rotation write above within the same synchronous
+        // ApplyFaceSnap call — without a forced sync, the refresh below reads stale bounds and
+        // the fix only "catches up" one click late, producing the inward/outward drift.
+        Physics.SyncTransforms();
+        if (fA.source != null && fB.source != null)
+            AutoDetectFacesBetween(fA.source, fB.source);
+        SceneView.RepaintAll();
+
         Repaint();
     }
 
@@ -2293,6 +2539,19 @@ public class JointAssistWindow : EditorWindow
 
     Bounds GetBounds(GameObject go)
     {
+        // Collider.bounds is a real live PhysX AABB — unlike hull triangles, it needs no
+        // baked-mesh access, so AutoDetectFaces can honor snapUseColliderHull exactly.
+        if (snapUseColliderHull)
+        {
+            var hullCols = go.GetComponentsInChildren<Collider>().Where(c => !c.isTrigger).ToArray();
+            if (hullCols.Length > 0)
+            {
+                Bounds hb = hullCols[0].bounds;
+                for (int i = 1; i < hullCols.Length; i++) hb.Encapsulate(hullCols[i].bounds);
+                return hb;
+            }
+        }
+
         var renderers = go.GetComponentsInChildren<Renderer>()
                           .Where(r => !(r is ParticleSystemRenderer)).ToArray();
         if (renderers.Length > 0)
