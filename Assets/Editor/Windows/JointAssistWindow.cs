@@ -528,6 +528,8 @@ public class JointAssistWindow : EditorWindow
         collisionTris = null;
         showOverlay = false;
         ClearHullBakeCache();
+        hullPairBudget = kHullPairBudget;
+        hullPairBudgetExceeded = false;
         // Re-read data files each check so in-game updates are picked up without reopening the window
         enrichedJsaMap = null;
         spMatJsaMap    = null;
@@ -927,6 +929,12 @@ public class JointAssistWindow : EditorWindow
         string polySuffix = polyFaces.Count > 0
             ? $", {polyAreaSum[0]:0.0000} m² across {polyFaces.Count} polygon{(polyFaces.Count == 1 ? "" : "s")}"
             : "";
+        // hullPairBudget is shared across this call's two CollectJointFacesHull passes AND the
+        // overlay's own two passes later in RunCompatibilityCheck — if any of them exhaust it,
+        // the reported area/count here may be a partial result, so say so rather than silently
+        // under-reporting on very complex/large selections.
+        if (hullPairBudgetExceeded)
+            polySuffix += " (partial — triangle-pair budget exceeded)";
 
         var colsA = sidesFilters[0].Select(p => p.mf.GetComponent<MeshCollider>()).Where(c => c != null && !c.isTrigger).ToList();
         var colsB = sidesFilters[1].Select(p => p.mf.GetComponent<MeshCollider>()).Where(c => c != null && !c.isTrigger).ToList();
@@ -1000,6 +1008,17 @@ public class JointAssistWindow : EditorWindow
     // is a real (if somewhat slow) PhysX cook, so avoid re-baking the same mesh for every
     // triangle-pair test within one Check pass. Cleared at the start of RunCompatibilityCheck.
     Dictionary<int, Mesh> hullBakeCache;
+
+    // CollectJointFacesHull's inner loop is O(trisA x trisB) per collider pair with no natural
+    // upper bound — a selection with many/complex hulls can make a Check take a long time.
+    // hullPairBudget is a running count of triangle-pair tests shared across every
+    // CollectJointFacesHull call within one Check (it's called up to 4x: A->B/B->A for the
+    // Collider check, A->B/B->A again for the overlay); once exhausted, remaining pairs are
+    // skipped rather than tested, and hullPairBudgetExceeded is set so the UI can warn that the
+    // reported area/overlay is a partial result, not silently pretend it's complete.
+    const int kHullPairBudget = 2_000_000;
+    int hullPairBudget;
+    bool hullPairBudgetExceeded;
 
     // Physics.BakeMesh(id, convex: true) mutates the mesh IN PLACE — never call it on a real
     // asset's instance ID. This duplicates meshA into a throwaway Mesh, bakes THAT instance's
@@ -1089,6 +1108,9 @@ public class JointAssistWindow : EditorWindow
 
                     for (int ib = 0; ib < trisB.Length; ib += 3)
                     {
+                        if (hullPairBudget <= 0) { hullPairBudgetExceeded = true; return; }
+                        hullPairBudget--;
+
                         Vector3 wb0 = wVertsB[trisB[ib]], wb1 = wVertsB[trisB[ib+1]], wb2 = wVertsB[trisB[ib+2]];
 
                         float sd0 = Vector3.Dot(wb0 - planeOrigin, faceNorm);
