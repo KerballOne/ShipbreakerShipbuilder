@@ -87,6 +87,21 @@ public class JointAssistWindow : EditorWindow
     struct JointFaceHighlight { public Vector3[] poly; public float planeDist; }
     List<JointFaceHighlight> jointFaces;
 
+    // Near-miss diagnostic highlight (scene-view only) — shown only when NO pair on the whole
+    // selection actually joints, to help the user see the SINGLE closest candidate pair overall
+    // (whichever of the two failure axes it's closest on) and by how much. Never shown for a
+    // pair that already joints (jointFaces takes priority); does not influence the pass/fail
+    // Mesh result at all — purely informational. Both triangles (A's and B's) are highlighted
+    // together in the same color, since they're one real candidate pair, not two statistics.
+    struct NearMissHighlight
+    {
+        public NearMissAxis axis; // Distance/Angle = two faces; PointPair = two dots + a line
+        public Vector3 triA0, triA1, triA2, triB0, triB1, triB2; // Distance/Angle only
+        public Vector3 pointA, pointB;                           // PointPair only
+        public float measuredValue, thresholdValue;
+    }
+    NearMissHighlight? nearMissHighlight;
+
 // jsa_compat.json: key = "JsaName1|JsaName2" (sorted), value = true/false
     Dictionary<string, bool> jsaCompatTable;
 
@@ -227,15 +242,24 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.Space(4);
 
-        compatCoplanarThreshold  = EditorGUILayout.FloatField(new GUIContent("Coplanar Threshold (m)",
+        compatCoplanarThreshold  = EditorGUILayout.FloatField(new GUIContent("Distance Threshold (m)",
             "How far apart two faces' planes can be and still be considered a candidate mating pair. " +
             "Used to gather coplanar joint polygons/faces and to inflate each mesh's bounds for the quick-reject test."),
             compatCoplanarThreshold);
-        compatCodirectionalThreshold = EditorGUILayout.FloatField(new GUIContent("Codirectional Threshold",
-            "How opposite two faces' normals must be (dot product) to be considered a candidate mating pair. " +
-            "Game uses 0.8 for general/runtime jointing (player cutting/placing/grappling) and a stricter 0.9 " +
-            "for ship-spawn/generation (ShipRandomizationHelper) — set to match whichever scenario you're checking."),
-            compatCodirectionalThreshold);
+        // Stored internally as a dot-product threshold (what the matching algorithm actually
+        // needs), but shown/edited here in degrees — "how far off from exactly opposite the two
+        // faces' normals may be" is far more intuitive than a raw cosine value. Game uses ~36.9°
+        // (dot 0.8) for general/runtime jointing (player cutting/placing/grappling) and a
+        // stricter ~25.8° (dot 0.9) for ship-spawn/generation (ShipRandomizationHelper) — set to
+        // match whichever scenario you're checking.
+        float codirectionalThresholdDeg = Mathf.Acos(Mathf.Clamp(compatCodirectionalThreshold, -1f, 1f)) * Mathf.Rad2Deg;
+        codirectionalThresholdDeg = EditorGUILayout.FloatField(new GUIContent("Angle Threshold (°)",
+            "How far off from exactly opposite two faces' normals may be and still be considered a candidate " +
+            "mating pair. Game uses ~36.9° for general/runtime jointing (player cutting/placing/grappling) and " +
+            "a stricter ~25.8° for ship-spawn/generation (ShipRandomizationHelper) — set to match whichever " +
+            "scenario you're checking."),
+            codirectionalThresholdDeg);
+        compatCodirectionalThreshold = Mathf.Cos(Mathf.Clamp(codirectionalThresholdDeg, 0f, 180f) * Mathf.Deg2Rad);
         compatCollisionThreshold = EditorGUILayout.FloatField(new GUIContent("Collision Threshold (m)",
             "The acceptable gap/overlap band used to decide whether a non-coplanar pair still " +
             "counts as \"touching\" for the Collider row's Pass/Fail result."),
@@ -276,7 +300,7 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.Space(4);
         DrawSeparator();
         EditorGUILayout.Space(4);
-        // The Collider row reports the actual game jointing algorithm's result — coplanar
+        // The Mesh row reports the actual game jointing algorithm's result — coplanar
         // render-mesh triangle-pair search + 2D convex hull + polygon clip, matching
         // BBI.Unity.Game.JointHelper.TryFindJointPolygonsJob (see [[project_game_jointing_algorithm]]).
         DrawCompatMeshResult(compatHull, jsaMjcBothFail);
@@ -616,7 +640,7 @@ public class JointAssistWindow : EditorWindow
         if (sidesFilters.Count < 2 || sidesFilters[0].Count == 0 || sidesFilters[1].Count == 0)
         {
             compatHull = new CompatResult { state = CompatResult.State.Warn,
-                message = "Collider: No StructurePart MeshFilters found on one or both sides." };
+                message = "Mesh: No StructurePart MeshFilters found on one or both sides." };
             ApplyCheckResults(newJointFaces);
             yield break;
         }
@@ -629,6 +653,13 @@ public class JointAssistWindow : EditorWindow
         int touchingCount = 0;
         float areaSum = 0f;
         var overlapPoly = new List<Vector2>();
+
+        // Track the SINGLE closest near-miss seen across the WHOLE Check (comparing both axes on
+        // a common relative-overshoot footing, same as inside TryFindJointPolygon) — only ever
+        // shown to the user if the Check ends with zero real joints found (see
+        // ApplyCheckResults). Read-only diagnostics; never affects overlapCount/pass-fail.
+        float bestMissOvershoot = float.MaxValue;
+        NearMissHighlight? bestNearMiss = null;
 
         int totalPairs = mfsA.Count * mfsB.Count;
         int pairIndex = 0;
@@ -650,7 +681,8 @@ public class JointAssistWindow : EditorWindow
                 var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, mfB.sharedMesh.bounds);
                 if (!expandedA.Intersects(boundsB)) { continue; }
 
-                if (TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly))
+                if (TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
+                    out var nearMiss))
                 {
                     overlapCount++;
                     float area = Mathf.Abs(SignedArea2D(overlapPoly));
@@ -668,6 +700,27 @@ public class JointAssistWindow : EditorWindow
                     float gap = BoundsDistance(boundsA, boundsB);
                     if (gap < minGap) minGap = gap;
                     if (gap <= compatCollisionThreshold) touchingCount++;
+
+                    // Track the SINGLE closest near-miss across the whole Check (both axes
+                    // compared on the same relative-overshoot footing) — purely diagnostic, does
+                    // not affect touchingCount/overlapCount/pass-fail.
+                    if (nearMiss.found)
+                    {
+                        float thresholdMag = Mathf.Max(1e-4f, Mathf.Abs(nearMiss.thresholdValue));
+                        float overshoot = Mathf.Abs(nearMiss.measuredValue - nearMiss.thresholdValue) / thresholdMag;
+                        if (overshoot < bestMissOvershoot)
+                        {
+                            bestMissOvershoot = overshoot;
+                            bestNearMiss = new NearMissHighlight
+                            {
+                                axis = nearMiss.axis,
+                                triA0 = nearMiss.triA0, triA1 = nearMiss.triA1, triA2 = nearMiss.triA2,
+                                triB0 = nearMiss.triB0, triB1 = nearMiss.triB1, triB2 = nearMiss.triB2,
+                                pointA = nearMiss.pointA, pointB = nearMiss.pointB,
+                                measuredValue = nearMiss.measuredValue, thresholdValue = nearMiss.thresholdValue
+                            };
+                        }
+                    }
                 }
 
                 if (hullPairBudgetExceeded) goto donePairs;
@@ -683,6 +736,32 @@ public class JointAssistWindow : EditorWindow
         if (hullPairBudgetExceeded)
             polySuffix += " (partial — triangle-pair budget exceeded)";
 
+        // Diagnostic near-miss line, appended into the SAME Mesh message box (a real Pass already
+        // has its authoritative answer and doesn't need this). Purely informational — never
+        // changes overlapCount/touchingCount/pass-fail. Only ONE line is ever shown — whichever
+        // single axis (distance or angle) the closest candidate pair actually missed on — colored
+        // to match its scene-view highlight. The codirectional value is a dot product (cosine of
+        // the angle between the two face normals), not a raw angle — converted to a degrees-off
+        // figure here since "-0.9 dot" isn't meaningful to read directly.
+        string nearMissLine = "";
+        if (overlapCount == 0 && bestNearMiss.HasValue)
+        {
+            var nm = bestNearMiss.Value;
+            if (nm.axis == NearMissAxis.Angle)
+            {
+                float measuredDeg = Mathf.Acos(Mathf.Clamp(-nm.measuredValue, -1f, 1f)) * Mathf.Rad2Deg;
+                float thresholdDeg = Mathf.Acos(Mathf.Clamp(-nm.thresholdValue, -1f, 1f)) * Mathf.Rad2Deg;
+                nearMissLine = $"\n<color=#c9b458>Closest: {measuredDeg:0.0}° off (max {thresholdDeg:0.0}°).</color>";
+            }
+            else
+            {
+                // Distance (a real per-pair near-miss) and PointPair (the bounding-box gate's
+                // whole-set rejection) both report a plain distance — same message either way,
+                // since both mean "these two points are this far apart."
+                nearMissLine = $"\n<color=#e0776b>Closest: {nm.measuredValue:0.000} m apart (max {nm.thresholdValue:0.000} m).</color>";
+            }
+        }
+
         // Only a genuine coplanar polygon match (overlapCount > 0) — the actual criterion the
         // game's TryFindJointPolygonsJob uses to form a joint — can report Pass. Bounding-box
         // proximity (touchingCount) is a crude whole-part-bounds proxy, not a real per-triangle
@@ -692,32 +771,39 @@ public class JointAssistWindow : EditorWindow
         if (overlapCount > 0)
         {
             compatHull = new CompatResult { state = CompatResult.State.Pass,
-                message = $"Collider: {overlapCount} coplanar pair{(overlapCount == 1 ? "" : "s")}{polySuffix}." };
-        }
-        else if (touchingCount > 0)
-        {
-            compatHull = new CompatResult { state = CompatResult.State.Fail,
-                message = $"Collider: bounding boxes close ({touchingCount} pair{(touchingCount == 1 ? "" : "s")}, " +
-                    $"{minGap:0.0000} m) but NO valid coplanar mesh match found — parts will not auto-joint{polySuffix}." };
+                message = $"Mesh: {overlapCount} coplanar pair{(overlapCount == 1 ? "" : "s")}{polySuffix}." };
         }
         else
         {
+            // Both the "bounding boxes close" and "N m gap" text previously reported here were
+            // low-value noise (a crude whole-part-bounds proxy, not the real reason a pair
+            // doesn't joint) — the actual actionable info is nearMissLine above, appended below.
             compatHull = new CompatResult { state = CompatResult.State.Fail,
-                message = (minGap == float.MaxValue
-                    ? "Collider: No coplanar mesh pair within range"
-                    : $"Collider: {minGap:0.0000} m gap") + $" — parts will not auto-joint{polySuffix}." };
+                message = $"Mesh: no valid coplanar match — parts will not auto-joint{polySuffix}.{nearMissLine}" };
         }
 
-        ApplyCheckResults(newJointFaces);
+        var newNearMiss = bestNearMiss;
+        ApplyCheckResults(newJointFaces, newNearMiss);
     }
 
     // Swaps the freshly-computed overlay/results in only once a Check completes normally —
     // called from the routine's final yield-break, never on cancel (StopAsyncCheck doesn't call
     // this), so a canceled Check leaves the previously-displayed overlay untouched.
-    void ApplyCheckResults(List<JointFaceHighlight> newJointFaces)
+    void ApplyCheckResults(List<JointFaceHighlight> newJointFaces, NearMissHighlight? newNearMiss = null)
     {
         jointFaces = newJointFaces;
-        showOverlay = jointFaces.Count > 0;
+        // Near-miss diagnostics only matter when nothing actually joints — if a real match
+        // exists, jointFaces already shows the authoritative result and the near-miss is noise.
+        nearMissHighlight = jointFaces.Count > 0 ? null : newNearMiss;
+        showOverlay = jointFaces.Count > 0 || nearMissHighlight.HasValue;
+        // debugHullA3D/debugHullB3D (raw pre-clip hull wireframes) are only ever written when a
+        // real match is found — clear them here so a stale wireframe from a PREVIOUS Check's
+        // successful pair doesn't linger on screen once the current Check finds no match at all.
+        if (jointFaces.Count == 0)
+        {
+            debugHullA3D.Clear();
+            debugHullB3D.Clear();
+        }
         SceneView.RepaintAll();
         Repaint();
     }
@@ -1086,12 +1172,45 @@ public class JointAssistWindow : EditorWindow
     //   3. convex polygon clip (Sutherland-Hodgman, via the existing ClipPolygons) of the two hulls
     // Returns false if no coplanar overlap is found. On success, outputs the shared joint plane
     // and the clipped overlap polygon in that plane's 2D space (tan/bitan basis).
+    // Near-miss diagnostic data for a pair that ultimately returns false — the single closest
+    // triangle pair seen on each of the two independent gating axes (coplanar distance,
+    // codirectional angle), purely for user-facing guidance on failed Checks. Populated
+    // read-only alongside the existing (unmodified) matching loop; never influences which
+    // triangle pairs match or the pass/fail result itself.
+    // Distance/Angle: a genuine per-triangle-pair near-miss (both triangles are real mesh
+    // geometry, drawn as faces — angle is fundamentally a face-normal comparison, so two real
+    // faces is the truthful representation). PointPair: the bounding-box-gate rejection, which
+    // isn't a triangle-pair failure at all (every contributing pair already passed both gating
+    // tests) — instead it's "these two specific accumulated VERTICES are the real worst-case
+    // separation," so it's drawn as two dots + a connecting line, not fake faces.
+    public enum NearMissAxis { Distance, Angle, PointPair }
+    public struct NearMissInfo
+    {
+        public bool found;
+        public NearMissAxis axis;
+        public Vector3 triA0, triA1, triA2; // side A's triangle verts (world space) — Distance/Angle only
+        public Vector3 triB0, triB1, triB2; // side B's triangle verts (world space) — Distance/Angle only
+        public Vector3 pointA, pointB;      // the two real extreme vertices — PointPair only
+        public float measuredValue;         // the actual coplanar distance, or codirectional dot
+        public float thresholdValue;        // the threshold it failed to meet
+    }
+
+    // Per-triangle-pair, exactly ONE axis can be the reason it failed (the codirectional check
+    // runs first and `continue`s before the coplanar check ever runs on that pair — see below),
+    // so each pair contributes to at most one axis's near-miss tracking, never both. Across the
+    // whole scan, only the SINGLE closest-to-passing pair overall is kept (comparing the two
+    // axes on a common footing: how many threshold-widths past the limit, i.e. relative
+    // overshoot) — never one-per-axis, so the reported near-miss is always one real triangle
+    // pair with both its triangles highlightable, not two unrelated statistics.
     bool TryFindJointPolygon(MeshFilter mfA, MeshFilter mfB,
         out Vector3 planeOrigin, out Vector3 faceNorm, out Vector3 tan, out Vector3 bitan,
-        List<Vector2> overlapPolygon2D)
+        List<Vector2> overlapPolygon2D,
+        out NearMissInfo nearMiss)
     {
         overlapPolygon2D.Clear();
         planeOrigin = faceNorm = tan = bitan = Vector3.zero;
+        nearMiss = default;
+        float bestMissOvershoot = float.MaxValue; // relative overshoot, common footing across axes
 
         var meshA = mfA.sharedMesh;
         var meshB = mfB.sharedMesh;
@@ -1164,10 +1283,51 @@ public class JointAssistWindow : EditorWindow
                 if (normB.sqrMagnitude < 1e-10f) continue;
                 normB.Normalize();
 
-                if (Vector3.Dot(normA, normB) >= -compatCodirectionalThreshold) continue;
+                float codirDot = Vector3.Dot(normA, normB);
+                if (codirDot >= -compatCodirectionalThreshold)
+                {
+                    // This pair failed ONLY the codirectional angle test. Track it as the best
+                    // near-miss overall (across BOTH axes, whole scan) if its relative overshoot
+                    // (how many threshold-widths past the limit) is the smallest seen — purely
+                    // diagnostic, does not affect matching in any way (read-only).
+                    float overshoot = (codirDot - (-compatCodirectionalThreshold)) / Mathf.Max(1e-4f, compatCodirectionalThreshold);
+                    if (overshoot < bestMissOvershoot)
+                    {
+                        bestMissOvershoot = overshoot;
+                        nearMiss = new NearMissInfo
+                        {
+                            found = true,
+                            axis = NearMissAxis.Angle,
+                            triA0 = wa0, triA1 = wa1, triA2 = wa2,
+                            triB0 = wb0, triB1 = wb1, triB2 = wb2,
+                            measuredValue = codirDot,
+                            thresholdValue = -compatCodirectionalThreshold
+                        };
+                    }
+                    continue;
+                }
 
                 float thisDist = Mathf.Abs(Vector3.Dot(wa0 - wb0, normA));
-                if (thisDist >= compatCoplanarThreshold) continue;
+                if (thisDist >= compatCoplanarThreshold)
+                {
+                    // This pair passed the codirectional test but failed ONLY the coplanar
+                    // distance test. Same cross-axis overshoot comparison as above.
+                    float overshoot = (thisDist - compatCoplanarThreshold) / Mathf.Max(1e-4f, compatCoplanarThreshold);
+                    if (overshoot < bestMissOvershoot)
+                    {
+                        bestMissOvershoot = overshoot;
+                        nearMiss = new NearMissInfo
+                        {
+                            found = true,
+                            axis = NearMissAxis.Distance,
+                            triA0 = wa0, triA1 = wa1, triA2 = wa2,
+                            triB0 = wb0, triB1 = wb1, triB2 = wb2,
+                            measuredValue = thisDist,
+                            thresholdValue = compatCoplanarThreshold
+                        };
+                    }
+                    continue;
+                }
 
                 Vector3 candidateOpposition = (normA - normB) * 0.5f;
                 bool agreesWithBest = Vector3.Dot(oppositionDir, candidateOpposition) < compatCodirectionalThreshold;
@@ -1246,10 +1406,43 @@ public class JointAssistWindow : EditorWindow
             minB = Vector3.Min(minB, v);
             maxB = Vector3.Max(maxB, v);
         }
-        if (minA.x - maxB.x > compatCoplanarThreshold || minA.y - maxB.y > compatCoplanarThreshold || minA.z - maxB.z > compatCoplanarThreshold ||
-            minB.x - maxA.x > compatCoplanarThreshold || minB.y - maxA.y > compatCoplanarThreshold || minB.z - maxA.z > compatCoplanarThreshold)
+        float boxSepX = Mathf.Max(minA.x - maxB.x, minB.x - maxA.x);
+        float boxSepY = Mathf.Max(minA.y - maxB.y, minB.y - maxA.y);
+        float boxSepZ = Mathf.Max(minA.z - maxB.z, minB.z - maxA.z);
+        if (boxSepX > compatCoplanarThreshold || boxSepY > compatCoplanarThreshold || boxSepZ > compatCoplanarThreshold)
         {
             DebugLog($"[{mfA.name} x {mfB.name}] REJECTED by bounding-box gate: A=[{minA:F3}..{maxA:F3}] B=[{minB:F3}..{maxB:F3}]");
+
+            // Diagnostic only (does not affect the reject decision above, already made): every
+            // individual triangle pair already passed both gating tests — what fails here is a
+            // WHOLE-SET aggregate check, so there's no single "near-miss triangle pair" the way
+            // the two per-pair axes have. Instead, find the actual two VERTICES (one per side)
+            // that are CLOSEST to each other across the gap on the worst-offending axis — these
+            // are precisely the two points minA/maxA/minB/maxB were computed from, so this
+            // reconstructs the true closest-approach pair, not an arbitrary/unrelated triangle.
+            float worstSep; int worstAxis; // 0=X,1=Y,2=Z
+            if (boxSepX >= boxSepY && boxSepX >= boxSepZ) { worstSep = boxSepX; worstAxis = 0; }
+            else if (boxSepY >= boxSepZ) { worstSep = boxSepY; worstAxis = 1; }
+            else { worstSep = boxSepZ; worstAxis = 2; }
+
+            // On the worst axis, exactly one of {A's near-side vertex, B's near-side vertex} is
+            // the pair actually driving the gap — whichever comparison (minA-maxB vs minB-maxA)
+            // matches worstSep tells us which side is "on the low end" of the gap.
+            bool aIsLowSide = (worstAxis == 0 ? minA.x - maxB.x : worstAxis == 1 ? minA.y - maxB.y : minA.z - maxB.z)
+                        >= (worstAxis == 0 ? minB.x - maxA.x : worstAxis == 1 ? minB.y - maxA.y : minB.z - maxA.z);
+            // If A is on the low end, A's CLOSEST-to-B point is its min on this axis, and B's
+            // closest-to-A point is its max (the two points bracketing the gap from either side).
+            Vector3 vertA = FindClosestApproachVertex(coplanarVertsA, worstAxis, findMin: aIsLowSide);
+            Vector3 vertB = FindClosestApproachVertex(coplanarVertsB, worstAxis, findMin: !aIsLowSide);
+
+            nearMiss = new NearMissInfo
+            {
+                found = true,
+                axis = NearMissAxis.PointPair,
+                pointA = vertA, pointB = vertB,
+                measuredValue = worstSep,
+                thresholdValue = compatCoplanarThreshold
+            };
             return false;
         }
 
@@ -1294,6 +1487,22 @@ public class JointAssistWindow : EditorWindow
         for (int i = 0; i < list.Count; i++)
             if ((list[i] - v).sqrMagnitude < kVertexEpsilon) return;
         list.Add(v);
+    }
+
+    // Finds the actual vertex in `verts` at the boundary of this point cloud on the given axis —
+    // its minimum (findMin: true) or maximum (findMin: false) coordinate. Used by the bounding-box
+    // gate's near-miss diagnostic to locate the two REAL vertices bracketing the worst-offending
+    // axis's gap, instead of an arbitrary triangle unrelated to the actual measured separation.
+    static Vector3 FindClosestApproachVertex(List<Vector3> verts, int axis, bool findMin)
+    {
+        Vector3 best = verts[0];
+        float bestCoord = axis == 0 ? best.x : axis == 1 ? best.y : best.z;
+        for (int i = 1; i < verts.Count; i++)
+        {
+            float c = axis == 0 ? verts[i].x : axis == 1 ? verts[i].y : verts[i].z;
+            if (findMin ? c < bestCoord : c > bestCoord) { bestCoord = c; best = verts[i]; }
+        }
+        return best;
     }
 
     // 2D convex hull via Jarvis March (gift-wrapping) — port of BBI.Unity.Game.JointHelper.
@@ -1466,7 +1675,6 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
     }
 
-
     void DrawPickedFaceHighlight(PickedFace? face, Color outline, Color fill)
     {
         if (!face.HasValue || face.Value.source == null) return;
@@ -1546,6 +1754,45 @@ public class JointAssistWindow : EditorWindow
                 Handles.color = lineColor;
                 for (int i = 0; i < f.poly.Length; i++)
                     Handles.DrawLine(f.poly[i], f.poly[(i + 1) % f.poly.Length]);
+            }
+            Handles.color = prevColor;
+        }
+
+        // Near-miss diagnostic highlight — only ever populated (by ApplyCheckResults) when
+        // NOTHING in the selection actually joints, showing the SINGLE closest real candidate
+        // pair (both its triangles, side A and side B). Red = distance near-miss (right angle,
+        // too far apart). Yellow = angle near-miss (close together, wrong angle). Purely
+        // informational — never drawn alongside a real jointFaces result.
+        if (showOverlay && nearMissHighlight.HasValue)
+        {
+            var nm = nearMissHighlight.Value;
+            var prevColor = Handles.color;
+            Color baseColor = nm.axis == NearMissAxis.Angle ? new Color(1f, 0.9f, 0.1f) : new Color(1f, 0.15f, 0.1f);
+
+            if (nm.axis == NearMissAxis.PointPair)
+            {
+                // Bounding-box-gate rejection — a real per-triangle-pair angle/distance test
+                // never fired here (every contributing pair already passed both), so drawing
+                // fake faces would be misleading. This is fundamentally "two specific real
+                // vertices are this far apart," so show exactly that: two dots + a connecting
+                // line, sized relative to the scene view so they stay visible when zoomed out.
+                float dotSize = HandleUtility.GetHandleSize(nm.pointA) * 0.05f;
+                Handles.color = baseColor;
+                Handles.SphereHandleCap(0, nm.pointA, Quaternion.identity, dotSize, EventType.Repaint);
+                Handles.SphereHandleCap(0, nm.pointB, Quaternion.identity, dotSize, EventType.Repaint);
+                Handles.DrawLine(nm.pointA, nm.pointB);
+            }
+            else
+            {
+                // Distance/Angle — a genuine per-triangle-pair near-miss; angle in particular is
+                // fundamentally a face-normal comparison, so two real faces is the truthful
+                // representation (not a synthetic marker).
+                Handles.color = new Color(baseColor.r, baseColor.g, baseColor.b, 0.35f);
+                Handles.DrawAAConvexPolygon(nm.triA0, nm.triA1, nm.triA2);
+                Handles.DrawAAConvexPolygon(nm.triB0, nm.triB1, nm.triB2);
+                Handles.color = new Color(baseColor.r, baseColor.g, baseColor.b, 1f);
+                Handles.DrawLine(nm.triA0, nm.triA1); Handles.DrawLine(nm.triA1, nm.triA2); Handles.DrawLine(nm.triA2, nm.triA0);
+                Handles.DrawLine(nm.triB0, nm.triB1); Handles.DrawLine(nm.triB1, nm.triB2); Handles.DrawLine(nm.triB2, nm.triB0);
             }
             Handles.color = prevColor;
         }
