@@ -1087,17 +1087,28 @@ public class JointAssistWindow : EditorWindow
         for (int i = 0; i < vertsB.Length; i++) wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
 
         // Step 1: TryFindCoplanarPoints — find the first matching triangle pair's plane, then
-        // accumulate every triangle (from either side) that's near-coplanar with it. (Matching/
-        // area/count logic is intentionally untouched — verified correct. Only the in-plane
-        // tan/bitan basis below is a pure visualization detail with no effect on the result.)
+        // accumulate every triangle (from either side) that's near-coplanar with it. (Matching
+        // scan itself is intentionally untouched — verified correct/faithful to the game's
+        // TryFindCoplanarPoints. Only which candidate plane's projection gets used afterward is
+        // changed below — see the area-weighted candidate scoring after this loop.)
         var coplanarVertsA = new List<Vector3>();
         var coplanarVertsB = new List<Vector3>();
         bool foundPlane = false;
+
+        // Candidate planes seen during matching (grouped by normal within ~1°), each carrying a
+        // running SUM of matched-triangle area (both sides) — used only to pick which locked
+        // plane's projection to draw/report, AFTER the (unmodified) matching scan completes.
+        // Rationale: the first-matched triangle pair can be a small bevel/chamfer edge rather
+        // than the true flat mating face (confirmed on a real part: a fixed, reproducible 45°
+        // offset traced to the part's corner bevel) — weighting by matched area favors the
+        // dominant real flat face over an incidentally-first-scanned small bevel.
+        var candidatePlanes = new List<(Vector3 normal, Vector3 origin, float areaWeight)>();
 
         for (int ia = 0; ia < trisA.Length; ia += 3)
         {
             Vector3 wa0 = wVertsA[trisA[ia]], wa1 = wVertsA[trisA[ia + 1]], wa2 = wVertsA[trisA[ia + 2]];
             Vector3 normA = Vector3.Cross(wa1 - wa0, wa2 - wa0);
+            float triAreaX2 = normA.magnitude;
             if (normA.sqrMagnitude < 1e-10f) continue;
             normA.Normalize();
 
@@ -1126,6 +1137,22 @@ public class JointAssistWindow : EditorWindow
                     foundPlane  = true;
                 }
 
+                // Tally this pair's area into the matching candidate-plane bucket (grouped by
+                // normal within ~1°) — does not affect matching or coplanarVertsA/B above.
+                float triBAreaX2 = Vector3.Cross(wb1 - wb0, wb2 - wb0).magnitude;
+                bool bucketed = false;
+                for (int bi = 0; bi < candidatePlanes.Count; bi++)
+                {
+                    if (Vector3.Dot(candidatePlanes[bi].normal, normA) > 0.9998f)
+                    {
+                        var b = candidatePlanes[bi];
+                        candidatePlanes[bi] = (b.normal, b.origin, b.areaWeight + triAreaX2 + triBAreaX2);
+                        bucketed = true;
+                        break;
+                    }
+                }
+                if (!bucketed) candidatePlanes.Add((normA, wa0, triAreaX2 + triBAreaX2));
+
                 triAMatched = true;
                 AddUnique(coplanarVertsB, wb0); AddUnique(coplanarVertsB, wb1); AddUnique(coplanarVertsB, wb2);
             }
@@ -1140,6 +1167,25 @@ public class JointAssistWindow : EditorWindow
         {
             DebugLog($"[{mfA.name} x {mfB.name}] NO PLANE FOUND (foundPlane={foundPlane}, vertsA={coplanarVertsA.Count}, vertsB={coplanarVertsB.Count})");
             return false;
+        }
+
+        // Use the area-weighted dominant candidate plane instead of the first-matched one. The
+        // SAME coplanarVertsA/B (already fully accumulated above, unchanged) are simply projected
+        // and clipped against this different plane — this can only change the drawn orientation/
+        // reported plane, never which triangle pairs were considered matching.
+        candidatePlanes.Sort((x, y) => y.areaWeight.CompareTo(x.areaWeight));
+        var dominant = candidatePlanes[0];
+        planeOrigin = dominant.origin;
+        faceNorm    = dominant.normal;
+        tan         = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
+        bitan       = Vector3.Cross(faceNorm, tan).normalized;
+
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[{mfA.name} x {mfB.name}] candidate planes={candidatePlanes.Count}");
+            for (int bi = 0; bi < Mathf.Min(5, candidatePlanes.Count); bi++)
+                sb.AppendLine($"  normal={candidatePlanes[bi].normal:F4} areaWeight={candidatePlanes[bi].areaWeight:F4}" + (bi == 0 ? "  <-- CHOSEN" : ""));
+            DebugLog(sb.ToString());
         }
 
         // Step 2: project each side's coplanar verts into the joint plane's 2D space, then take
