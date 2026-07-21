@@ -1401,6 +1401,8 @@ public class ComponentCopyWindow : EditorWindow
             AddRow(rows, fields, "Fuel control", FindKeyContaining(fields, "m_FuelControl"));
             AddRow(rows, fields, "Cryo control", FindKeyContaining(fields, "m_CryoControl"));
             AddRow(rows, fields, "Salvage destination", FindKeyContaining(fields, "m_PossibleSalvageableOptions"));
+            AddAwardedCurrencyRows(rows, fields);
+            AddElectricalControlRow(rows, fields);
         }
 
         if (rows.Count == 0) return;
@@ -1410,6 +1412,7 @@ public class ComponentCopyWindow : EditorWindow
         var valStyleFurnace  = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.9f, 0.4f, 0.4f) } };
         var valStyleProcessor= new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.4f, 0.85f, 0.9f) } };
         var valStyleBarge    = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.4f, 0.85f, 0.4f) } };
+        var valStyleWarning  = new GUIStyle(EditorStyles.boldLabel) { normal = { textColor = new Color(0.95f, 0.65f, 0.2f) } };
 
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         foreach (var (label, value) in rows)
@@ -1419,6 +1422,7 @@ public class ComponentCopyWindow : EditorWindow
                 : label == "Salvage destination" && value == "Furnace" ? valStyleFurnace
                 : label == "Salvage destination" && value == "Processor" ? valStyleProcessor
                 : label == "Salvage destination" && value == "Barge" ? valStyleBarge
+                : label == "Electrical control" && value.Contains("Global") ? valStyleWarning
                 : EditorStyles.boldLabel;
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(130));
@@ -1459,6 +1463,66 @@ public class ComponentCopyWindow : EditorWindow
         if (!fields.TryGetValue(key, out var val) || val == null) return;
         bool has = val.ToString().Split(',').Any(f => f.Trim().Equals(flagName, System.StringComparison.OrdinalIgnoreCase));
         rows.Add((label, has ? "True" : "False"));
+    }
+
+    // GlobalElectricReceiver_MachinePartAsset / LocalElectricReceiver_MachinePartAsset are
+    // ComponentDataAsset entries in m_ComponentDataAssets (same array Fuel/Cryo control read from),
+    // referenced by name via the "...[N]@ref" key rather than a scalar field — scan all @ref values
+    // for either receiver name instead of matching one fixed key. GlobalElectricReceiver is also
+    // what triggers MachinePartEmissiveSystem's power-state glow (see DynamicLight exclusion fix),
+    // so this is worth surfacing alongside Fuel/Cryo control.
+    static void AddElectricalControlRow(List<(string, string)> rows, Dictionary<string, object> fields)
+    {
+        bool hasGlobal = fields.Any(kv => kv.Key.EndsWith("@ref", System.StringComparison.Ordinal)
+            && kv.Value?.ToString() == "GlobalElectricReceiver_MachinePartAsset");
+        bool hasLocal = fields.Any(kv => kv.Key.EndsWith("@ref", System.StringComparison.Ordinal)
+            && kv.Value?.ToString() == "LocalElectricReceiver_MachinePartAsset");
+
+        if (!hasGlobal && !hasLocal) return;
+
+        string value = hasGlobal && hasLocal ? "Global, Local" : hasGlobal ? "Global" : "Local";
+        rows.Add(("Electrical control", value));
+    }
+
+    // m_AwardedCurrencies is a SalvageableCurrencyBlock[] on SalvageableComponentAsset — a BP can
+    // award more than one currency (e.g. Credits + a scrap-specific currency), so this adds one
+    // row per array element found in the captured fields, keyed off the "m_AwardedCurrencies[N]."
+    // prefix PartInfoLogger writes for each struct element.
+    static void AddAwardedCurrencyRows(List<(string, string)> rows, Dictionary<string, object> fields)
+    {
+        var indices = fields.Keys
+            .Select(k => {
+                int start = k.IndexOf("m_AwardedCurrencies[", System.StringComparison.Ordinal);
+                if (start < 0) return -1;
+                int open = start + "m_AwardedCurrencies[".Length;
+                int close = k.IndexOf(']', open);
+                return close > open && int.TryParse(k.Substring(open, close - open), out var n) ? n : -1;
+            })
+            .Where(n => n >= 0)
+            .Distinct()
+            .OrderBy(n => n);
+
+        foreach (var i in indices)
+        {
+            string prefix = $"m_AwardedCurrencies[{i}].";
+            string currency = FindKeyContaining(fields, prefix + "m_CurrencyType@ref");
+            string currencyName = currency != null && fields.TryGetValue(currency, out var cv) ? cv?.ToString() : "Credits";
+
+            string minKey = FindKeyContaining(fields, prefix + "m_MinInitialValue");
+            string maxKey = FindKeyContaining(fields, prefix + "m_MaxInitialValue");
+            string massBasedKey = FindKeyContaining(fields, prefix + "m_MassBasedValue");
+
+            string min = minKey != null && fields.TryGetValue(minKey, out var minv) ? minv?.ToString() : null;
+            string max = maxKey != null && fields.TryGetValue(maxKey, out var maxv) ? maxv?.ToString() : null;
+            bool massBased = massBasedKey != null && fields.TryGetValue(massBasedKey, out var mbv) && mbv != null && mbv.ToString() == "True";
+
+            if (min == null && max == null) continue;
+
+            string value = min == max ? min : $"{min}-{max}";
+            if (massBased) value += " (mass-based)";
+
+            rows.Add(($"Salvage value ({currencyName ?? "Credits"})", value));
+        }
     }
 
     void DrawAssetPreview(string displayName, ref bool open)

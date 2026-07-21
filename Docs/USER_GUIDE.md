@@ -475,6 +475,12 @@ A two-tab editor window for diffing and copying data between GameObjects or mate
 
 **Addressable detection:** The tool identifies a GO as an addressable loader (not a baked part) by the presence of an `AddressableLoader` component — not by the absence of `StructurePart`. Keep this in mind if you see unexpected classification.
 
+**SP/BP summary (always visible, Tab 0):** Below the SP/BP name field, a compact summary shows key gameplay fields pulled from `sp_bp_fields.json` (the reflected dump PartInfoLogger writes every game session) without needing to expand "Preview captured fields":
+- SP: Cut grade/stage, Mass density, Joint setup, Room sealing, Vaporize on cut, Yank lock on start, Breakable by grapple
+- BP: Fuel control, Cryo control, Salvage destination (color-coded Furnace/Processor/Barge), Salvage value per awarded currency (min-max, flagged `(mass-based)` if scaled by part mass), and **Electrical control** (Global/Local — highlighted orange when Global is present, since that's what triggers the [power-state glow bug](#persistent-glow-after-spbp-component-copy))
+
+This summary requires PartInfoLogger to have run at least once with the current DLL (rebuild + relaunch the game) so `sp_bp_fields.json` is up to date; the window re-reads the file automatically whenever its write time changes.
+
 ---
 
 #### `Shipbuilder / Bake Addressable In Place`
@@ -1171,6 +1177,17 @@ Fix: open **Component Copy Window → Material Shader tab**, set the glowing par
 - `_EmissiveColorMap`: assign a real emissive texture from a working game part
 
 Rebuild after saving the material. The glow will be gone on next load.
+
+**Power-state-dependent glow (different from the above) — `MachinePartEmissiveSystem`**
+If a part glows bright white/orange only while ship battery power is connected, and stops glowing when power is disconnected, this is NOT the persistent shader-keyword bug above — the `.mat` file is not the cause and editing it will not fix it.
+
+Root cause: the game's `MachinePartEmissiveSystem` (in `BBI.Unity.Game.dll`) runs every frame and writes `_EmissiveColor`/`_RoomIntensity` directly via `MaterialPropertyBlock` — bypassing the material asset entirely — on any `MeshRenderer` belonging to an entity that has `MachinePartComponent` plus an electricity/fuel/cryo/pressure receiver buffer (e.g. a BP with `GlobalElectricReceiver_MachinePartAsset` or `LocalElectricReceiver_MachinePartAsset` in its `m_ComponentDataAssets`). This is the same MPB-override pattern the BayLights mod uses for fixture emissive colors.
+
+The system explicitly excludes any entity that also has a `DynamicLight`, `ReactorBaseEmissiveController`, or `ReactorComponent`.
+
+**Fix: add a `DynamicLight` component to the part's GameObject.** This is a Unity-asset-only change (no BepInEx mod or runtime code needed) and excludes the part from the emissive system entirely. Confirmed working.
+
+The **Component Copy Window → Component tab** shows an **Electrical control** row (Global/Local) in the BP summary whenever a copied BP carries an electric receiver — it's highlighted orange when "Global" is present, since that's the specific case that triggers this glow. Use this to spot at-risk parts before they show the bug in-game, without needing to know which BP was used.
 
 **ACL null entries crash ship load**
 An `AddressableComponentLoader` with null/missing entries causes `ShipPreviewUtils.CalculateSpaceTruckPartCount` to receive null `moduleSummaries`, which chains to a crash that freezes the loading screen. The validator catches these as errors and blocks the build. After deleting any part GO, clean its ACL entries immediately.
