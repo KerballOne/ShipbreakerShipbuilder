@@ -55,7 +55,14 @@ public class JointAssistWindow : EditorWindow
     float autoDedupRadius      = 0.05f;
 
     // Joint compatibility check state
-    float compatCoplanarThreshold   = 0.025f; // mirrors game's coplanarDistanceThreshold
+    float compatCoplanarThreshold     = 0.025f; // mirrors game's coplanarDistanceThreshold
+    // Game uses TWO different threshold pairs at different call sites (decompiled
+    // BBI.Unity.Game): JointingService.JointStructureParts (general/runtime, player
+    // cutting/placing/grappling) uses 0.1 coplanar / 0.8 codirectional; ShipRandomizationHelper's
+    // JointPartsAsync (ship-spawn/generation) uses a STRICTER 0.05 / 0.9. This was previously
+    // hardcoded (kCodirectionalDotThresholdRuntime = 0.8f, no UI control at all) — now exposed so
+    // both halves of either pair can actually be tested together against real in-game behavior.
+    float compatCodirectionalThreshold = 0.8f;
     float compatCollisionThreshold  = 0.01f;  // acceptable gap/overlap band for a non-coplanar pair to count as "touching"
 
     struct CompatResult
@@ -224,6 +231,11 @@ public class JointAssistWindow : EditorWindow
             "How far apart two faces' planes can be and still be considered a candidate mating pair. " +
             "Used to gather coplanar joint polygons/faces and to inflate each mesh's bounds for the quick-reject test."),
             compatCoplanarThreshold);
+        compatCodirectionalThreshold = EditorGUILayout.FloatField(new GUIContent("Codirectional Threshold",
+            "How opposite two faces' normals must be (dot product) to be considered a candidate mating pair. " +
+            "Game uses 0.8 for general/runtime jointing (player cutting/placing/grappling) and a stricter 0.9 " +
+            "for ship-spawn/generation (ShipRandomizationHelper) — set to match whichever scenario you're checking."),
+            compatCodirectionalThreshold);
         compatCollisionThreshold = EditorGUILayout.FloatField(new GUIContent("Collision Threshold (m)",
             "The acceptable gap/overlap band used to decide whether a non-coplanar pair still " +
             "counts as \"touching\" for the Collider row's Pass/Fail result."),
@@ -528,6 +540,10 @@ public class JointAssistWindow : EditorWindow
     // TEMP DEBUG (this session only — investigating overlay tilt, remove after):
     const string kDebugLogPath = "C:/Users/user/source/repos/ShipbreakerShipbuilder/joint_tilt_debug.log";
     static void DebugLog(string s) => System.IO.File.AppendAllText(kDebugLogPath, s + "\n");
+    // Raw hullA/hullB (pre-clip), reconstructed to 3D, for visual inspection — are the two
+    // hulls actually the same real seam, or two unrelated surfaces flattened onto one plane?
+    static List<Vector3> debugHullA3D = new List<Vector3>();
+    static List<Vector3> debugHullB3D = new List<Vector3>();
 
     void RunCompatibilityCheck()
     {
@@ -667,22 +683,29 @@ public class JointAssistWindow : EditorWindow
         if (hullPairBudgetExceeded)
             polySuffix += " (partial — triangle-pair budget exceeded)";
 
-        if (overlapCount == 0 && touchingCount == 0)
+        // Only a genuine coplanar polygon match (overlapCount > 0) — the actual criterion the
+        // game's TryFindJointPolygonsJob uses to form a joint — can report Pass. Bounding-box
+        // proximity (touchingCount) is a crude whole-part-bounds proxy, not a real per-triangle
+        // coplanar test; treating it as Pass was confirmed to produce false positives on real
+        // non-jointing part pairs (bounding boxes overlap/touch, but no valid coplanar mesh
+        // surface match exists between the actual render geometry).
+        if (overlapCount > 0)
+        {
+            compatHull = new CompatResult { state = CompatResult.State.Pass,
+                message = $"Collider: {overlapCount} coplanar pair{(overlapCount == 1 ? "" : "s")}{polySuffix}." };
+        }
+        else if (touchingCount > 0)
+        {
+            compatHull = new CompatResult { state = CompatResult.State.Fail,
+                message = $"Collider: bounding boxes close ({touchingCount} pair{(touchingCount == 1 ? "" : "s")}, " +
+                    $"{minGap:0.0000} m) but NO valid coplanar mesh match found — parts will not auto-joint{polySuffix}." };
+        }
+        else
         {
             compatHull = new CompatResult { state = CompatResult.State.Fail,
                 message = (minGap == float.MaxValue
                     ? "Collider: No coplanar mesh pair within range"
                     : $"Collider: {minGap:0.0000} m gap") + $" — parts will not auto-joint{polySuffix}." };
-        }
-        else if (overlapCount == 0)
-        {
-            compatHull = new CompatResult { state = CompatResult.State.Pass,
-                message = $"Collider: {touchingCount} pair{(touchingCount == 1 ? "" : "s")}, {minGap:0.0000} m gap{polySuffix}." };
-        }
-        else
-        {
-            compatHull = new CompatResult { state = CompatResult.State.Pass,
-                message = $"Collider: {overlapCount} coplanar pair{(overlapCount == 1 ? "" : "s")}{polySuffix}." };
         }
 
         ApplyCheckResults(newJointFaces);
@@ -1046,10 +1069,10 @@ public class JointAssistWindow : EditorWindow
     int hullPairBudget;
     bool hullPairBudgetExceeded;
 
-    // Runtime constants from the game's JointHelper/MathUtility (BBI.Unity.Game), so this tool's
-    // Check matches what TryFindJointPolygonsJob actually does at ship-spawn time. See
-    // [[project_game_jointing_algorithm]] for the decompiled source this is ported from.
-    const float kCodirectionalDotThresholdRuntime = 0.8f;
+    // Vertex/geometry tolerance from the game's JointHelper/MathUtility (BBI.Unity.Game) — see
+    // [[project_game_jointing_algorithm]] for the decompiled source this is ported from. The
+    // codirectional dot threshold used to be hardcoded here too; it's now the user-settable
+    // compatCodirectionalThreshold field above (see comment there for why).
     const float kVertexEpsilon = 1e-5f;
 
     // Port of BBI.Unity.Game.JointHelper.TryFindJointPolygonsJob.TryFindCoplanarPoints +
@@ -1086,106 +1109,148 @@ public class JointAssistWindow : EditorWindow
         var wVertsB = new Vector3[vertsB.Length];
         for (int i = 0; i < vertsB.Length; i++) wVertsB[i] = mB.MultiplyPoint3x4(vertsB[i]);
 
-        // Step 1: TryFindCoplanarPoints — find the first matching triangle pair's plane, then
-        // accumulate every triangle (from either side) that's near-coplanar with it. (Matching
-        // scan itself is intentionally untouched — verified correct/faithful to the game's
-        // TryFindCoplanarPoints. Only which candidate plane's projection gets used afterward is
-        // changed below — see the area-weighted candidate scoring after this loop.)
+        // Step 1: TryFindCoplanarPoints — FAITHFUL port of the decompiled algorithm
+        // (BBI.Unity.Game.JointHelper.TryFindJointPolygonsJob.TryFindCoplanarPoints,
+        // C:\Users\user\.claude\decomp\bbi_full.decompiled.cs ~line 191400). Earlier ports this
+        // session omitted three real pieces of this algorithm, which is the actual root cause of
+        // both the visual misorientation AND a confirmed Collider-check false positive on a real
+        // non-jointing part pair:
+        //   1. RESET-ON-CLOSER-MATCH: the game does NOT lock onto the first matching pair forever.
+        //      It tracks a running "opposition direction" x = (normA-normB)/2 and the closest
+        //      planeDist seen (num). Whenever a NEW pair is found that's closer (num2 < num) AND
+        //      still agrees with the current best direction, it CLEARS the accumulated index sets
+        //      and re-locks onto that better pair. Without this, one bad early match (e.g. a bevel
+        //      edge) permanently contaminates the accumulated set with everything scanned after it.
+        //   2. RUNNING-SUM NORMAL: jointTransform.Normal is accumulated as a sum across every
+        //      distinct matched vertex (+= for side A, -= for side B), normalized once at the end
+        //      — not fixed from one triangle's normal.
+        //   3. FINAL BOUNDING-BOX GATE: after accumulation, the decompile checks that side A's and
+        //      side B's accumulated point bounding boxes are within coplanarDistanceThreshold of
+        //      each other on all 3 axes — if not, the whole match is REJECTED (return false). This
+        //      is a real sanity check with no equivalent in earlier ports; its absence is likely
+        //      why a spread-out, spurious "match" could still report a plausible clip area.
         var coplanarVertsA = new List<Vector3>();
         var coplanarVertsB = new List<Vector3>();
-        bool foundPlane = false;
+        // coplanarIndicesA/B equivalent: index membership sets used to dedupe within one A-triangle
+        // iteration, matching the decompile's coplanarIndices1/2 (NativeList<int> membership scans).
+        var indexSetA = new HashSet<int>();
+        var indexSetB = new HashSet<int>();
 
-        // Candidate planes seen during matching (grouped by normal within ~1°), each carrying a
-        // running SUM of matched-triangle area (both sides) — used only to pick which locked
-        // plane's projection to draw/report, AFTER the (unmodified) matching scan completes.
-        // Rationale: the first-matched triangle pair can be a small bevel/chamfer edge rather
-        // than the true flat mating face (confirmed on a real part: a fixed, reproducible 45°
-        // offset traced to the part's corner bevel) — weighting by matched area favors the
-        // dominant real flat face over an incidentally-first-scanned small bevel.
-        var candidatePlanes = new List<(Vector3 normal, Vector3 origin, float areaWeight)>();
+        Vector3 oppositionDir = Vector3.zero; // decompile's `x`
+        float bestPlaneDist = float.MaxValue; // decompile's `num`
+        bool hasLocked = false;               // decompile's `flag`
+        bool hasTangent = false;               // decompile's `flag2`
+        Vector3 normalSum = Vector3.zero;      // decompile's jointTransform.Normal (running sum)
+        Vector3 lockedPosition = Vector3.zero; // decompile's jointTransform.Position
 
         for (int ia = 0; ia < trisA.Length; ia += 3)
         {
-            Vector3 wa0 = wVertsA[trisA[ia]], wa1 = wVertsA[trisA[ia + 1]], wa2 = wVertsA[trisA[ia + 2]];
+            int ia0 = trisA[ia], ia1 = trisA[ia + 1], ia2 = trisA[ia + 2];
+            Vector3 wa0 = wVertsA[ia0], wa1 = wVertsA[ia1], wa2 = wVertsA[ia2];
             Vector3 normA = Vector3.Cross(wa1 - wa0, wa2 - wa0);
-            float triAreaX2 = normA.magnitude;
             if (normA.sqrMagnitude < 1e-10f) continue;
             normA.Normalize();
 
-            bool triAMatched = false;
+            bool triAMatchedThisIter = false; // decompile's flag3
+
             for (int ib = 0; ib < trisB.Length; ib += 3)
             {
                 if (hullPairBudget <= 0) { hullPairBudgetExceeded = true; goto donePairs; }
                 hullPairBudget--;
 
-                Vector3 wb0 = wVertsB[trisB[ib]], wb1 = wVertsB[trisB[ib + 1]], wb2 = wVertsB[trisB[ib + 2]];
+                int ib0 = trisB[ib], ib1 = trisB[ib + 1], ib2 = trisB[ib + 2];
+                Vector3 wb0 = wVertsB[ib0], wb1 = wVertsB[ib1], wb2 = wVertsB[ib2];
                 Vector3 normB = Vector3.Cross(wb1 - wb0, wb2 - wb0);
                 if (normB.sqrMagnitude < 1e-10f) continue;
                 normB.Normalize();
 
-                if (Vector3.Dot(normA, normB) >= -kCodirectionalDotThresholdRuntime) continue;
+                if (Vector3.Dot(normA, normB) >= -compatCodirectionalThreshold) continue;
 
-                float planeDist = Mathf.Abs(Vector3.Dot(wa0 - wb0, normA));
-                if (planeDist > compatCoplanarThreshold) continue;
+                float thisDist = Mathf.Abs(Vector3.Dot(wa0 - wb0, normA));
+                if (thisDist >= compatCoplanarThreshold) continue;
 
-                if (!foundPlane)
+                Vector3 candidateOpposition = (normA - normB) * 0.5f;
+                bool agreesWithBest = Vector3.Dot(oppositionDir, candidateOpposition) < compatCodirectionalThreshold;
+
+                if (!hasLocked || (agreesWithBest && thisDist < bestPlaneDist))
                 {
-                    planeOrigin = wa0;
-                    faceNorm    = normA;
-                    tan         = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
-                    bitan       = Vector3.Cross(faceNorm, tan).normalized;
-                    foundPlane  = true;
+                    // Reset: this is a strictly closer (or first) match — clear everything
+                    // accumulated so far and re-lock onto this pair.
+                    oppositionDir   = candidateOpposition;
+                    bestPlaneDist   = thisDist;
+                    normalSum       = Vector3.zero;
+                    lockedPosition  = wa0;
+                    indexSetA.Clear();
+                    indexSetB.Clear();
+                    coplanarVertsA.Clear();
+                    coplanarVertsB.Clear();
+                    hasLocked       = true;
+                    hasTangent      = false;
+                    agreesWithBest  = false;
                 }
+                if (agreesWithBest) continue;
 
-                // Tally this pair's area into the matching candidate-plane bucket (grouped by
-                // normal within ~1°) — does not affect matching or coplanarVertsA/B above.
-                float triBAreaX2 = Vector3.Cross(wb1 - wb0, wb2 - wb0).magnitude;
-                bool bucketed = false;
-                for (int bi = 0; bi < candidatePlanes.Count; bi++)
+                if (!hasTangent && hasLocked)
                 {
-                    if (Vector3.Dot(candidatePlanes[bi].normal, normA) > 0.9998f)
+                    Vector3 edge = wa1 - wa0;
+                    if (edge.sqrMagnitude > 1e-5f)
                     {
-                        var b = candidatePlanes[bi];
-                        candidatePlanes[bi] = (b.normal, b.origin, b.areaWeight + triAreaX2 + triBAreaX2);
-                        bucketed = true;
-                        break;
+                        tan = edge.normalized;
+                        hasTangent = true;
                     }
                 }
-                if (!bucketed) candidatePlanes.Add((normA, wa0, triAreaX2 + triBAreaX2));
 
-                triAMatched = true;
-                AddUnique(coplanarVertsB, wb0); AddUnique(coplanarVertsB, wb1); AddUnique(coplanarVertsB, wb2);
+                triAMatchedThisIter = true;
+
+                if (indexSetB.Add(ib0)) { coplanarVertsB.Add(wb0); normalSum -= normB; }
+                if (indexSetB.Add(ib1)) { coplanarVertsB.Add(wb1); normalSum -= normB; }
+                if (indexSetB.Add(ib2)) { coplanarVertsB.Add(wb2); normalSum -= normB; }
             }
-            if (triAMatched)
-            {
-                AddUnique(coplanarVertsA, wa0); AddUnique(coplanarVertsA, wa1); AddUnique(coplanarVertsA, wa2);
-            }
+
+            if (!triAMatchedThisIter) continue;
+
+            if (indexSetA.Add(ia0)) { coplanarVertsA.Add(wa0); normalSum += normA; }
+            if (indexSetA.Add(ia1)) { coplanarVertsA.Add(wa1); normalSum += normA; }
+            if (indexSetA.Add(ia2)) { coplanarVertsA.Add(wa2); normalSum += normA; }
         }
         donePairs:
 
-        if (!foundPlane || coplanarVertsA.Count < 3 || coplanarVertsB.Count < 3)
+        if (!hasTangent || coplanarVertsA.Count < 3 || coplanarVertsB.Count < 3)
         {
-            DebugLog($"[{mfA.name} x {mfB.name}] NO PLANE FOUND (foundPlane={foundPlane}, vertsA={coplanarVertsA.Count}, vertsB={coplanarVertsB.Count})");
+            DebugLog($"[{mfA.name} x {mfB.name}] NO PLANE FOUND (hasTangent={hasTangent}, vertsA={coplanarVertsA.Count}, vertsB={coplanarVertsB.Count})");
             return false;
         }
 
-        // Use the area-weighted dominant candidate plane instead of the first-matched one. The
-        // SAME coplanarVertsA/B (already fully accumulated above, unchanged) are simply projected
-        // and clipped against this different plane — this can only change the drawn orientation/
-        // reported plane, never which triangle pairs were considered matching.
-        candidatePlanes.Sort((x, y) => y.areaWeight.CompareTo(x.areaWeight));
-        var dominant = candidatePlanes[0];
-        planeOrigin = dominant.origin;
-        faceNorm    = dominant.normal;
-        tan         = Vector3.Cross(faceNorm, Mathf.Abs(faceNorm.y) < 0.9f ? Vector3.up : Vector3.right).normalized;
-        bitan       = Vector3.Cross(faceNorm, tan).normalized;
+        faceNorm    = normalSum.normalized;
+        planeOrigin = lockedPosition;
+        bitan       = Vector3.Cross(tan, faceNorm).normalized;
+        // Re-orthogonalize tan against the final averaged normal (decompile computes BiTangent =
+        // cross(Tangent, Normal) directly without re-projecting Tangent — mirror that exactly;
+        // Tangent itself came from a single real mesh edge and is never modified further).
 
+        // Final bounding-box sanity gate (decompile ~line 191559): reject the whole match if the
+        // two accumulated point clouds' bounding boxes aren't actually within
+        // compatCoplanarThreshold of each other on every axis — catches a spread-out, spurious
+        // "match" that individual pairwise tests let through.
+        Vector3 minA = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 maxA = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        foreach (var v in coplanarVertsA)
         {
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"[{mfA.name} x {mfB.name}] candidate planes={candidatePlanes.Count}");
-            for (int bi = 0; bi < Mathf.Min(5, candidatePlanes.Count); bi++)
-                sb.AppendLine($"  normal={candidatePlanes[bi].normal:F4} areaWeight={candidatePlanes[bi].areaWeight:F4}" + (bi == 0 ? "  <-- CHOSEN" : ""));
-            DebugLog(sb.ToString());
+            minA = Vector3.Min(minA, v);
+            maxA = Vector3.Max(maxA, v);
+        }
+        Vector3 minB = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 maxB = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        foreach (var v in coplanarVertsB)
+        {
+            minB = Vector3.Min(minB, v);
+            maxB = Vector3.Max(maxB, v);
+        }
+        if (minA.x - maxB.x > compatCoplanarThreshold || minA.y - maxB.y > compatCoplanarThreshold || minA.z - maxB.z > compatCoplanarThreshold ||
+            minB.x - maxA.x > compatCoplanarThreshold || minB.y - maxA.y > compatCoplanarThreshold || minB.z - maxA.z > compatCoplanarThreshold)
+        {
+            DebugLog($"[{mfA.name} x {mfB.name}] REJECTED by bounding-box gate: A=[{minA:F3}..{maxA:F3}] B=[{minB:F3}..{maxB:F3}]");
+            return false;
         }
 
         // Step 2: project each side's coplanar verts into the joint plane's 2D space, then take
@@ -1203,12 +1268,21 @@ public class JointAssistWindow : EditorWindow
             return false;
         }
 
+        // TEMP DEBUG: reconstruct hullA/hullB to 3D (same formula as the final clipped polygon)
+        // for direct visual inspection — do these two hulls actually sit on/near the same real
+        // seam, or are they two unrelated surfaces that just happen to flatten onto one plane?
+        debugHullA3D.Clear();
+        foreach (var p in hullA) debugHullA3D.Add(planeOrigin + p.x * tan + p.y * bitan);
+        debugHullB3D.Clear();
+        foreach (var p in hullB) debugHullB3D.Add(planeOrigin + p.x * tan + p.y * bitan);
+
         // Step 3: clip the two convex hulls against each other (Sutherland-Hodgman is
         // mathematically equivalent to the game's segment-intersection-based
         // TryGetConvexHullIntersection for convex-vs-convex polygons).
         float clipArea = ClipPolygons(hullA, hullB, overlapPolygon2D);
         DebugLog($"[{mfA.name} x {mfB.name}] clipArea={clipArea:F4} resultVerts={overlapPolygon2D.Count} " +
-            $"planeOrigin={planeOrigin:F3} faceNorm={faceNorm:F4} tan={tan:F4} bitan={bitan:F4}");
+            $"planeOrigin={planeOrigin:F3} faceNorm={faceNorm:F4} tan={tan:F4} bitan={bitan:F4} " +
+            $"vertsA={coplanarVertsA.Count} vertsB={coplanarVertsB.Count} bestPlaneDist={bestPlaneDist:F5}");
         return clipArea > 1e-9f;
     }
 
@@ -1472,6 +1546,27 @@ public class JointAssistWindow : EditorWindow
                 Handles.color = lineColor;
                 for (int i = 0; i < f.poly.Length; i++)
                     Handles.DrawLine(f.poly[i], f.poly[(i + 1) % f.poly.Length]);
+            }
+            Handles.color = prevColor;
+        }
+
+        // TEMP DEBUG: draw the raw pre-clip hullA (orange) / hullB (cyan) wireframes, so we can
+        // see directly whether they sit on the same real seam or are two unrelated surfaces that
+        // happened to flatten onto the same chosen plane.
+        if (showOverlay)
+        {
+            var prevColor = Handles.color;
+            if (debugHullA3D.Count >= 2)
+            {
+                Handles.color = new Color(1f, 0.5f, 0f, 1f);
+                for (int i = 0; i < debugHullA3D.Count; i++)
+                    Handles.DrawLine(debugHullA3D[i], debugHullA3D[(i + 1) % debugHullA3D.Count]);
+            }
+            if (debugHullB3D.Count >= 2)
+            {
+                Handles.color = new Color(0f, 0.9f, 1f, 1f);
+                for (int i = 0; i < debugHullB3D.Count; i++)
+                    Handles.DrawLine(debugHullB3D[i], debugHullB3D[(i + 1) % debugHullB3D.Count]);
             }
             Handles.color = prevColor;
         }
