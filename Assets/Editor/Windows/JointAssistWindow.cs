@@ -63,7 +63,6 @@ public class JointAssistWindow : EditorWindow
     // hardcoded (kCodirectionalDotThresholdRuntime = 0.8f, no UI control at all) — now exposed so
     // both halves of either pair can actually be tested together against real in-game behavior.
     float compatCodirectionalThreshold = 0.8f;
-    float compatCollisionThreshold  = 0.01f;  // acceptable gap/overlap band for a non-coplanar pair to count as "touching"
 
     struct CompatResult
     {
@@ -95,7 +94,7 @@ public class JointAssistWindow : EditorWindow
     // together in the same color, since they're one real candidate pair, not two statistics.
     struct NearMissHighlight
     {
-        public NearMissAxis axis; // Distance/Angle = two faces; PointPair = two dots + a line
+        public NearMissAxis axis; // Distance/Angle = two faces; PointPair = one arrow along the separation axis
         public Vector3 triA0, triA1, triA2, triB0, triB1, triB2; // Distance/Angle only
         public Vector3 pointA, pointB;                           // PointPair only
         public float measuredValue, thresholdValue;
@@ -260,21 +259,17 @@ public class JointAssistWindow : EditorWindow
             "scenario you're checking."),
             codirectionalThresholdDeg);
         compatCodirectionalThreshold = Mathf.Cos(Mathf.Clamp(codirectionalThresholdDeg, 0f, 180f) * Mathf.Deg2Rad);
-        compatCollisionThreshold = EditorGUILayout.FloatField(new GUIContent("Collision Threshold (m)",
-            "The acceptable gap/overlap band used to decide whether a non-coplanar pair still " +
-            "counts as \"touching\" for the Collider row's Pass/Fail result."),
-            compatCollisionThreshold);
 
         int compatSel = Selection.gameObjects.Length;
         EditorGUILayout.BeginHorizontal();
-        using (new EditorGUI.DisabledScope(compatSel < 2 && !checkRunning))
+        // No toolbar Cancel button while checkRunning: EditorUtility.DisplayCancelableProgressBar
+        // (in StepAsyncCheck) is a MODAL window that captures input focus for as long as the Check
+        // is running, so a button drawn here would be behind it and unclickable. The progress
+        // bar's own Cancel/X is the only reachable way to cancel — this toolbar just disables
+        // itself and shows that the Check is in progress.
+        using (new EditorGUI.DisabledScope(compatSel < 2 || checkRunning))
         {
-            if (checkRunning)
-            {
-                if (GUILayout.Button("Cancel", GUILayout.Height(28), GUILayout.MinWidth(0)))
-                    StopAsyncCheck();
-            }
-            else if (GUILayout.Button($"Check  ({compatSel})", GUILayout.Height(28), GUILayout.MinWidth(0)))
+            if (GUILayout.Button(checkRunning ? "Checking..." : $"Check  ({compatSel})", GUILayout.Height(28), GUILayout.MinWidth(0)))
                 RunCompatibilityCheck();
         }
         if (jointFaces != null)
@@ -560,6 +555,10 @@ public class JointAssistWindow : EditorWindow
     float checkProgress;
     string checkProgressLabel = "";
     IEnumerator checkEnumerator;
+    // Set the instant the modal progress bar's Cancel is clicked, checked inside
+    // TryFindJointPolygon's inner scan loop so a slow single MeshFilter pair can be interrupted
+    // mid-scan (that method has no yield points of its own — it isn't a coroutine).
+    bool checkCanceled;
 
     // TEMP DEBUG (this session only — investigating overlay tilt, remove after):
     const string kDebugLogPath = "C:/Users/user/source/repos/ShipbreakerShipbuilder/joint_tilt_debug.log";
@@ -569,10 +568,24 @@ public class JointAssistWindow : EditorWindow
     static List<Vector3> debugHullA3D = new List<Vector3>();
     static List<Vector3> debugHullB3D = new List<Vector3>();
 
-    void RunCompatibilityCheck()
+    // GameObjects from the last Check, kept only so a budget-exceeded re-run can restart on the
+    // exact same selection without requiring the user to still have it selected in the Hierarchy.
+    GameObject[] lastCheckSel;
+
+    void RunCompatibilityCheck() => RunCompatibilityCheck(kDefaultHullPairBudget);
+
+    void RunCompatibilityCheck(int budget)
     {
         var sel = Selection.gameObjects;
         if (sel.Length < 2 || checkRunning) return;
+        RunCompatibilityCheckInternal(sel, budget);
+    }
+
+    void RunCompatibilityCheckInternal(GameObject[] sel, int budget)
+    {
+        if (checkRunning) return;
+        lastCheckSel = sel;
+        hullPairBudgetMax = budget;
 
         // TEMP DEBUG (this session only): reset the log each Check so it only shows this run.
         System.IO.File.WriteAllText(kDebugLogPath, $"=== Check run {System.DateTime.Now:HH:mm:ss} ===\n");
@@ -595,8 +608,9 @@ public class JointAssistWindow : EditorWindow
         // and the user can cancel mid-run, per this session's plan. Existing overlay/result
         // fields are only swapped in once the run completes normally — a cancel leaves the
         // previously-displayed Check results untouched rather than showing a partial result.
-        hullPairBudget = kHullPairBudget;
         hullPairBudgetExceeded = false;
+        worstCaseRequiredPairs = 0;
+        checkCanceled = false;
         checkEnumerator = MeshJointCheckRoutine(sel);
         checkRunning = true;
         checkProgress = 0f;
@@ -608,7 +622,7 @@ public class JointAssistWindow : EditorWindow
     void StepAsyncCheck()
     {
         bool cancel = EditorUtility.DisplayCancelableProgressBar("Joint Compatibility Check", checkProgressLabel, checkProgress);
-        if (cancel) { StopAsyncCheck(); Repaint(); return; }
+        if (cancel) { checkCanceled = true; StopAsyncCheck(); Repaint(); return; }
 
         bool more;
         try { more = checkEnumerator.MoveNext(); }
@@ -624,6 +638,24 @@ public class JointAssistWindow : EditorWindow
         EditorUtility.ClearProgressBar();
         checkRunning = false;
         checkEnumerator = null;
+
+        // Triangle-pair budget was exhausted on at least one MeshFilter pair — the Mesh result may
+        // be a false negative. Rather than exposing the budget as a permanent UI knob, offer to
+        // just re-run with exactly the budget that pair needed (plus headroom), on confirmation.
+        if (hullPairBudgetExceeded && worstCaseRequiredPairs > hullPairBudgetMax)
+        {
+            long suggested = worstCaseRequiredPairs + worstCaseRequiredPairs / 10; // +10% headroom
+            bool rerun = EditorUtility.DisplayDialog("Joint Compatibility Check",
+                $"The triangle-pair budget ({hullPairBudgetMax:N0}) was exceeded on at least one part pair — " +
+                $"that pair's result may be a false negative. It needs at least {worstCaseRequiredPairs:N0} pairs " +
+                $"to fully scan.\n\nRe-run the Check with a budget of {suggested:N0}?",
+                "Re-run", "Cancel");
+            if (rerun && lastCheckSel != null)
+            {
+                int newBudget = suggested > int.MaxValue ? int.MaxValue : (int)suggested;
+                EditorApplication.delayCall += () => RunCompatibilityCheckInternal(lastCheckSel, newBudget);
+            }
+        }
     }
 
     // Combined port of the game's TryFindJointPolygonsJob (see [[project_game_jointing_algorithm]])
@@ -650,7 +682,6 @@ public class JointAssistWindow : EditorWindow
 
         float minGap = float.MaxValue;
         int overlapCount = 0;
-        int touchingCount = 0;
         float areaSum = 0f;
         var overlapPoly = new List<Vector2>();
 
@@ -669,20 +700,24 @@ public class JointAssistWindow : EditorWindow
         foreach (var mfA in mfsA)
         {
             var boundsA = TransformBoundsToWorld(mfA.transform.localToWorldMatrix, mfA.sharedMesh.bounds);
-            float margin = Mathf.Max(compatCoplanarThreshold, compatCollisionThreshold) * 2f;
+            float margin = compatCoplanarThreshold * 2f;
             var expandedA = boundsA; expandedA.Expand(margin);
 
             foreach (var mfB in mfsB)
             {
                 pairIndex++;
+                // Fallback progress for pairs whose scan is short enough to never hit the
+                // per-triangle-pair polling cadence inside TryFindJointPolygon (which overwrites
+                // these with real triangle-pair progress once a scan is actually underway).
                 checkProgress = totalPairs > 0 ? (float)pairIndex / totalPairs : 1f;
-                checkProgressLabel = $"Checking mesh pair {pairIndex}/{totalPairs}...";
+                string pairLabel = $"Mesh pair {pairIndex}/{totalPairs}";
+                checkProgressLabel = $"Checking {pairLabel}...";
 
                 var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, mfB.sharedMesh.bounds);
                 if (!expandedA.Intersects(boundsB)) { continue; }
 
                 if (TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
-                    out var nearMiss))
+                    out var nearMiss, pairLabel))
                 {
                     overlapCount++;
                     float area = Mathf.Abs(SignedArea2D(overlapPoly));
@@ -699,11 +734,10 @@ public class JointAssistWindow : EditorWindow
                     // distance so a clearly-separated pair still reports something useful.
                     float gap = BoundsDistance(boundsA, boundsB);
                     if (gap < minGap) minGap = gap;
-                    if (gap <= compatCollisionThreshold) touchingCount++;
 
                     // Track the SINGLE closest near-miss across the whole Check (both axes
                     // compared on the same relative-overshoot footing) — purely diagnostic, does
-                    // not affect touchingCount/overlapCount/pass-fail.
+                    // not affect overlapCount/pass-fail.
                     if (nearMiss.found)
                     {
                         float thresholdMag = Mathf.Max(1e-4f, Mathf.Abs(nearMiss.thresholdValue));
@@ -723,22 +757,24 @@ public class JointAssistWindow : EditorWindow
                     }
                 }
 
-                if (hullPairBudgetExceeded) goto donePairs;
+                // Budget is spent per-pair now (reset inside TryFindJointPolygon each call), so one
+                // pair exceeding its budget only makes THAT pair's result partial — it must not
+                // abort scanning of the rest of the selection's pairs.
+                if (checkCanceled) yield break; // leaves previously-displayed results untouched
 
                 if (++pairsSinceYield >= kPairsPerYield) { pairsSinceYield = 0; yield return null; }
             }
         }
-        donePairs:
 
         string polySuffix = newJointFaces.Count > 0
             ? $", {areaSum:0.0000} m² across {newJointFaces.Count} polygon{(newJointFaces.Count == 1 ? "" : "s")}"
             : "";
         if (hullPairBudgetExceeded)
-            polySuffix += " (partial — triangle-pair budget exceeded)";
+            polySuffix += $" (partial — triangle-pair budget exceeded; needs at least {worstCaseRequiredPairs:N0})";
 
         // Diagnostic near-miss line, appended into the SAME Mesh message box (a real Pass already
         // has its authoritative answer and doesn't need this). Purely informational — never
-        // changes overlapCount/touchingCount/pass-fail. Only ONE line is ever shown — whichever
+        // changes overlapCount/pass-fail. Only ONE line is ever shown — whichever
         // single axis (distance or angle) the closest candidate pair actually missed on — colored
         // to match its scene-view highlight. The codirectional value is a dot product (cosine of
         // the angle between the two face normals), not a raw angle — converted to a degrees-off
@@ -764,7 +800,7 @@ public class JointAssistWindow : EditorWindow
 
         // Only a genuine coplanar polygon match (overlapCount > 0) — the actual criterion the
         // game's TryFindJointPolygonsJob uses to form a joint — can report Pass. Bounding-box
-        // proximity (touchingCount) is a crude whole-part-bounds proxy, not a real per-triangle
+        // proximity is a crude whole-part-bounds proxy, not a real per-triangle
         // coplanar test; treating it as Pass was confirmed to produce false positives on real
         // non-jointing part pairs (bounding boxes overlap/touch, but no valid coplanar mesh
         // surface match exists between the actual render geometry).
@@ -1146,14 +1182,27 @@ public class JointAssistWindow : EditorWindow
         return new CompatResult { state = CompatResult.State.Fail, message = $"{msg}\n{string.Join("\n", labels)}" };
     }
 
-    // Triangle-pair budget shared across one Check pass's CollectJointFacesRender calls (it's
-    // called 2x: A->B/B->A) — same coplanar-scan shape as the game's TryFindCoplanarPoints
-    // (BBI.Unity.Game.JointHelper), which is O(trisA x trisB) with no natural upper bound for a
-    // pathological selection. Once exhausted, remaining pairs are skipped and
-    // hullPairBudgetExceeded is set so the UI can warn the reported area/overlay is partial.
-    const int kHullPairBudget = 2_000_000;
+    // Triangle-pair budget for a single TryFindJointPolygon call (one MeshFilter A x MeshFilter B
+    // pair) — the O(trisA x trisB) coplanar scan (same shape as the game's TryFindCoplanarPoints,
+    // BBI.Unity.Game.JointHelper) has no natural upper bound for a large/complex mesh pair. Reset
+    // fresh for EACH MeshFilter pair (not shared across the whole Check — see below for why that
+    // matters); if it runs out mid-pair, that pair's result is partial and hullPairBudgetExceeded
+    // is set so the UI can warn, which can cause a FALSE NEGATIVE for that specific pair if the
+    // budget runs out before the scan reaches the triangle pair that would have matched.
+    // Not a persistent user setting — every manual Check starts fresh at kDefaultHullPairBudget.
+    // If exhausted, StopAsyncCheck offers a one-shot confirm dialog to re-run just that Check at
+    // worstCaseRequiredPairs + 10% headroom; the bump applies only to that single re-run.
+    // Per-pair, not per-Check: a shared/global counter decremented across every MeshFilter pair in
+    // the whole selection would make raising it change results non-monotonically, since whichever
+    // pair happened to exhaust the shared budget first would depend on scan order, not on the pair
+    // actually being examined. Per-pair budgeting makes "did THIS pair need more budget" a
+    // well-defined, monotonic question, and lets worstCaseRequiredPairs below report exactly how
+    // large a budget would have been needed for the worst-hit pair.
+    const int kDefaultHullPairBudget = 2_000_000;
+    int hullPairBudgetMax = kDefaultHullPairBudget;
     int hullPairBudget;
-    bool hullPairBudgetExceeded;
+    bool hullPairBudgetExceeded;      // true if ANY pair in the Check hit its budget
+    long worstCaseRequiredPairs;      // largest trisA/3 * trisB/3 among pairs that hit the budget
 
     // Vertex/geometry tolerance from the game's JointHelper/MathUtility (BBI.Unity.Game) — see
     // [[project_game_jointing_algorithm]] for the decompiled source this is ported from. The
@@ -1182,7 +1231,7 @@ public class JointAssistWindow : EditorWindow
     // faces is the truthful representation). PointPair: the bounding-box-gate rejection, which
     // isn't a triangle-pair failure at all (every contributing pair already passed both gating
     // tests) — instead it's "these two specific accumulated VERTICES are the real worst-case
-    // separation," so it's drawn as two dots + a connecting line, not fake faces.
+    // separation," so it's drawn as a single arrow along that separation axis, not fake faces.
     public enum NearMissAxis { Distance, Angle, PointPair }
     public struct NearMissInfo
     {
@@ -1205,7 +1254,8 @@ public class JointAssistWindow : EditorWindow
     bool TryFindJointPolygon(MeshFilter mfA, MeshFilter mfB,
         out Vector3 planeOrigin, out Vector3 faceNorm, out Vector3 tan, out Vector3 bitan,
         List<Vector2> overlapPolygon2D,
-        out NearMissInfo nearMiss)
+        out NearMissInfo nearMiss,
+        string pairLabel = null)
     {
         overlapPolygon2D.Clear();
         planeOrigin = faceNorm = tan = bitan = Vector3.zero;
@@ -1218,6 +1268,7 @@ public class JointAssistWindow : EditorWindow
 
         var trisA = meshA.triangles;
         var trisB = meshB.triangles;
+        hullPairBudget = hullPairBudgetMax; // per-pair, not shared across the whole Check
         var vertsA = meshA.vertices;
         var vertsB = meshB.vertices;
         var mA = mfA.transform.localToWorldMatrix;
@@ -1274,7 +1325,35 @@ public class JointAssistWindow : EditorWindow
 
             for (int ib = 0; ib < trisB.Length; ib += 3)
             {
-                if (hullPairBudget <= 0) { hullPairBudgetExceeded = true; goto donePairs; }
+                // A single TryFindJointPolygon call has no yield points of its own (it isn't a
+                // coroutine), so on a slow MeshFilter pair, Cancel would otherwise do nothing until
+                // this whole O(trisA x trisB) scan finishes on its own — StepAsyncCheck can't poll
+                // the modal progress bar again until this synchronous call returns. So poll it
+                // directly from inside the scan instead, at a coarse cadence (every 4096 triangle
+                // pairs — checking every single pair would call into native UI code far too often
+                // and slow the scan down). Also drives the progress bar off actual triangle-pair
+                // work done (hullPairBudgetMax - hullPairBudget), not just "which MeshFilter pair"
+                // — a 1-to-1 selection would otherwise always show a meaningless "1/1".
+                if ((hullPairBudgetMax - hullPairBudget) % 4096 == 0)
+                {
+                    checkProgress = 1f - (float)hullPairBudget / hullPairBudgetMax;
+                    if (pairLabel != null)
+                        checkProgressLabel = $"{pairLabel} — {hullPairBudgetMax - hullPairBudget:N0}/{hullPairBudgetMax:N0} triangle pairs...";
+                    if (EditorUtility.DisplayCancelableProgressBar("Joint Compatibility Check", checkProgressLabel, checkProgress))
+                    {
+                        checkCanceled = true;
+                        nearMiss = default;
+                        return false;
+                    }
+                }
+
+                if (hullPairBudget <= 0)
+                {
+                    hullPairBudgetExceeded = true;
+                    long requiredPairs = (long)(trisA.Length / 3) * (long)(trisB.Length / 3);
+                    if (requiredPairs > worstCaseRequiredPairs) worstCaseRequiredPairs = requiredPairs;
+                    goto donePairs;
+                }
                 hullPairBudget--;
 
                 int ib0 = trisB[ib], ib1 = trisB[ib + 1], ib2 = trisB[ib + 2];
@@ -1773,14 +1852,22 @@ public class JointAssistWindow : EditorWindow
             {
                 // Bounding-box-gate rejection — a real per-triangle-pair angle/distance test
                 // never fired here (every contributing pair already passed both), so drawing
-                // fake faces would be misleading. This is fundamentally "two specific real
-                // vertices are this far apart," so show exactly that: two dots + a connecting
-                // line, sized relative to the scene view so they stay visible when zoomed out.
-                float dotSize = HandleUtility.GetHandleSize(nm.pointA) * 0.05f;
-                Handles.color = baseColor;
-                Handles.SphereHandleCap(0, nm.pointA, Quaternion.identity, dotSize, EventType.Repaint);
-                Handles.SphereHandleCap(0, nm.pointB, Quaternion.identity, dotSize, EventType.Repaint);
-                Handles.DrawLine(nm.pointA, nm.pointB);
+                // fake faces would be misleading. The two points' individual positions aren't
+                // meaningful on their own (they're just whichever real vertices happened to sit
+                // at the extremes of the worst-offending axis) — what IS meaningful is the axis
+                // itself: the single direction the two parts need to move together (or apart)
+                // along. So draw one arrow, centered on the midpoint, along that direction —
+                // not a line connecting two arbitrary vertices.
+                Vector3 mid = (nm.pointA + nm.pointB) * 0.5f;
+                Vector3 dir = (nm.pointB - nm.pointA);
+                if (dir.sqrMagnitude < 1e-8f) dir = Vector3.up;
+                dir.Normalize();
+                // Purple, not red/green/blue, so it's never confused with the transform gizmo's
+                // axis handles when both are visible in the scene view at once.
+                Color arrowColor = new Color(0.75f, 0.25f, 1f);
+                float arrowSize = HandleUtility.GetHandleSize(mid) * 1.5f;
+                Handles.color = arrowColor;
+                Handles.ArrowHandleCap(0, mid - dir * arrowSize * 0.5f, Quaternion.LookRotation(dir), arrowSize, EventType.Repaint);
             }
             else
             {

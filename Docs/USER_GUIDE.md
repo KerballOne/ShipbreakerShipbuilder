@@ -551,6 +551,30 @@ The most complex tool in the mod. Automates the placement of joint markers betwe
 
 The JSA compatibility table (`jsa_compat.json`) is populated by **PartInfoLogger** at runtime: on gameplay start, it reflects the complete `JointabilityAsset.m_AllPairingAssets` table (351 pairs, 55 JSA names as of the Rocinante build). SP_Mat filenames have decoration suffixes that do not appear in JSA names — the longest-prefix match strips these correctly.
 
+#### Joint Compatibility Check (JCC)
+
+A separate panel in the same window that predicts whether two selected parts will actually auto-joint in-game, without needing to build and test. Select two (or two groups of) `StructurePart`/`FakeStructurePart` GameObjects and click **Check**.
+
+The panel reports three independent results, all of which must pass for the parts to auto-joint:
+
+1. **SP_Mat** — whether the two parts' `JointSetupAsset` types are compatible (see the JSA compatibility check above).
+2. **MJC** — whether the two parts share a `MandatoryJointContainer` ancestor (bypasses the JSA/Mesh requirement entirely if so).
+3. **Mesh** — the actual result of the game's real jointing algorithm (`BBI.Unity.Game.JointHelper.TryFindJointPolygonsJob`), reimplemented faithfully: a brute-force search for coplanar, near-opposite triangle pairs between the two parts' render meshes, then a 2D convex-hull clip of the matched region. This is the same geometry test the game runs at spawn — a **Pass** here means the parts will physically joint if placed this way.
+
+**Thresholds** (top of the panel):
+- **Distance Threshold (m)** — how far apart two faces' planes can be and still count as coplanar. Game defaults: `0.1` (general/runtime jointing) or a stricter `0.05` (ship-spawn/generation).
+- **Angle Threshold (°)** — how far off from exactly opposite two faces' normals can be. Game defaults: `~36.9°` (runtime) or a stricter `~25.8°` (ship-spawn).
+
+Set both to match whichever in-game scenario you're testing against.
+
+**Reading a Fail result:** if the Mesh row reports Fail, the message includes a **Closest** near-miss line — the single closest candidate triangle pair found anywhere in the whole selection, and by how much it missed:
+- Yellow text = an angle near-miss (the two faces were close enough together, but not opposite enough).
+- Red text = a distance near-miss (the two faces were angled correctly, but too far apart) — this also covers the rarer case where every individual triangle pair passed both tests but the two parts' full matched regions don't line up as a whole.
+
+The scene view highlights this same closest pair: green highlights are a real coplanar match (the parts will joint); a colored triangle pair (yellow/red) or a purple arrow marks the near-miss and, for the arrow case, the actual direction one part needs to move to close the gap.
+
+**Triangle-pair budget:** the coplanar search is brute-force (every triangle in A against every triangle in B), so it's capped at 2,000,000 triangle-pair comparisons per MeshFilter pair to keep the Editor responsive on large/complex parts. If a pair hits this cap, its result may be a false negative — a dialog will offer to re-run the Check with a larger budget (sized to exactly what that pair needs, plus 10% headroom). The progress bar shows real triangle-pair throughput while a scan is in progress, and **Cancel** takes effect within a fraction of a second even mid-scan on a single large pair.
+
 ---
 
 #### `Shipbuilder / Radial Duplicate`
