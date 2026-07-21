@@ -24,9 +24,9 @@ public class GameRenderWindow : EditorWindow
 
     public static bool drawJointCensus = false;
     public static bool drawJointCensusHull = true; // true = Convex Hull, false = Mesh Wireframe (mutually exclusive)
-    public static bool jointCensusShowByNeighborCount = true; // true = Neighbor Count, false = Cluster (mutually exclusive)
-    public static int jointCensusNeighborIndex = 0; // 0-5, where 5 means "5 or more"
-    public static Color jointCensusNeighborColor = new Color(1f, 0f, 0f, 0.5f);
+    public static bool jointCensusShowByClusterSize = true; // true = Cluster Size, false = Cluster (mutually exclusive)
+    public static int jointCensusSizeIndex = 0; // exact cluster-part-count to highlight, clamped to JointCensusGizmos.MaxClusterSize
+    public static Color jointCensusSizeColor = new Color(1f, 0f, 0f, 0.5f);
     public static int jointCensusClusterIndex = 0;
     public static Color jointCensusClusterColor = new Color(0f, 1f, 1f, 0.6f);
     string lastFrameStatus;
@@ -65,9 +65,9 @@ public class GameRenderWindow : EditorWindow
         bakedJointColor       = LoadColor(K + "bakedJointColor",       bakedJointColor);
         drawJointCensus           = EditorPrefs.GetBool(K + "drawJointCensus", drawJointCensus);
         drawJointCensusHull       = EditorPrefs.GetBool(K + "drawJointCensusHull", drawJointCensusHull);
-        jointCensusShowByNeighborCount = EditorPrefs.GetBool(K + "jointCensusShowByNeighborCount", jointCensusShowByNeighborCount);
-        jointCensusNeighborIndex       = EditorPrefs.GetInt(K + "jointCensusNeighborIndex", jointCensusNeighborIndex);
-        jointCensusNeighborColor       = LoadColor(K + "jointCensusNeighborColor", jointCensusNeighborColor);
+        jointCensusShowByClusterSize = EditorPrefs.GetBool(K + "jointCensusShowByClusterSize", jointCensusShowByClusterSize);
+        jointCensusSizeIndex         = EditorPrefs.GetInt(K + "jointCensusSizeIndex", jointCensusSizeIndex);
+        jointCensusSizeColor         = LoadColor(K + "jointCensusSizeColor", jointCensusSizeColor);
         jointCensusClusterIndex   = EditorPrefs.GetInt(K + "jointCensusClusterIndex", jointCensusClusterIndex);
         jointCensusClusterColor   = LoadColor(K + "jointCensusClusterColor", jointCensusClusterColor);
     }
@@ -128,18 +128,21 @@ public class GameRenderWindow : EditorWindow
         }
 
         drawJointCensusHull = DrawSwitch(drawJointCensusHull, "Convex Hull", "Mesh Wireframe");
-        jointCensusShowByNeighborCount = DrawSwitch(jointCensusShowByNeighborCount, "Neighbor Count", "Cluster");
+        jointCensusShowByClusterSize = DrawSwitch(jointCensusShowByClusterSize, "Cluster Size", "Cluster");
 
-        if (jointCensusShowByNeighborCount)
+        if (jointCensusShowByClusterSize)
         {
+            var maxSize = Mathf.Max(1, JointCensusGizmos.MaxClusterSize);
+            jointCensusSizeIndex = Mathf.Clamp(jointCensusSizeIndex, 1, maxSize);
+
             EditorGUILayout.BeginHorizontal();
-            DrawStepperArrows(ref jointCensusNeighborIndex, 0, 5);
-            var label = jointCensusNeighborIndex >= 5 ? "5+ neighbors" : $"{jointCensusNeighborIndex} neighbor{(jointCensusNeighborIndex == 1 ? "" : "s")}";
-            GUILayout.Label(label, GUILayout.Width(110));
+            DrawStepperArrows(ref jointCensusSizeIndex, 1, maxSize);
+            var label = $"size {jointCensusSizeIndex} ({(jointCensusSizeIndex == 1 ? "isolated" : "clusters")})";
+            GUILayout.Label(new GUIContent(label, "Highlights every part belonging to ANY cluster with exactly this many parts"), GUILayout.Width(150));
             GUILayout.FlexibleSpace();
-            jointCensusNeighborColor = ColorFieldFixed(GUIContent.none, jointCensusNeighborColor);
+            jointCensusSizeColor = ColorFieldFixed(GUIContent.none, jointCensusSizeColor);
             EditorGUILayout.EndHorizontal();
-            jointCensusNeighborIndex = EditorGUILayout.IntSlider(jointCensusNeighborIndex, 0, 5);
+            jointCensusSizeIndex = EditorGUILayout.IntSlider(jointCensusSizeIndex, 1, maxSize);
         }
         else
         {
@@ -274,9 +277,9 @@ public class GameRenderWindow : EditorWindow
         SaveColor(K + "bakedJointColor",      bakedJointColor);
         EditorPrefs.SetBool(K + "drawJointCensus", drawJointCensus);
         EditorPrefs.SetBool(K + "drawJointCensusHull", drawJointCensusHull);
-        EditorPrefs.SetBool(K + "jointCensusShowByNeighborCount", jointCensusShowByNeighborCount);
-        EditorPrefs.SetInt(K + "jointCensusNeighborIndex", jointCensusNeighborIndex);
-        SaveColor(K + "jointCensusNeighborColor", jointCensusNeighborColor);
+        EditorPrefs.SetBool(K + "jointCensusShowByClusterSize", jointCensusShowByClusterSize);
+        EditorPrefs.SetInt(K + "jointCensusSizeIndex", jointCensusSizeIndex);
+        SaveColor(K + "jointCensusSizeColor", jointCensusSizeColor);
         EditorPrefs.SetInt(K + "jointCensusClusterIndex", jointCensusClusterIndex);
         SaveColor(K + "jointCensusClusterColor", jointCensusClusterColor);
     }

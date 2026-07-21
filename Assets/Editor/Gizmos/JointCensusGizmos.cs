@@ -33,6 +33,10 @@ public static class JointCensusGizmos
     public static int GetClusterSize(int clusterId) =>
         s_clusterSizes.TryGetValue(clusterId, out var size) ? size : 0;
 
+    // Largest cluster size present, for clamping the Cluster Size stepper — clusters vary
+    // wildly in size (a single stray part vs. the whole ship), unlike neighbor count's 0-5 cap.
+    public static int MaxClusterSize { get; private set; } = 0;
+
     // All part names (from the CSV, independent of whether they currently exist in the scene)
     // belonging to a given cluster — used for diagnostics when scene matching comes up short.
     static Dictionary<int, List<string>> s_clusterNames = new Dictionary<int, List<string>>();
@@ -51,6 +55,7 @@ public static class JointCensusGizmos
         s_clusterSizes.Clear();
         s_clusterNames.Clear();
         ClusterCount = 0;
+        MaxClusterSize = 0;
         LoadFailed = false;
         TryLoad();
     }
@@ -130,12 +135,14 @@ public static class JointCensusGizmos
             // so the picker never shows a cluster that has nothing left to highlight.
             var orderedRaw = rawClusters.Keys.OrderBy(k => rawClusters[k].Count).ToList();
             var rawToNew = new Dictionary<int, int>();
+            MaxClusterSize = 0;
             for (int newId = 0; newId < orderedRaw.Count; newId++)
             {
                 var rawId = orderedRaw[newId];
                 rawToNew[rawId] = newId;
                 s_clusterSizes[newId] = rawClusters[rawId].Count;
                 s_clusterNames[newId] = rawClusters[rawId];
+                if (rawClusters[rawId].Count > MaxClusterSize) MaxClusterSize = rawClusters[rawId].Count;
             }
 
             foreach (var (name, count, rawClusterId) in pending)
@@ -159,6 +166,7 @@ public static class JointCensusGizmos
             s_clusterSizes.Clear();
             s_clusterNames.Clear();
             ClusterCount = 0;
+            MaxClusterSize = 0;
         }
     }
 
@@ -192,13 +200,10 @@ public static class JointCensusGizmos
         return fields;
     }
 
-    // Neighbor count is clamped to [0,5] for bucket matching — 5 means "5 or more".
-    static bool MatchesSelectedNeighborCount(int count)
-    {
-        var selected = GameRenderWindow.jointCensusNeighborIndex;
-        var clamped = Mathf.Min(count, 5);
-        return clamped == selected;
-    }
+    // Exact match against the selected cluster size — unlike neighbor count there's no natural
+    // small cap, so no "N or more" bucketing; the stepper's range is clamped to MaxClusterSize.
+    static bool MatchesSelectedClusterSize(int clusterSize) =>
+        clusterSize == GameRenderWindow.jointCensusSizeIndex;
 
     static GameObject[] GetActiveRootObjects()
     {
@@ -335,7 +340,7 @@ public static class JointCensusGizmos
         TryLoad();
         if (s_parts.Count == 0) return;
 
-        bool clusterMode = !GameRenderWindow.jointCensusShowByNeighborCount;
+        bool clusterMode = !GameRenderWindow.jointCensusShowByClusterSize;
         int selectedCluster = GameRenderWindow.jointCensusClusterIndex;
 
         foreach (var root in GetActiveRootObjects())
@@ -355,8 +360,10 @@ public static class JointCensusGizmos
                 }
                 else
                 {
-                    if (!MatchesSelectedNeighborCount(info.NeighborCount)) continue;
-                    col = GameRenderWindow.jointCensusNeighborColor;
+                    // Highlights every part belonging to ANY cluster of the selected size,
+                    // not just one specific cluster — that's the point of this mode.
+                    if (!MatchesSelectedClusterSize(info.ClusterSize)) continue;
+                    col = GameRenderWindow.jointCensusSizeColor;
                 }
 
                 var mesh = meshFilter.sharedMesh;
