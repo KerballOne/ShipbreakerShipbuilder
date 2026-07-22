@@ -1506,7 +1506,9 @@ public class ComponentCopyWindow : EditorWindow
         {
             string prefix = $"m_AwardedCurrencies[{i}].";
             string currency = FindKeyContaining(fields, prefix + "m_CurrencyType@ref");
-            string currencyName = currency != null && fields.TryGetValue(currency, out var cv) ? cv?.ToString() : "Credits";
+            string currencyName = currency != null && fields.TryGetValue(currency, out var cv) ? cv?.ToString() : "Credits_CurrencyAsset";
+            if (currencyName != null && currencyName.EndsWith("_CurrencyAsset", System.StringComparison.Ordinal))
+                currencyName = currencyName.Substring(0, currencyName.Length - "_CurrencyAsset".Length);
 
             string minKey = FindKeyContaining(fields, prefix + "m_MinInitialValue");
             string maxKey = FindKeyContaining(fields, prefix + "m_MaxInitialValue");
@@ -1521,7 +1523,8 @@ public class ComponentCopyWindow : EditorWindow
             string value = min == max ? min : $"{min}-{max}";
             if (massBased) value += " (mass-based)";
 
-            rows.Add(($"Salvage value ({currencyName ?? "Credits"})", value));
+            string label = currencyName == "Credits" ? "Salvage value" : $"Salvage value ({currencyName})";
+            rows.Add((label, value));
         }
     }
 
