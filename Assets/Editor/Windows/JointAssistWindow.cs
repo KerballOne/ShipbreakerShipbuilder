@@ -2224,7 +2224,7 @@ public class JointAssistWindow : EditorWindow
     // objects after a snap moves them — the picked points/normals are derived fresh from each
     // object's CURRENT bounds, so this resets the stale indicators without touching any of the
     // snap's own position/rotation/scale math.
-    void AutoDetectFacesBetween(GameObject a, GameObject b)
+    void AutoDetectFacesBetween(GameObject a, GameObject b, bool resetAncestorDepth = true)
     {
         Bounds bA = GetBounds(a), bB = GetBounds(b);
         Vector3 dir = GetDirection(bA, bB); // direction from A toward B
@@ -2236,7 +2236,12 @@ public class JointAssistWindow : EditorWindow
 
         snapFaceA = new PickedFace { point = faceAPoint, normal =  dir, source = a, localNormal = a.transform.worldToLocalMatrix.MultiplyVector(dir) };
         snapFaceB = new PickedFace { point = faceBPoint, normal = -dir, source = b, localNormal = b.transform.worldToLocalMatrix.MultiplyVector(-dir) };
-        ResetAncestorDepth();
+        // Only reset the ▲▼ "Moving" ancestor selection when the picked objects themselves
+        // change (a genuine new auto-detect). The post-snap refresh call (resetAncestorDepth:
+        // false) re-derives stale face points/normals on the SAME pair of objects and must not
+        // clobber the user's manual ancestor-depth choice each time Snap is pressed.
+        if (resetAncestorDepth)
+            ResetAncestorDepth();
     }
 
     void ApplyFaceSnap(float overlap)
@@ -2377,7 +2382,7 @@ public class JointAssistWindow : EditorWindow
         // the fix only "catches up" one click late, producing the inward/outward drift.
         Physics.SyncTransforms();
         if (fA.source != null && fB.source != null)
-            AutoDetectFacesBetween(fA.source, fB.source);
+            AutoDetectFacesBetween(fA.source, fB.source, resetAncestorDepth: false);
         SceneView.RepaintAll();
 
         Repaint();

@@ -174,6 +174,24 @@ public class RadialDuplicateWindow : EditorWindow
                 }
                 if (PrefabUtility.IsPartOfAnyPrefab(copy))
                     PrefabUtility.UnpackPrefabInstance(copy, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+
+                // src may already have a live AddressableRendering preview child under it
+                // (a FakePrefabDisplay, hideFlags=DontSave) — Instantiate() deep-clones that
+                // along with everything else. Strip clones of it so the next view refresh
+                // doesn't end up with two preview children under this copy's AddressableLoader.
+                int removedFakes = 0;
+                foreach (var fake in copy.GetComponentsInChildren<FakePrefabDisplay>(true))
+                {
+                    if (fake == null) continue;
+                    Object.DestroyImmediate(fake.gameObject);
+                    removedFakes++;
+                }
+                if (removedFakes > 0)
+                    sb.AppendLine($"    Stripped {removedFakes} cloned preview child(ren)");
+
+                int removed = RemoveDuplicateNonAddressableChildren.RemoveDuplicatesUnder(copy.transform);
+                if (removed > 0)
+                    sb.AppendLine($"    Removed {removed} duplicate non-addressable child(ren)");
                 Undo.RegisterCreatedObjectUndo(copy, "Radial Duplicate");
                 created.Add(copy);
             }

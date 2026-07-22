@@ -24,6 +24,21 @@ public static class RemoveDuplicateNonAddressableChildren
     [MenuItem(ShipMenuPath, true, priority = 144)]
     static bool Validate() => Selection.gameObjects.Length > 0;
 
+    /// <summary>
+    /// Silently removes duplicate non-addressable GUID-named children under an already-unpacked
+    /// transform (no dialog, no prefab unpack/relink). Used by tools like Radial Duplicate that
+    /// clone subtrees containing addressable-preview children and need to clean up immediately.
+    /// Returns the number of objects removed.
+    /// </summary>
+    public static int RemoveDuplicatesUnder(Transform root)
+    {
+        var toDelete = new List<(Transform child, Transform parent)>();
+        CollectDuplicates(root, toDelete);
+        foreach (var (child, _) in toDelete)
+            Object.DestroyImmediate(child.gameObject);
+        return toDelete.Count;
+    }
+
     [MenuItem(GOMenuPath, false, 49)]
     [MenuItem(ShipMenuPath, false, priority = 144)]
     static void Execute()
