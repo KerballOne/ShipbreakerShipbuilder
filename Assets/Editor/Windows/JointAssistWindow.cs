@@ -8,7 +8,17 @@ using UnityEditor;
 
 public class JointAssistWindow : EditorWindow
 {
-    // Cut point state
+    // Cut point state — the assigned prefab can be EITHER a real baked local prefab (a real
+    // StructurePart baked in directly — instantiated as-is) OR a pure-addressable wrapper prefab
+    // (its root/descendant carries an AddressableLoader with an assetGUID — placement then creates
+    // a fresh AddressableLoader node with that same GUID, resolved by the game's own Addressables
+    // system at runtime, so the result is genuinely interactable in-game). A plain FakeStructurePart
+    // prefab (the earlier approach) is only an editor-preview stand-in for a real StructurePart
+    // living inside addressable content (see Assets/Scripts/EditorFakes/FakeStructurePart.cs +
+    // AddressableRendering.cs) — it renders visually but is never actually interactable, since
+    // there's no real StructurePart behind it. Assigning an addressable-wrapper prefab here (rather
+    // than typing a raw GUID) avoids that trap while still letting you pick by name in the object
+    // picker. Same underlying placement pattern as ImportGamePartWizard.DoPlaceLocal.
     GameObject cutPointPrefab;
     bool pickingCutPoint;
 
@@ -357,8 +367,12 @@ public class JointAssistWindow : EditorWindow
         EditorGUILayout.Space(8);
 
         EditorGUI.BeginChangeCheck();
-        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(
-            "Cut Point Prefab", cutPointPrefab, typeof(GameObject), false);
+        cutPointPrefab = (GameObject)EditorGUILayout.ObjectField(new GUIContent("Cut Point Prefab",
+            "A baked local prefab (a real StructurePart — placed as-is) OR a pure-addressable " +
+            "wrapper prefab (has an AddressableLoader with an assetGUID somewhere in it — placement " +
+            "creates a fresh AddressableLoader node with that same GUID, resolved by the game's own " +
+            "Addressables system at runtime, so it's genuinely interactable in-game)."),
+            cutPointPrefab, typeof(GameObject), false);
         if (EditorGUI.EndChangeCheck()) SavePref(CutPrefKey, cutPointPrefab);
 
         using (new EditorGUI.DisabledScope(cutPointPrefab == null))
@@ -898,20 +912,7 @@ public class JointAssistWindow : EditorWindow
         }
 
         if (anyCompat)
-        {
-            var asyncNames = sel.Where(go => {
-                for (var t = go.transform; t != null; t = t.parent)
-                    if (t.TryGetComponent<BBI.Unity.Game.AddressableLoader>(out _)) return true;
-                return false;
-            }).Select(go => go.name).ToList();
-
-            if (asyncNames.Count > 0)
-            {
-                var asyncLines = string.Join("\n", asyncNames.Select(n => $"{n} is addressable (async)"));
-                return new CompatResult { state = CompatResult.State.Fail, message = $"SP_Mat: Compatible\n{sides}\n{asyncLines}" };
-            }
             return new CompatResult { state = CompatResult.State.Pass, message = $"SP_Mat: Compatible\n{sides}\nWill Auto-Joint" };
-        }
         if (anyIncompat && !anyUnknown)
             return new CompatResult { state = CompatResult.State.Fail, message = $"SP_Mat: Incompatible — will NOT auto-joint\n{sides}" };
         return new CompatResult { state = CompatResult.State.Warn,
@@ -1748,8 +1749,7 @@ public class JointAssistWindow : EditorWindow
         string msg = message
             .Replace("Compatible",               "<color=#44cc44>Compatible</color>")
             .Replace("Will Auto-Joint",          "<color=#44cc44>Will Auto-Joint</color>")
-            .Replace("covers all selected parts","<color=#44cc44>covers all selected parts</color>")
-            .Replace("is addressable (async)",   "<color=#cc4444>is addressable (async)</color>");
+            .Replace("covers all selected parts","<color=#44cc44>covers all selected parts</color>");
         EditorGUILayout.LabelField(msg, style);
         EditorGUILayout.EndHorizontal();
     }
@@ -1993,11 +1993,36 @@ public class JointAssistWindow : EditorWindow
                 if (hit)
                 {
                     Transform parent = ResolveParent(picked, "");
-                    var inst = (GameObject)PrefabUtility.InstantiatePrefab(cutPointPrefab, parent);
+                    GameObject inst;
+
+                    // If the assigned prefab is a pure-addressable wrapper (an AddressableLoader
+                    // living somewhere in it, e.g. exported by ImportGamePartWizard's "pure
+                    // addressable" placement), don't instantiate the wrapper prefab itself — create
+                    // a fresh AddressableLoader node with the SAME assetGUID instead, exactly like
+                    // ImportGamePartWizard.DoPlaceLocal's addressable branch. This is what makes the
+                    // result genuinely interactable in-game (the game's own Addressables system
+                    // resolves assetGUID into the real prefab at runtime) rather than a
+                    // FakeStructurePart-style visual stand-in with no real StructurePart behind it.
+                    var existingLoader = cutPointPrefab.GetComponentInChildren<BBI.Unity.Game.AddressableLoader>(true);
+                    if (existingLoader != null && !string.IsNullOrEmpty(existingLoader.assetGUID))
+                    {
+                        inst = new GameObject(cutPointPrefab.name);
+                        Undo.RegisterCreatedObjectUndo(inst, "Place Cut Point");
+                        inst.transform.SetParent(parent, false);
+                        var loader = inst.AddComponent<BBI.Unity.Game.AddressableLoader>();
+                        loader.assetGUID = existingLoader.assetGUID;
+                        loader.childPath = existingLoader.childPath;
+                    }
+                    else
+                    {
+                        // A real baked local prefab — instantiate as-is, same as before.
+                        inst = (GameObject)PrefabUtility.InstantiatePrefab(cutPointPrefab, parent);
+                        Undo.RegisterCreatedObjectUndo(inst, "Place Cut Point");
+                    }
+
                     inst.transform.localScale = Vector3.one;
                     inst.transform.position   = hitPoint;
                     inst.transform.rotation   = CutPointRotation(hitNormal);
-                    Undo.RegisterCreatedObjectUndo(inst, "Place Cut Point");
                     Selection.activeGameObject = inst;
                     statusMessage = $"Placed Cut Point at {hitPoint:F3}.";
                     statusType    = MessageType.Info;

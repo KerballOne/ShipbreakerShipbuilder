@@ -539,8 +539,6 @@ The most complex tool in the mod. Automates the placement of joint markers betwe
 4. **Check compatibility:** The tool shows a compatibility summary — whether the two parts' `JointSetupAsset` types are able to joint at runtime.
 5. **Place joints:** Click Auto-Place InvisibleJoint to drop a joint marker that bridges the two flush faces. The tool deduplicates overlapping joints automatically.
 
-**FSP/SP caveat:** The tool handles both `StructurePart` (SP) components on baked parts and `FakeStructurePart` (FSP) components on async-loaded addressable parts. Both paths are supported. Parts with FSPs are flagged in the compatibility panel with an `(addressable)` label.
-
 **InvisibleJoint requirements:**
 - Must be a solid collider (`Is Trigger: false`)
 - Scale must be `(1, 1, 1)` — larger scales physically push parts apart before joints can form
