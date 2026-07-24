@@ -382,7 +382,7 @@ Opens a searchable window for importing game parts into your ship. Search by par
 - Animated doors and airlocks — baking strips the AddressableSOLoader and the animations stop working
 - Parts that load child content via their own `AddressableSOLoader` at runtime
 
-**Real example — Rocinante nozzle:** The Epstein drive nozzle was built as a custom FBX mesh and imported via the wizard using the Bake path, then scaled to fit. Lock In Rescale was required before building because the game reads joint/mass data from raw mesh vertices, not transform scale.
+**Real example — a test ship's engine nozzle:** The torch drive nozzle was built as a custom FBX mesh and imported via the wizard using the Bake path, then scaled to fit. Lock In Rescale was required before building because the game reads joint/mass data from raw mesh vertices, not transform scale.
 
 **Real example — hull panels:** Mackerel wall panels are baked so they can be repositioned and rescaled to fit custom hull dimensions. The bake process auto-recenters the geometry on the prefab's root origin, so panels appear correctly at (0,0,0) in prefab edit mode.
 
@@ -517,7 +517,7 @@ Bakes the current non-unit transform scale into the mesh geometry and resets the
 3. Restores child world positions (which causes their `localPosition` to recompute to the correct scaled values automatically)
 4. Writes the scale into each `MeshFilter.sharedMesh` via vertex transformation
 
-**Real example — Rocinante hull panels:** A Mackerel wall panel was baked and then scaled to 1.5× to fit the Rocinante's wider hull section. After scaling, Lock In Rescale was applied. The panel's joint and mass now correctly reflect the larger geometry.
+**Real example — a test ship's hull panels:** A Mackerel wall panel was baked and then scaled to 1.5× to fit the test ship's wider hull section. After scaling, Lock In Rescale was applied. The panel's joint and mass now correctly reflect the larger geometry.
 
 #### `Shipbuilder / Lock In Rescale — All Rescaled`
 
@@ -553,7 +553,7 @@ The most complex tool in the mod. Automates the placement of joint markers betwe
 3. `AddressableLoader.assetGUID` — for game addressable parts, looks up the prefab GUID in the enriched data
 4. Prefab name / asset GUID fallback — matches GO or prefab name against `known_assets_enriched.json` part names
 
-The JSA compatibility table (`jsa_compat.json`) is populated by **PartInfoLogger** at runtime: on gameplay start, it reflects the complete `JointabilityAsset.m_AllPairingAssets` table (351 pairs, 55 JSA names as of the Rocinante build). SP_Mat filenames have decoration suffixes that do not appear in JSA names — the longest-prefix match strips these correctly.
+The JSA compatibility table (`jsa_compat.json`) is populated by **PartInfoLogger** at runtime: on gameplay start, it reflects the complete `JointabilityAsset.m_AllPairingAssets` table (351 pairs, 55 JSA names as of this writing). SP_Mat filenames have decoration suffixes that do not appear in JSA names — the longest-prefix match strips these correctly.
 
 #### Joint Compatibility Check (JCC)
 
@@ -585,7 +585,7 @@ The scene view highlights this same closest pair: green highlights are a real co
 
 Duplicates selected GameObjects radially around a chosen axis (X, Y, or Z) or a reference axis defined by another GO. Enter the count and angle, optionally rotate room volumes proportionally.
 
-**When to use:** Creating cylindrical structures like the Rocinante's octagonal hull rings — place one segment, then radially duplicate 8× at 45° around the ship's long axis.
+**When to use:** Creating cylindrical structures like a test ship's octagonal hull rings — place one segment, then radially duplicate 8× at 45° around the ship's long axis.
 
 **Caveat — double children after duplication:** If both a parent and one of its children are selected when you run Radial Duplicate, the child will be duplicated twice per copy (once as part of the parent's Instantiate, once on its own). The tool filters to topmost-only roots automatically, but this can still happen if you manually multi-select a parent and a descendant. If you see double GUID-named children after duplicating, use **Remove Duplicate Non-Addressable Children** (below) to clean them up.
 
@@ -620,7 +620,7 @@ Auto-generates radial collider wedge segments on a prefab for cylindrical geomet
 
 **Why this exists:** Convex colliders on a full cylinder fill the hollow interior. By splitting the cylinder into wedge-shaped segments and making each one convex, the correct hollow shape is preserved in the physics system.
 
-**Real example — Rocinante nozzle:** The nozzle ring was exported as a single mesh but its collider was split into 8× 45° wedge children using Segment Meshes. Each wedge's convex collider covers the outer wall without filling the interior.
+**Real example — a test ship's nozzle:** The nozzle ring was exported as a single mesh but its collider was split into 8× 45° wedge children using Segment Meshes. Each wedge's convex collider covers the outer wall without filling the interior.
 
 ---
 
@@ -648,15 +648,15 @@ Locks ProBuilder mesh vertices to the surface of a target part, then moves those
 
 #### `Shipbuilder / Render Overlays`
 
-Opens a configurable overlay window that draws debug gizmos in the scene view:
+Opens a configurable overlay window that draws debug gizmos in the scene view. Each overlay's color is configurable in the window (defaults shown are just a starting point):
 
-| Overlay | Color | What it shows |
-|---|---|---|
-| Room SubVolumes | Green | Include volumes (pressurized space) |
-| Room SubVolumes (Exclude) | Red | Exclude volumes (carve-outs) |
-| Room Openings | Red arrows | Flow axis direction on each opening |
-| Joints | Color-coded by type | Joint marker positions |
-| Joint collision | Outline | Collider bounds of each joint |
+| Overlay | What it shows |
+|---|---|
+| Room SubVolumes | Include volumes (pressurized space) |
+| Room SubVolumes (Exclude) | Exclude volumes (carve-outs) |
+| Room Openings | Flow axis direction on each opening (shown as arrows) |
+| Joints | Joint marker positions, color-coded by type |
+| Joint collision | Collider bounds of each joint (shown as an outline) |
 
 **When to use:** When diagnosing pressurisation issues, room overlap problems, or unexpected de-pressurisation on ship load. The overlays make the invisible room volumes visible without having to click into each prefab.
 
@@ -905,14 +905,14 @@ Before running `Shipbuilder / ⛭ Build`, confirm:
 
 Defines how the room behaves. Set the room type via the `Dynamic Room Container Asset` field using the GUIDs in [Section 4.3](#43-room-type-guids).
 
-#### RoomSubVolumeDefinition (green boxes in overlay)
+#### RoomSubVolumeDefinition (shown as boxes in the overlay)
 
 Defines the pressurised volume.
 - At least one `Include` mode volume is required
 - `Exclude` mode volumes carve out space from Include volumes
 - The `Center` field is a world-space offset applied after the parent Transform — edit it in the Inspector
 
-#### RoomOpeningDefinition (red boxes in overlay)
+#### RoomOpeningDefinition (shown as boxes in the overlay)
 
 Defines how volumes connect. The `Type` field:
 
@@ -922,7 +922,7 @@ Defines how volumes connect. The `Type` field:
 | 1 | Portal | Door opening. Game hatch prefabs already include their own portal, so you do not need to add one manually. |
 | 2 | Overlap | **Required** wherever two different rooms' SubVolume boxes intersect in 3D space |
 
-The red arrows show the **flow axis** — which direction air flows when the opening is breached.
+The overlay's arrows show the **flow axis** — which direction air flows when the opening is breached.
 
 **Overlap caveat:** Extra or misplaced Overlap volumes cause instant room de-pressurisation when loading. The room volume debug overlay (`Shipbuilder / Render Overlays`) makes overlaps visible.
 
@@ -949,7 +949,7 @@ Rooms must live inside an **addressable prefab with a ModuleDefinition** compone
 
 The game's `RoomProbeInitializeSystem` assigns each `RoomProbe` to a room at runtime. The probe must land cleanly inside a `RoomSubVolumeDefinition` Include volume — not inside an Exclude volume, and not inside a `RoomOpeningDefinition` Overlap volume straddling a boundary.
 
-**Real issue discovered during the Rocinante build:** Every baked `PRF_Panel_4xBx4` has a `RoomOpeningDefinition` with `Type = Overlap` and a default Size of `(3, 1.25, 3)`. When a wall panel is positioned adjacent to an atmosphere regulator, that 3×3 overlap volume can cover the regulator's probe position — preventing the probe from being claimed by the room, which breaks the interaction button entirely.
+**Real issue discovered while building a test ship:** Every baked `PRF_Panel_4xBx4` has a `RoomOpeningDefinition` with `Type = Overlap` and a default Size of `(3, 1.25, 3)`. When a wall panel is positioned adjacent to an atmosphere regulator, that 3×3 overlap volume can cover the regulator's probe position — preventing the probe from being claimed by the room, which breaks the interaction button entirely.
 
 **Fix:** Shrink the Overlap volume on the offending panel (a Size of approximately `(1, 0.2, 1)` is enough to fulfil the overlap requirement without swallowing the probe).
 
@@ -1154,7 +1154,7 @@ Source: `aa/catalog.json` binary decode (authoritative as of 2026-06-18).
 
 ## 8. Caveats & Gotchas
 
-These are issues discovered during real ship building (primarily the Rocinante mod) that are non-obvious and not directly surfaced by any tool.
+These are issues discovered during real ship building (primarily a test ship mod) that are non-obvious and not directly surfaced by any tool.
 
 **Convex colliders fill hollow meshes**
 A convex `MeshCollider` on a ring or cylinder fills the interior with an implicit convex hull — the player cannot enter the inside. Use the **Segment Meshes** tool to split the mesh into wedge-shaped children, each of which is individually convex. The root collider stays enabled (required for the game to register the part on load) but the wedge children handle actual physics.

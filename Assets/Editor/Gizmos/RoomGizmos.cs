@@ -61,7 +61,7 @@ public static class RoomGizmos
                 {
                     var origin = baseM.MultiplyPoint3x4(Vector3.zero);
                     Handles.color = GameRenderWindow.roomOverlapFlowColor;
-                    var fwd = rod.FlowAxis == 1 ? Vector3.up : Vector3.forward;
+                    var fwd = rod.FlowAxis == 0 ? Vector3.right : rod.FlowAxis == 1 ? Vector3.up : Vector3.forward;
                     DrawArrow.ForHandles(origin, fwd);
                     DrawArrow.ForHandles(origin, -fwd);
                 }
