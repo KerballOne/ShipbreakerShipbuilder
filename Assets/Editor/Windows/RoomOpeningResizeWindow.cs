@@ -18,7 +18,6 @@ public class RoomOpeningResizeWindow : EditorWindow
 
     List<Entry> m_Entries = new List<Entry>();
     float m_Scale = 0.95f;
-    bool m_CenterOnParent = true;
 
     [MenuItem("Shipbuilder/Resize Room Openings To Parent Mesh", priority = 184)]
     static void Open() => GetWindow<RoomOpeningResizeWindow>("Resize Room Openings");
@@ -100,14 +99,23 @@ public class RoomOpeningResizeWindow : EditorWindow
         }
 
         EditorGUILayout.Space(6);
-        EditorGUILayout.LabelField("Size Scale (0-1)", EditorStyles.miniBoldLabel);
-        m_Scale = Mathf.Clamp01(EditorGUILayout.FloatField(m_Scale));
-
-        m_CenterOnParent = EditorGUILayout.ToggleLeft("Center on parent (Position 0,0,0)", m_CenterOnParent);
+        m_Scale = Mathf.Clamp01(EditorGUILayout.FloatField("Size Scale (0-1)", m_Scale));
 
         EditorGUILayout.Space(6);
         if (GUILayout.Button("Run"))
             Apply();
+
+        EditorGUILayout.Space(2);
+        if (GUILayout.Button("Select Only Room Opening GameObjects"))
+            SelectEntryGameObjects();
+    }
+
+    void SelectEntryGameObjects()
+    {
+        var gos = new GameObject[m_Entries.Count];
+        for (int i = 0; i < m_Entries.Count; i++)
+            gos[i] = m_Entries[i].rod.gameObject;
+        Selection.objects = gos;
     }
 
     void Apply()
@@ -130,12 +138,6 @@ public class RoomOpeningResizeWindow : EditorWindow
                 Undo.RecordObject(e.rod, "Resize Room Opening");
                 sizeProp.vector3Value = newSize;
                 so.ApplyModifiedProperties();
-            }
-
-            if (m_CenterOnParent && e.rod.transform.localPosition != Vector3.zero)
-            {
-                Undo.RecordObject(e.rod.transform, "Resize Room Opening");
-                e.rod.transform.localPosition = Vector3.zero;
             }
         }
 
