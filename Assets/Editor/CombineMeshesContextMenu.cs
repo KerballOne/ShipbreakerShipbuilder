@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BBI.Unity.Game;
 using UnityEditor;
 using UnityEngine;
 
@@ -16,6 +17,13 @@ using UnityEngine;
 /// One submesh per unique source material is preserved (mergeSubMeshes: false), so the combined
 /// object keeps multi-material rendering via multiple MeshRenderer materials in the same slot
 /// order as submeshes.
+///
+/// Also adds a convex MeshCollider referencing the new mesh (game physics/salvage require convex
+/// colliders — see AddressableBaker), and copies StructurePart from the first selected source
+/// object if present, so the combined object stays independently salvageable. Unlike
+/// AddressableBaker (which crosses a runtime-bundle boundary and must null+GUID-resolve the SP_Mat
+/// reference), this source object lives in-project, so EditorUtility.CopySerialized carries
+/// m_StructurePartAsset over as a normal live reference.
 /// </summary>
 public static class CombineMeshesContextMenu
 {
@@ -135,6 +143,26 @@ public static class CombineMeshesContextMenu
         var newRenderer = combinedGo.AddComponent<MeshRenderer>();
         newRenderer.sharedMaterials = materials.ToArray();
         newMf.sharedMesh = finalMesh;
+
+        var newMc = combinedGo.AddComponent<MeshCollider>();
+        newMc.sharedMesh = finalMesh;
+        newMc.convex = true;
+
+        // StructurePart isn't derivable from nothing (its SP_Mat reference has no sensible
+        // default) — copy it from the first source object, matching that object's material/mass.
+        if (originTransform.TryGetComponent<StructurePart>(out var srcSp))
+        {
+            var newSp = combinedGo.AddComponent<StructurePart>();
+            EditorUtility.CopySerialized(srcSp, newSp);
+        }
+
+        // EntityBlueprintComponent is required alongside StructurePart for the part to register
+        // as a salvageable entity (mass/label/salvage destination) — see AddressableBaker.
+        if (originTransform.TryGetComponent<EntityBlueprintComponent>(out var srcEbc))
+        {
+            var newEbc = combinedGo.AddComponent<EntityBlueprintComponent>();
+            EditorUtility.CopySerialized(srcEbc, newEbc);
+        }
 
         foreach (var mf in meshFilters)
         {
