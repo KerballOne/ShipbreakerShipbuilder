@@ -140,6 +140,7 @@ public class BuildContent
                 var shipName = char.ToUpper(shipNameRaw[0]) + shipNameRaw.Substring(1);
                 Debug.Log($"Processing root bundle for ship: {shipName} ({rootBundle})");
                 MoveShipBundle(shipName, mainCatalogPath, rootBundle, manifest);
+                SplitBundleForRepo(shipName, rootBundle);
             }
 
             // Move each custom bundle
@@ -151,6 +152,7 @@ public class BuildContent
                 Debug.Log("Current bundlePath is: " + bundlePath);
 
                 MoveShipBundle(shipName, Path.Combine(shipDirectory, shipName + ".json"), bundlePath, manifest);
+                SplitBundleForRepo(shipName, bundlePath);
             }
             Debug.Log("Moving ship bundles completed");
 
@@ -248,6 +250,49 @@ public class BuildContent
 
         Debug.Log($"{shipName} - Writing manifest");
         File.WriteAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, "manifest.json"), JsonConvert.SerializeObject(manifest));
+    }
+
+    // GitHub blocks files over 100MB, so bundles are committed as chunks under BundleParts/
+    // instead of the raw .bundle (which is gitignored). No reassembly step exists — this repo
+    // is only ever built locally, chunks are for backup/versioning on GitHub only.
+    const long BUNDLE_CHUNK_SIZE = 80L * 1024 * 1024;
+
+    private static void SplitBundleForRepo(string shipName, string bundlePath)
+    {
+        var partsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BundleParts", shipName));
+        if (Directory.Exists(partsDir))
+        {
+            Directory.Delete(partsDir, true);
+        }
+        Directory.CreateDirectory(partsDir);
+
+        var bundleFileName = Path.GetFileName(bundlePath);
+        byte[] buffer = new byte[BUNDLE_CHUNK_SIZE];
+        int partIndex = 0;
+        using (var input = File.OpenRead(bundlePath))
+        {
+            int bytesRead;
+            while ((bytesRead = ReadFully(input, buffer)) > 0)
+            {
+                var partPath = Path.Combine(partsDir, $"{bundleFileName}.part{partIndex}");
+                File.WriteAllBytes(partPath, bytesRead == buffer.Length ? buffer : buffer.Take(bytesRead).ToArray());
+                partIndex++;
+            }
+        }
+
+        Debug.Log($"{shipName} - Split bundle into {partIndex} chunk(s) under {partsDir}");
+    }
+
+    private static int ReadFully(Stream input, byte[] buffer)
+    {
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = input.Read(buffer, totalRead, buffer.Length - totalRead);
+            if (read == 0) break;
+            totalRead += read;
+        }
+        return totalRead;
     }
 
     static void ContinueBuildAfterAutoFix()

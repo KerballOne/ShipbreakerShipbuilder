@@ -96,3 +96,7 @@ nul
 # Python cache
 __pycache__/
 *.pyc
+
+# Built ship bundles (raw output, can exceed GitHub's 100MB limit) —
+# tracked instead as split chunks under BundleParts/, see BuildContent.cs
+/BuiltShipContent/
