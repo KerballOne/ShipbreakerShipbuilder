@@ -88,12 +88,12 @@ COLLAR_INNER_R = 1.70 * SCALE
 COLLAR_WALL    = 0.10 * SCALE
 COLLAR_TAPER   = 0.45 * SCALE  # how much the collar narrows at the opening (exit) end
 
-EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell.fbx"
-EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_bell_col.fbx"
-EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Models/rocinante_engine_nozzle.fbx"
+EXPORT_OUTER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Tachi/Models/rocinante_engine_bell.fbx"
+EXPORT_OUTER_COL = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Tachi/Models/rocinante_engine_bell_col.fbx"
+EXPORT_INNER     = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Tachi/Models/rocinante_engine_nozzle.fbx"
 
 # Set to a source image path to generate PBR textures; leave blank to skip
-SOURCE_TEXTURE   = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Rocinante/Textures/EpsDrive.png"
+SOURCE_TEXTURE   = "C:/Users/user/source/repos/ShipbreakerShipbuilder/Assets/_CustomShips/Tachi/Textures/EpsDrive.png"
 
 # Texture generation parameters
 TEX_NORMAL_STRENGTH    = 6.0   # Sobel normal map intensity
