@@ -98,5 +98,5 @@ __pycache__/
 *.pyc
 
 # Built ship bundles (raw output, can exceed GitHub's 100MB limit) —
-# tracked instead as split chunks under BundleParts/, see BuildContent.cs
+# tracked instead as a 7z archive (split into volumes if needed) under BundleParts/, see BuildContent.cs
 /BuiltShipContent/

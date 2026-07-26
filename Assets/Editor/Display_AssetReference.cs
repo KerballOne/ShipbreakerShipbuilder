@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.UIElements;
@@ -24,6 +25,7 @@ public class AddressableAssetPropertyDrawerOverride : PropertyDrawer
     public static bool shouldDisableOffset = false;
 
     UnityEngine.Object previewObj;
+    bool previewLoadAttempted = false;
 
     static float previewImageHeight = 0;
     Texture2D previewImage;
@@ -70,22 +72,31 @@ public class AddressableAssetPropertyDrawerOverride : PropertyDrawer
 
         if (knownPath != "")
         {
-            if (previewObj == null)
+            if (refPath == "Vanilla Asset")
             {
-                if (refPath == "Vanilla Asset")
+                if (previewObj == null && !previewLoadAttempted)
                 {
-                    Addressables.LoadAssetAsync<UnityEngine.Object>(new AssetReference(property.FindPropertyRelative("m_AssetGUID").stringValue)).Completed += res =>
+                    previewLoadAttempted = true;
+
+                    var guid = property.FindPropertyRelative("m_AssetGUID").stringValue;
+                    if (Addressables.ResourceLocators.Any(locator => locator.Locate(guid, typeof(UnityEngine.Object), out _)))
                     {
-                        previewObj = res.Result;
-                        previewImage = AssetPreview.GetAssetPreview(res.Result);
-                        RepaintInspector(property.serializedObject);
-                    };
+                        Addressables.LoadAssetAsync<UnityEngine.Object>(new AssetReference(guid)).Completed += res =>
+                        {
+                            previewObj = res.Result;
+                            previewImage = AssetPreview.GetAssetPreview(res.Result);
+                            RepaintInspector(property.serializedObject);
+                        };
+                    }
                 }
-                else
-                {
-                    previewObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AssetDatabase.GUIDToAssetPath(property.FindPropertyRelative("m_AssetGUID").stringValue));
-                    previewImage = AssetPreview.GetAssetPreview(previewObj);
-                }
+            }
+            else if (previewImage == null)
+            {
+                // Don't gate this on previewLoadAttempted: AssetPreview.GetAssetPreview can
+                // return null while Unity is still generating the preview asynchronously,
+                // so keep retrying on repaint until it succeeds.
+                previewObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(AssetDatabase.GUIDToAssetPath(property.FindPropertyRelative("m_AssetGUID").stringValue));
+                previewImage = AssetPreview.GetAssetPreview(previewObj);
             }
 
             // Path, clickable to load the asset

@@ -140,7 +140,7 @@ public class BuildContent
                 var shipName = char.ToUpper(shipNameRaw[0]) + shipNameRaw.Substring(1);
                 Debug.Log($"Processing root bundle for ship: {shipName} ({rootBundle})");
                 MoveShipBundle(shipName, mainCatalogPath, rootBundle, manifest);
-                SplitBundleForRepo(shipName, rootBundle);
+                SplitBundleForRepo(shipName);
             }
 
             // Move each custom bundle
@@ -152,7 +152,7 @@ public class BuildContent
                 Debug.Log("Current bundlePath is: " + bundlePath);
 
                 MoveShipBundle(shipName, Path.Combine(shipDirectory, shipName + ".json"), bundlePath, manifest);
-                SplitBundleForRepo(shipName, bundlePath);
+                SplitBundleForRepo(shipName);
             }
             Debug.Log("Moving ship bundles completed");
 
@@ -252,13 +252,40 @@ public class BuildContent
         File.WriteAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, "manifest.json"), JsonConvert.SerializeObject(manifest));
     }
 
-    // GitHub blocks files over 100MB, so bundles are committed as chunks under BundleParts/
-    // instead of the raw .bundle (which is gitignored). No reassembly step exists — this repo
-    // is only ever built locally, chunks are for backup/versioning on GitHub only.
-    const long BUNDLE_CHUNK_SIZE = 80L * 1024 * 1024;
+    // GitHub blocks files over 100MB, so bundles are committed as a 7z archive under BundleParts/
+    // instead of the raw .bundle (which is gitignored). The archive includes catalog.json and
+    // manifest.json alongside the bundle so the ship folder can be reconstructed by extracting
+    // with 7-Zip (or any tool that understands .7z / split volumes, e.g. WinZip, PeaZip).
+    const long SPLIT_THRESHOLD_BYTES = 99L * 1024 * 1024;
+    const long VOLUME_SIZE_BYTES = 99L * 1024 * 1024;
 
-    private static void SplitBundleForRepo(string shipName, string bundlePath)
+    private static readonly string[] SevenZipCandidates =
     {
+        @"C:\Program Files\7-Zip\7z.exe",
+        @"C:\Program Files (x86)\7-Zip\7z.exe",
+    };
+
+    private static void SplitBundleForRepo(string shipName)
+    {
+        var modPath = Path.Combine("BepInEx", "plugins", "ModdedShipLoader", "Ships");
+        var shipFolder = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, $"{shipName}.{Settings.buildSettings.Author}");
+        var bundlePath = Path.Combine(shipFolder, shipName + "_assets_all.bundle");
+        var catalogPath = Path.Combine(shipFolder, "catalog.json");
+        var manifestPath = Path.Combine(shipFolder, "manifest.json");
+
+        if (!File.Exists(bundlePath))
+        {
+            Debug.LogError($"{shipName} - Expected deployed bundle at {bundlePath}, skipping repo archive.");
+            return;
+        }
+
+        var sevenZip = FindSevenZip();
+        if (sevenZip == null)
+        {
+            Debug.LogError($"{shipName} - Could not find 7z.exe (checked PATH and standard install locations). Skipping repo archive.");
+            return;
+        }
+
         var partsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BundleParts", shipName));
         if (Directory.Exists(partsDir))
         {
@@ -266,33 +293,90 @@ public class BuildContent
         }
         Directory.CreateDirectory(partsDir);
 
-        var bundleFileName = Path.GetFileName(bundlePath);
-        byte[] buffer = new byte[BUNDLE_CHUNK_SIZE];
-        int partIndex = 0;
-        using (var input = File.OpenRead(bundlePath))
+        var bundleSize = new FileInfo(bundlePath).Length;
+
+        if (bundleSize <= SPLIT_THRESHOLD_BYTES)
         {
-            int bytesRead;
-            while ((bytesRead = ReadFully(input, buffer)) > 0)
-            {
-                var partPath = Path.Combine(partsDir, $"{bundleFileName}.part{partIndex}");
-                File.WriteAllBytes(partPath, bytesRead == buffer.Length ? buffer : buffer.Take(bytesRead).ToArray());
-                partIndex++;
-            }
+            // Under threshold: no archive needed, just copy the loose files.
+            File.Copy(bundlePath, Path.Combine(partsDir, Path.GetFileName(bundlePath)), true);
+            File.Copy(catalogPath, Path.Combine(partsDir, Path.GetFileName(catalogPath)), true);
+            File.Copy(manifestPath, Path.Combine(partsDir, Path.GetFileName(manifestPath)), true);
+            Debug.Log($"{shipName} - Bundle is {bundleSize / (1024 * 1024)} MB, copied loose (no archive needed) to {partsDir}");
+            return;
         }
 
-        Debug.Log($"{shipName} - Split bundle into {partIndex} chunk(s) under {partsDir}");
+        // Over threshold: split into 7z volumes (7z -v produces {archive}.7z.001, .002, ...)
+        // -mx=0: store only, no compression — bundle contents are already compressed and
+        // large ships otherwise take a long time to archive for little size benefit.
+        var archivePath = Path.Combine(partsDir, $"{shipName}.7z");
+        var inputFiles = $"\"{bundlePath}\" \"{catalogPath}\" \"{manifestPath}\"";
+        var args = $"a -mx=0 -v{VOLUME_SIZE_BYTES}b \"{archivePath}\" {inputFiles}";
+
+        if (!RunSevenZip(sevenZip, args, out string error))
+        {
+            Debug.LogError($"{shipName} - 7z archive creation failed: {error}");
+            return;
+        }
+
+        var volumeCount = Directory.GetFiles(partsDir, $"{shipName}.7z.*").Length;
+        Debug.Log($"{shipName} - Bundle was {bundleSize / (1024 * 1024)} MB, split into {volumeCount} volume(s) under {partsDir}");
     }
 
-    private static int ReadFully(Stream input, byte[] buffer)
+    private static string FindSevenZip()
     {
-        int totalRead = 0;
-        while (totalRead < buffer.Length)
+        foreach (var candidate in SevenZipCandidates)
         {
-            int read = input.Read(buffer, totalRead, buffer.Length - totalRead);
-            if (read == 0) break;
-            totalRead += read;
+            if (File.Exists(candidate))
+                return candidate;
         }
-        return totalRead;
+
+        // Fall back to PATH
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("where", "7z.exe")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using (var proc = System.Diagnostics.Process.Start(psi))
+            {
+                var output = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit();
+                if (proc.ExitCode == 0 && !string.IsNullOrEmpty(output))
+                    return output.Split('\n')[0].Trim();
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    private static bool RunSevenZip(string sevenZipPath, string args, out string error)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(sevenZipPath, args)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using (var proc = System.Diagnostics.Process.Start(psi))
+        {
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+
+            if (proc.ExitCode != 0)
+            {
+                error = string.IsNullOrEmpty(stderr) ? stdout : stderr;
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
     }
 
     static void ContinueBuildAfterAutoFix()
