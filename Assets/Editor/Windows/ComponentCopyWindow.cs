@@ -1391,7 +1391,7 @@ public class ComponentCopyWindow : EditorWindow
             AddRow(rows, fields, "Cut grade/stage", "Data.m_CuttingTargetableAsset.Data.m_PowerRating");
             AddRow(rows, fields, "Mass density", "Data.m_IRigidbodyAsset.Data.m_DensityOrMass");
             AddRow(rows, fields, "Joint setup", "Data.m_JointSetupAsset@ref", "Data.m_JointSetupAsset.name");
-            AddRow(rows, fields, "Room sealing", "Data.m_JointSetupAsset.m_CanSealRoom", "Data.m_JointSetupAsset.CanSealRoom");
+            AddRoomSealingRow(rows, fields);
             AddRow(rows, fields, "Vaporize on cut", "Data.m_ShatterableComponentAsset.Data.m_VaporizationOverrideAsset@ref");
             AddRow(rows, fields, "Yank lock on start", "Data.m_BreakableJointAsset.Data.m_YankLockOnStart");
             AddFlagContainsRow(rows, fields, "Breakable by grapple", "Data.m_BreakableJointAsset.Data.m_BreakableBy", "Grapple");
@@ -1454,6 +1454,22 @@ public class ComponentCopyWindow : EditorWindow
             if (key.EndsWith(suffix, System.StringComparison.Ordinal))
                 return key;
         return null;
+    }
+
+    // Runtime CanSeal is JSA.CanSealRoom OR'd with "does this SP's EntityBlueprint carry a
+    // PanelSealingAsset component data asset" (PanelSealingAsset.SetComponentData force-sets
+    // CanSeal = true unconditionally) — see BBI.Unity.Game StructurePart.InitializeComponents
+    // and PanelSealingAsset in bbi_full.decompiled.cs. The JSA flag alone (old "Room sealing"
+    // row) under-reports: SP_AirlockAerobridge has m_CanSealRoom = False but seals in-game
+    // because it carries a Default_PanelSealingAsset component data asset.
+    static void AddRoomSealingRow(List<(string, string)> rows, Dictionary<string, object> fields)
+    {
+        bool jsaCanSeal = fields.TryGetValue("Data.m_JointSetupAsset.m_CanSealRoom", out var v1) && v1?.ToString() == "True"
+            || fields.TryGetValue("Data.m_JointSetupAsset.CanSealRoom", out var v2) && v2?.ToString() == "True";
+        bool hasPanelSealingAsset = fields.Any(kv => kv.Key.EndsWith("@type", System.StringComparison.Ordinal)
+            && kv.Value?.ToString() == "PanelSealingAsset");
+
+        rows.Add(("Room sealing", (jsaCanSeal || hasPanelSealingAsset) ? "True" : "False"));
     }
 
     // m_BreakableBy is a flags enum captured as a comma-separated string (e.g. "Tether, Grapple,
