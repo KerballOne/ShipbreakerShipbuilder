@@ -10,9 +10,9 @@ using UnityEngine;
 // a MeshRenderer+MeshFilter preview (see AddressableRendering's FakePrefabDisplay), so a
 // Collider-based (PhysX) check silently does nothing for them.
 [InitializeOnLoad]
-public static class ColliderStopGizmos
+public static class MoveCollideOnMeshGizmos
 {
-    const string kPrefKey = "Shipbuilder.ColliderStopEnabled";
+    const string kPrefKey = "Shipbuilder.MoveCollideOnMeshEnabled";
 
     public static bool Enabled
     {
@@ -28,18 +28,18 @@ public static class ColliderStopGizmos
     static readonly Dictionary<Transform, Vector3> s_lastValidPos = new Dictionary<Transform, Vector3>();
     static Transform[] s_lastSelection = new Transform[0];
 
-    static ColliderStopGizmos()
+    static MoveCollideOnMeshGizmos()
     {
         SceneView.duringSceneGui += OnSceneGUI;
     }
 
-    [MenuItem("Shipbuilder/Collider Stop", priority = 182)]
+    [MenuItem("Shipbuilder/Move Collide on Mesh", priority = 182)]
     static void ToggleMenuItem() => Enabled = !Enabled;
 
-    [MenuItem("Shipbuilder/Collider Stop", validate = true)]
+    [MenuItem("Shipbuilder/Move Collide on Mesh", validate = true)]
     static bool ToggleMenuItemValidate()
     {
-        Menu.SetChecked("Shipbuilder/Collider Stop", Enabled);
+        Menu.SetChecked("Shipbuilder/Move Collide on Mesh", Enabled);
         return true;
     }
 
@@ -48,6 +48,7 @@ public static class ColliderStopGizmos
         DrawButton(sv);
 
         if (!Enabled) return;
+        if (Tools.current != Tool.Move) return; // button is only shown/toggleable in this state too
         if (Event.current.type != EventType.Repaint) return;
 
         var selection = Selection.transforms;
@@ -247,12 +248,15 @@ public static class ColliderStopGizmos
 
     static void DrawButton(SceneView sv)
     {
+        if (Tools.current != Tool.Move) return; // only relevant while dragging position
+
         Handles.BeginGUI();
         var wasEnabled = Enabled;
-        var tip = new GUIContent("⛔", "Collider Stop — block dragging selected objects through other parts' meshes");
+        var tip = new GUIContent("Move Collide on Mesh",
+            "Block dragging selected objects through other parts' meshes");
         var prevColor = GUI.backgroundColor;
         if (wasEnabled) GUI.backgroundColor = Color.red;
-        bool newEnabled = GUI.Toggle(new Rect(5, 5, 28, 22), wasEnabled, tip, "Button");
+        bool newEnabled = GUI.Toggle(new Rect(5, 5, 160, 22), wasEnabled, tip, "Button");
         GUI.backgroundColor = prevColor;
         if (newEnabled != wasEnabled) Enabled = newEnabled;
         Handles.EndGUI();
