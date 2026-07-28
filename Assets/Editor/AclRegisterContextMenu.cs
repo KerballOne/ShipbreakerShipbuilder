@@ -516,6 +516,92 @@ public class AclRegisterWindow : EditorWindow
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// <summary>
+/// Right-click a GameObject in the hierarchy → "Unregister Components From ACL"
+/// The inverse of AclRegisterContextMenu. Scans every AddressableComponentLoader in
+/// the open scene(s) — not just ancestors — for componentValues entries whose
+/// component belongs to the selected GO or one of its descendants, shows exactly
+/// what would be removed in a single confirm dialog (even across a multi-object
+/// selection), then removes only those entries. Built for undoing a wrong ACL entry
+/// created by mistakenly running "Register Components in Parent ACL" against the
+/// wrong selection — e.g. a name-based "any-SP" fallback match landing on an
+/// unrelated component elsewhere in a shared/room-level ACL. See
+/// project_jsa_compat_isactive_bug / project_acl_register memories for the failure
+/// mode this undoes.
+/// </summary>
+public static class AclUnregisterContextMenu
+{
+    const string GOMenuPath   = "GameObject/Shipbuilder/Unregister Components From ACL";
+    const string ShipMenuPath = "Shipbuilder/Unregister Components From ACL";
+
+    [MenuItem(GOMenuPath, true)]
+    static bool ValidateGO() => Selection.gameObjects.Length > 0;
+
+    [MenuItem(GOMenuPath, false)]
+    static void ExecuteGO() => Execute();
+
+    [MenuItem(ShipMenuPath, true, priority = 122)]
+    static bool ValidateShip() => Selection.gameObjects.Length > 0;
+
+    [MenuItem(ShipMenuPath, false, priority = 122)]
+    static void ExecuteShip() => Execute();
+
+    static void Execute()
+    {
+        var selected = Selection.gameObjects;
+        if (selected.Length == 0) return;
+
+        // Every GameObject the removal should match: the selected GOs plus all their descendants.
+        var targetGos = new HashSet<GameObject>();
+        foreach (var go in selected)
+            foreach (var t in go.GetComponentsInChildren<Transform>(true))
+                targetGos.Add(t.gameObject);
+
+        // Search every AddressableComponentLoader in every open scene, not just ancestors —
+        // the whole point is that a wrong entry can live on an unrelated/distant ACL (e.g. a
+        // shared room-level ACL), which is exactly the case this tool exists to find.
+        var hits = new List<(AddressableComponentLoader acl, int index, AddressableComponentValue cv)>();
+        foreach (var acl in Object.FindObjectsOfType<AddressableComponentLoader>())
+        {
+            for (int i = 0; i < acl.componentValues.Count; i++)
+            {
+                var cv = acl.componentValues[i];
+                if (cv.component != null && targetGos.Contains(cv.component.gameObject))
+                    hits.Add((acl, i, cv));
+            }
+        }
+
+        if (hits.Count == 0)
+        {
+            EditorUtility.DisplayDialog("Unregister From ACL",
+                "No ACL entries found referencing the selected object(s) or their descendants.", "OK");
+            return;
+        }
+
+        var lines = hits.Select(h =>
+            $"'{h.cv.component.gameObject.name}' ({h.cv.component.GetType().Name}.{h.cv.field}) " +
+            $"= {h.cv.address}\n    on ACL '{h.acl.gameObject.name}'");
+        string message = $"Unregister {hits.Count} ACL entr{(hits.Count == 1 ? "y" : "ies")}?\n\n" + string.Join("\n\n", lines);
+
+        if (!EditorUtility.DisplayDialog("Unregister From ACL", message, "Unregister", "Cancel"))
+            return;
+
+        // Group by ACL so each one gets a single Undo record and SetDirty call.
+        foreach (var group in hits.GroupBy(h => h.acl))
+        {
+            var acl = group.Key;
+            Undo.RecordObject(acl, "Unregister Components From ACL");
+            // Remove by value identity, highest index first so earlier indices stay valid.
+            foreach (var h in group.OrderByDescending(h => h.index))
+                acl.componentValues.RemoveAt(h.index);
+            EditorUtility.SetDirty(acl);
+        }
+
+        Debug.Log($"[AclUnregister] Removed {hits.Count} entr{(hits.Count == 1 ? "y" : "ies")} " +
+            $"across {hits.Select(h => h.acl).Distinct().Count()} ACL(s) for '{string.Join(", ", selected.Select(g => g.name))}'.");
+    }
+}
+
 public static class AclCleanContextMenu
 {
     const string GOMenuPath   = "GameObject/Shipbuilder/Clean ACL (Remove Missing + Deduplicate)";

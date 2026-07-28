@@ -963,15 +963,30 @@ public class JointAssistWindow : EditorWindow
                     if (jsa != null) { Debug.Log(log); return jsa; }
                 }
                 // Second pass: ACL was pasted from a donor (component refs point at wrong GOs).
-                // Try any StructurePart entry — all SP entries in a homogeneous ACL share the same SP_Mat.
+                // Try any StructurePart entry — but ONLY if every SP entry in this ACL resolves
+                // to the SAME JSA, proving the ACL is actually homogeneous (a single baked
+                // composite part's own ACL). A shared/room-level ACL covering multiple unrelated
+                // parts (e.g. a floor plate and a nav terminal under the same room) is NOT
+                // homogeneous, and picking an arbitrary entry from it silently attributes one
+                // part's real JSA to a totally unrelated part. Confirmed real-world case: this
+                // fallback returned SM_Floor_Plate_Front's JOINT_Panel_Ext for
+                // SM_Prop_Terminal_Nav_Lower, whose real JSA (per StructurePartAsset.Data.
+                // JointSetupAsset, ground truth from PartInfoLogger's joint_census.csv) is
+                // JOINT_PropMount_Exclude_Panel_Ext — see project_jsa_compat_isactive_bug memory.
+                string homogeneousJsa = null;
+                bool anySpEntry = false, isHomogeneous = true;
                 foreach (var cv in acl.componentValues)
                 {
-                    if (cv.component == null) continue;
-                    if (!(cv.component is BBI.Unity.Game.StructurePart)) continue;
+                    if (cv.component == null || !(cv.component is BBI.Unity.Game.StructurePart)) continue;
                     var jsa = EnrichedJsaName(cv.address);
-                    log += $"\n  P1.5b: any-SP ACL entry on '{cv.component.gameObject.name}' addr={cv.address} → {jsa ?? "miss"}";
-                    if (jsa != null) { Debug.Log(log); return jsa; }
+                    if (jsa == null) continue;
+                    anySpEntry = true;
+                    if (homogeneousJsa == null) homogeneousJsa = jsa;
+                    else if (homogeneousJsa != jsa) { isHomogeneous = false; break; }
                 }
+                log += $"\n  P1.5b: any-SP entries in ACL '{acl.gameObject.name}' → " +
+                    (anySpEntry ? (isHomogeneous ? homogeneousJsa : "MIXED (skipped, not homogeneous)") : "none");
+                if (anySpEntry && isHomogeneous) { Debug.Log(log); return homogeneousJsa; }
             }
         }
 
