@@ -16,6 +16,7 @@ public class SelectAddressableParentEditor : Editor
         public string displayName, partName;
         public float[] dims;
         public float volume, mass;
+        public string spName, bpName;
     }
 
     class RawEntry
@@ -25,6 +26,8 @@ public class SelectAddressableParentEditor : Editor
         [JsonProperty("dims")]        public float[] dims;
         [JsonProperty("volume")]      public float   volume;
         [JsonProperty("mass")]        public float   mass;
+        [JsonProperty("spName")]      public string  spName;
+        [JsonProperty("bpName")]      public string  bpName;
     }
 
     void OnEnable() => EnsureEnriched();
@@ -48,6 +51,8 @@ public class SelectAddressableParentEditor : Editor
                     dims        = kv.Value.dims,
                     volume      = kv.Value.volume,
                     mass        = kv.Value.mass,
+                    spName      = kv.Value.spName,
+                    bpName      = kv.Value.bpName,
                 };
                 s_ByName[kv.Key] = e;
                 if (!string.IsNullOrEmpty(kv.Value.partName))
@@ -76,6 +81,8 @@ public class SelectAddressableParentEditor : Editor
                     $"X {entry.dims[0]:F2}  Y {entry.dims[1]:F2}  Z {entry.dims[2]:F2}");
             EditorGUILayout.LabelField("Volume", $"{entry.volume:F4} m³");
             EditorGUILayout.LabelField("Mass",   $"{entry.mass:F2} kg");
+            EditorGUILayout.LabelField("SP", string.IsNullOrEmpty(entry.spName) ? "(not captured)" : entry.spName);
+            EditorGUILayout.LabelField("BP", string.IsNullOrEmpty(entry.bpName) ? "(not captured)" : entry.bpName);
         }
         else
         {
