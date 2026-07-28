@@ -2,15 +2,15 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-// STEP 1 of a from-scratch rebuild (see user direction: get free rotation + stable highlight
-// working and verified before adding any snap-on-release logic). This version does ONLY two
-// things:
-//   1. Rotate tool works completely normally — this script never writes to any transform.
-//   2. While the selected object overlaps another mesh, highlight the two contact faces
-//      (orange = selected/rotating object, blue = the other part) and keep that same pair
-//      shown continuously for as long as they remain overlapping (or until nothing overlaps).
-// No drag-start/drag-end detection, no position pinning, no snapping — those come later, once
-// this baseline is confirmed actually working.
+// Rotates completely freely during the drag (no transform writes at all while dragging — see
+// notes elsewhere in this project on why writing to t.rotation/t.position mid-drag corrupts
+// Unity's own Rotate handle state). While overlapping another mesh, highlights the contact face
+// pair live (orange = rotating object, blue = target, green = already coplanar/flush) using the
+// ACTUAL overlapping triangles' normals rather than a bounding-box approximation. At the exact
+// moment the drag ends (mouse released), if a face pair was found, snaps rotation to align face A
+// exactly flush with face B — ported from JointAssistWindow's ApplyFaceSnap
+// (Quaternion.FromToRotation(currentNormalA, -currentNormalB)) — but pivoted around the object's
+// own current position instead of the contact point, so position never changes at all.
 [InitializeOnLoad]
 public static class RotateStopsOnFlushGizmos
 {
@@ -31,6 +31,23 @@ public static class RotateStopsOnFlushGizmos
     static readonly Color kFaceColorFlush     = new Color(0.2f, 1.0f, 0.2f, 1.00f); // green — already flush
     static readonly Color kFaceColorFlushFill = new Color(0.2f, 1.0f, 0.2f, 0.20f);
 
+    // Last-seen rotation per selected transform, refreshed every Repaint — used only to know
+    // what pose the drag started/ended at, never to infer whether a drag is still happening.
+    static readonly Dictionary<Transform, Quaternion> s_lastRot = new Dictionary<Transform, Quaternion>();
+
+    // Two earlier detection attempts for "did the drag just end" both failed:
+    //  - Diffing t.rotation across Repaints: SceneView Repaints fire much faster than the
+    //    handle's own mouse-move updates, so several consecutive "unchanged rotation" frames
+    //    happen constantly during a perfectly continuous drag, not just at release.
+    //  - Sampling GUIUtility.hotControl once per Repaint: hotControl is a shared/global value
+    //    many different controls (selection outlines, other gizmos) briefly claim within the
+    //    same frame, so the exact "rotate gizmo released" 1->0 transition was never reliably
+    //    observed at Repaint time — ended up never firing at all.
+    // EventType.MouseUp is the actual OS-level mouse release event Unity itself dispatches
+    // through duringSceneGui, so react to it directly rather than inferring release from some
+    // other signal sampled at a different point in the frame.
+    static Transform[] s_lastSelection = new Transform[0];
+
     static RotateStopsOnFlushGizmos()
     {
         SceneView.duringSceneGui += OnSceneGUI;
@@ -46,44 +63,112 @@ public static class RotateStopsOnFlushGizmos
         return true;
     }
 
+    // Most recently computed contact-face pair per transform, refreshed every Repaint — read by
+    // the MouseUp handler below so the snap always matches exactly what was last drawn on
+    // screen, without needing to redo the (fairly expensive) overlap scan on the MouseUp event
+    // itself.
+    static readonly Dictionary<Transform, (PickedFace a, PickedFace b, bool isFlush)?> s_lastFaces =
+        new Dictionary<Transform, (PickedFace, PickedFace, bool)?>();
+
     static void OnSceneGUI(SceneView sv)
     {
         DrawButton(sv);
 
         if (!Enabled) return;
         if (Tools.current != Tool.Rotate) return;
-        if (Event.current.type != EventType.Repaint) return;
 
         var selection = Selection.transforms;
-        if (selection.Length == 0) return;
+        if (selection.Length == 0) { s_lastRot.Clear(); s_lastFaces.Clear(); s_lastSelection = selection; return; }
 
-        var allFilters = Object.FindObjectsOfType<MeshFilter>();
+        bool selectionChanged = selection.Length != s_lastSelection.Length;
+        if (!selectionChanged)
+            for (int i = 0; i < selection.Length; i++)
+                if (selection[i] != s_lastSelection[i]) { selectionChanged = true; break; }
 
-        foreach (var t in selection)
+        if (selectionChanged)
         {
-            var ownFilters = t.GetComponentsInChildren<MeshFilter>();
-            if (ownFilters.Length == 0) continue;
+            s_lastRot.Clear();
+            s_lastFaces.Clear();
+            foreach (var t in selection) s_lastRot[t] = t.rotation;
+            s_lastSelection = selection;
+        }
 
-            var otherFilters = GatherOtherFilters(allFilters, t);
-            var faces = FindFirstOverlapFaces(t, otherFilters);
+        // EventType.MouseUp is the actual OS-level mouse release Unity dispatches through
+        // duringSceneGui — react to it directly rather than inferring release some other way
+        // (see field comment on why two earlier approaches based on inferring it didn't work).
+        bool isMouseUp = Event.current.type == EventType.MouseUp;
 
-            if (faces.HasValue)
+        if (Event.current.type == EventType.Repaint)
+        {
+            if (selectionChanged) return; // pose already re-seeded above; nothing else to do
+
+            var allFilters = Object.FindObjectsOfType<MeshFilter>();
+
+            foreach (var t in selection)
             {
-                // Already-flush (coplanar + genuinely touching) is highlighted green on BOTH
-                // faces instead of orange/blue — a visually distinct "you're already there"
-                // signal rather than "here's what would become flush."
-                if (faces.Value.isFlush)
+                var ownFilters = t.GetComponentsInChildren<MeshFilter>();
+                if (ownFilters.Length == 0) continue;
+
+                if (!s_lastRot.TryGetValue(t, out _)) s_lastRot[t] = t.rotation;
+
+                var otherFilters = GatherOtherFilters(allFilters, t);
+                var faces = FindFirstOverlapFaces(t, otherFilters);
+                s_lastFaces[t] = faces;
+
+                if (faces.HasValue)
                 {
-                    DrawPickedFaceHighlight(faces.Value.a, kFaceColorFlush, kFaceColorFlushFill);
-                    DrawPickedFaceHighlight(faces.Value.b, kFaceColorFlush, kFaceColorFlushFill);
-                }
-                else
-                {
-                    DrawPickedFaceHighlight(faces.Value.a, kFaceColorA, kFaceColorAFill);
-                    DrawPickedFaceHighlight(faces.Value.b, kFaceColorB, kFaceColorBFill);
+                    // Already-flush (coplanar + genuinely touching) is highlighted green on BOTH
+                    // faces instead of orange/blue — a visually distinct "you're already there"
+                    // signal rather than "here's what would become flush."
+                    if (faces.Value.isFlush)
+                    {
+                        DrawPickedFaceHighlight(faces.Value.a, kFaceColorFlush, kFaceColorFlushFill);
+                        DrawPickedFaceHighlight(faces.Value.b, kFaceColorFlush, kFaceColorFlushFill);
+                    }
+                    else
+                    {
+                        DrawPickedFaceHighlight(faces.Value.a, kFaceColorA, kFaceColorAFill);
+                        DrawPickedFaceHighlight(faces.Value.b, kFaceColorB, kFaceColorBFill);
+                    }
                 }
             }
         }
+        else if (isMouseUp)
+        {
+            foreach (var t in selection)
+            {
+                if (!s_lastRot.TryGetValue(t, out var lastRot)) continue;
+                var currentRot = t.rotation;
+                if (currentRot == lastRot) continue; // nothing rotated this gesture — no-op
+
+                // The only moment the transform is touched, and only rotation — never position
+                // (pivot is the object's own current position, not the contact point, per
+                // project direction that this tool must never move position at all).
+                if (s_lastFaces.TryGetValue(t, out var faces) && faces.HasValue && !faces.Value.isFlush)
+                {
+                    var resolvedRot = ComputeFlushRotation(faces.Value.a, faces.Value.b, currentRot);
+                    t.rotation = resolvedRot;
+                    currentRot = resolvedRot;
+                }
+
+                s_lastRot[t] = currentRot;
+            }
+        }
+    }
+
+    // Rotation-align math ported from JointAssistWindow.ApplyFaceSnap:
+    //   Quaternion alignRot = Quaternion.FromToRotation(currentNormalA, -currentNormalB);
+    //   ... newRot = alignRot * moveRoot.rotation;
+    // JAFS also pivots POSITION around the contact point (ptA) as part of the same rotation —
+    // deliberately dropped here per project direction that this tool must never move position at
+    // all, so this only ever returns the new rotation, applied around the object's own current
+    // position (i.e. position is left completely untouched by the caller).
+    static Quaternion ComputeFlushRotation(PickedFace faceA, PickedFace faceB, Quaternion currentRot)
+    {
+        Vector3 currentNormalA = faceA.source.localToWorldMatrix.MultiplyVector(faceA.localNormal).normalized;
+        Vector3 currentNormalB = faceB.source.localToWorldMatrix.MultiplyVector(faceB.localNormal).normalized;
+        Quaternion alignRot = Quaternion.FromToRotation(currentNormalA, -currentNormalB);
+        return alignRot * currentRot;
     }
 
     static List<MeshFilter> GatherOtherFilters(MeshFilter[] allFilters, Transform root)
@@ -132,12 +217,6 @@ public static class RotateStopsOnFlushGizmos
             // face is the one actually facing the wall, not whichever happens to have big
             // triangles nearby.
             var candidates = CollectCandidateFacesOnA(ownFilters, otherMf, hitNormalB);
-
-            Debug.Log($"[RotateStopsOnFlush] '{root.name}' vs '{otherTransform.name}': {candidates.Count} candidate face(s) on A:");
-            foreach (var c in candidates)
-                Debug.Log($"[RotateStopsOnFlush]   candidate normal={c.normal} area={c.area:F4} point={c.point} " +
-                    $"dotToFlush={Vector3.Dot(c.normal, -hitNormalB):F3} isFlush={c.isFlush}");
-
             if (candidates.Count == 0) continue;
 
             // A candidate already flush (coplanar + genuinely touching) wins outright — it IS
@@ -177,8 +256,6 @@ public static class RotateStopsOnFlushGizmos
             var faceB = new PickedFace { point = hitPointB, normal = hitNormalB, source = otherTransform,
                 localNormal = otherTransform.worldToLocalMatrix.MultiplyVector(hitNormalB) };
 
-            Debug.Log($"[RotateStopsOnFlush] PICKED candidate: normal={best.normal} area={best.area:F4} " +
-                $"dotToFlush={Vector3.Dot(best.normal, -hitNormalB):F3} isFlush={foundFlush}");
             return (faceA, faceB, foundFlush);
         }
 
@@ -283,13 +360,6 @@ public static class RotateStopsOnFlushGizmos
         float dot = Vector3.Dot(normalA, -normalB);
         Vector3 centerA = (a0 + a1 + a2) / 3f;
         float distToPlaneB = Mathf.Abs(Vector3.Dot(centerA - b0, normalB));
-
-        // DEBUG: log any near-miss so we can see the real numbers instead of guessing at
-        // tolerances — "near-miss" here means at least roughly facing each other and within a
-        // generous debug distance, even if it fails the actual thresholds below.
-        if (dot > 0.5f && distToPlaneB < 0.5f)
-            Debug.Log($"[RotateStopsOnFlush] IsCoplanarTouching near-miss: dot={dot:F4} (need >={normalDotThreshold}) " +
-                $"distToPlaneB={distToPlaneB:F4} (need <={planeDistThreshold})");
 
         if (dot < normalDotThreshold) return false;
         if (distToPlaneB > planeDistThreshold) return false;
@@ -487,7 +557,7 @@ public static class RotateStopsOnFlushGizmos
         Handles.BeginGUI();
         var wasEnabled = Enabled;
         var tip = new GUIContent("Rotate Stops on Flush",
-            "STEP 1: highlight-only test build, no snapping yet");
+            "Rotate freely; on release, snap flush with the highlighted contact face");
         var prevColor = GUI.backgroundColor;
         if (wasEnabled) GUI.backgroundColor = Color.red;
         bool newEnabled = GUI.Toggle(new Rect(5, 5, 160, 22), wasEnabled, tip, "Button");
