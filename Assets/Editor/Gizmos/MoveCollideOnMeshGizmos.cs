@@ -33,13 +33,13 @@ public static class MoveCollideOnMeshGizmos
         SceneView.duringSceneGui += OnSceneGUI;
     }
 
-    [MenuItem("Shipbuilder/Move Collide on Mesh", priority = 182)]
+    [MenuItem("Shipbuilder/Move Collides on Mesh", priority = 182)]
     static void ToggleMenuItem() => Enabled = !Enabled;
 
-    [MenuItem("Shipbuilder/Move Collide on Mesh", validate = true)]
+    [MenuItem("Shipbuilder/Move Collides on Mesh", validate = true)]
     static bool ToggleMenuItemValidate()
     {
-        Menu.SetChecked("Shipbuilder/Move Collide on Mesh", Enabled);
+        Menu.SetChecked("Shipbuilder/Move Collides on Mesh", Enabled);
         return true;
     }
 
@@ -252,7 +252,7 @@ public static class MoveCollideOnMeshGizmos
 
         Handles.BeginGUI();
         var wasEnabled = Enabled;
-        var tip = new GUIContent("Move Collide on Mesh",
+        var tip = new GUIContent("Move Collides on Mesh",
             "Block dragging selected objects through other parts' meshes");
         var prevColor = GUI.backgroundColor;
         if (wasEnabled) GUI.backgroundColor = Color.red;
