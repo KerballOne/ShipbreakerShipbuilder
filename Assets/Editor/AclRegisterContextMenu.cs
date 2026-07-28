@@ -537,16 +537,36 @@ public static class AclUnregisterContextMenu
     [MenuItem(GOMenuPath, true)]
     static bool ValidateGO() => Selection.gameObjects.Length > 0;
 
+    // Unity calls a "GameObject/..." MenuItem once PER SELECTED OBJECT — confirmed even with a
+    // MenuCommand parameter and a command.context==selected[0] guard, all N invocations still ran
+    // (Unity's per-object dispatch order doesn't reliably line up with Selection.gameObjects[0],
+    // and/or Selection.gameObjects itself isn't stable across the N synchronous calls). Instead of
+    // trying to identify "the first" call, coalesce via EditorApplication.delayCall: every
+    // synchronous invocation bumps a request token and schedules a deferred check; by the time any
+    // deferred check actually runs, all N synchronous calls have already completed, so only the
+    // LAST-scheduled one (token matches) still executes.
+    static int s_requestToken;
+
     [MenuItem(GOMenuPath, false)]
-    static void ExecuteGO() => Execute();
+    static void ExecuteGO()
+    {
+        int myToken = ++s_requestToken;
+        Debug.Log($"[AclUnregister] ExecuteGO called, token={myToken}, selection={Selection.gameObjects.Length}");
+        EditorApplication.delayCall += () =>
+        {
+            Debug.Log($"[AclUnregister] delayCall fired for token={myToken}, current s_requestToken={s_requestToken}");
+            if (myToken != s_requestToken) return; // a later invocation superseded this one
+            ExecuteOnce();
+        };
+    }
 
     [MenuItem(ShipMenuPath, true, priority = 122)]
     static bool ValidateShip() => Selection.gameObjects.Length > 0;
 
     [MenuItem(ShipMenuPath, false, priority = 122)]
-    static void ExecuteShip() => Execute();
+    static void ExecuteShip() => ExecuteOnce();
 
-    static void Execute()
+    static void ExecuteOnce()
     {
         var selected = Selection.gameObjects;
         if (selected.Length == 0) return;
