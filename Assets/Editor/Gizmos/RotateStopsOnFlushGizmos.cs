@@ -7,10 +7,11 @@ using UnityEngine;
 // Unity's own Rotate handle state). While overlapping another mesh, highlights the contact face
 // pair live (orange = rotating object, blue = target, green = already coplanar/flush) using the
 // ACTUAL overlapping triangles' normals rather than a bounding-box approximation. At the exact
-// moment the drag ends (mouse released), if a face pair was found, snaps rotation to align face A
-// exactly flush with face B — ported from JointAssistWindow's ApplyFaceSnap
-// (Quaternion.FromToRotation(currentNormalA, -currentNormalB)) — but pivoted around the object's
-// own current position instead of the contact point, so position never changes at all.
+// moment the drag ends (mouse released), if a face pair was found, snaps to align face A exactly
+// flush with face B — ported from JointAssistWindow's ApplyFaceSnap (rotation via
+// Quaternion.FromToRotation(currentNormalA, -currentNormalB), position pivoted around the
+// contact point on face A) so the contact point itself stays fixed through the snap, like a
+// hinge, rather than the object's own (possibly off-center) transform pivot.
 [InitializeOnLoad]
 public static class RotateStopsOnFlushGizmos
 {
@@ -141,13 +142,16 @@ public static class RotateStopsOnFlushGizmos
                 var currentRot = t.rotation;
                 if (currentRot == lastRot) continue; // nothing rotated this gesture — no-op
 
-                // The only moment the transform is touched, and only rotation — never position
-                // (pivot is the object's own current position, not the contact point, per
-                // project direction that this tool must never move position at all).
+                // The only moment the transform is touched: rotation is snapped flush, and
+                // position is corrected so the CONTACT POINT (faceA.point) stays fixed through
+                // the rotation — like a hinge — rather than the object's own transform pivot,
+                // which can be far from the visible mesh and made the object appear to slide
+                // toward/away from the wall depending on which corner initiated contact.
                 if (s_lastFaces.TryGetValue(t, out var faces) && faces.HasValue && !faces.Value.isFlush)
                 {
-                    var resolvedRot = ComputeFlushRotation(faces.Value.a, faces.Value.b, currentRot);
+                    var (resolvedRot, resolvedPos) = ComputeFlushSnap(faces.Value.a, faces.Value.b, currentRot, t.position);
                     t.rotation = resolvedRot;
+                    t.position = resolvedPos;
                     currentRot = resolvedRot;
                 }
 
@@ -156,19 +160,28 @@ public static class RotateStopsOnFlushGizmos
         }
     }
 
-    // Rotation-align math ported from JointAssistWindow.ApplyFaceSnap:
+    // Rotation+position-align math ported from JointAssistWindow.ApplyFaceSnap:
     //   Quaternion alignRot = Quaternion.FromToRotation(currentNormalA, -currentNormalB);
-    //   ... newRot = alignRot * moveRoot.rotation;
-    // JAFS also pivots POSITION around the contact point (ptA) as part of the same rotation —
-    // deliberately dropped here per project direction that this tool must never move position at
-    // all, so this only ever returns the new rotation, applied around the object's own current
-    // position (i.e. position is left completely untouched by the caller).
-    static Quaternion ComputeFlushRotation(PickedFace faceA, PickedFace faceB, Quaternion currentRot)
+    //   Vector3 toRoot   = moveRoot.position - ptA;
+    //   Quaternion newRot = alignRot * moveRoot.rotation;
+    //   Vector3 newPos    = ptA + alignRot * toRoot;
+    // Pivoting around ptA (faceA.point, the actual contact point) rather than the object's own
+    // transform pivot keeps that contact point fixed through the rotation — a hinge, not a swing
+    // around wherever the pivot happens to be, which for an off-center pivot made the object
+    // visibly slide toward/away from the wall depending on which corner initiated contact.
+    static (Quaternion rot, Vector3 pos) ComputeFlushSnap(PickedFace faceA, PickedFace faceB,
+        Quaternion currentRot, Vector3 currentPos)
     {
         Vector3 currentNormalA = faceA.source.localToWorldMatrix.MultiplyVector(faceA.localNormal).normalized;
         Vector3 currentNormalB = faceB.source.localToWorldMatrix.MultiplyVector(faceB.localNormal).normalized;
         Quaternion alignRot = Quaternion.FromToRotation(currentNormalA, -currentNormalB);
-        return alignRot * currentRot;
+
+        Vector3 ptA = faceA.point;
+        Vector3 toRoot = currentPos - ptA;
+        Quaternion newRot = alignRot * currentRot;
+        Vector3 newPos = ptA + alignRot * toRoot;
+
+        return (newRot, newPos);
     }
 
     static List<MeshFilter> GatherOtherFilters(MeshFilter[] allFilters, Transform root)

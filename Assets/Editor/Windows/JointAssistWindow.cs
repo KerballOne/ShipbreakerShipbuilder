@@ -2266,6 +2266,22 @@ public class JointAssistWindow : EditorWindow
     // snap's own position/rotation/scale math.
     void AutoDetectFacesBetween(GameObject a, GameObject b, bool resetAncestorDepth = true)
     {
+        // Mesh mode: pick faces from real mesh geometry — the closest pair of coplanar-triangle
+        // clusters (one per object) whose normals roughly oppose each other, i.e. "which two
+        // faces would touch first if brought together." Bounding-box picking (below, still used
+        // for Collider Hull mode and as a fallback) instead picks whichever face has the
+        // smallest box-to-box gap across the object's WHOLE bounds, which for elongated/rotated
+        // parts is often a completely different face than the one that's actually closest —
+        // confirmed by the same failure mode in Rotate Stops on Flush's early attempts, fixed
+        // there by switching to real mesh-triangle-based face picking.
+        if (!snapUseColliderHull && TryFindClosestFacingFaces(a, b, out var meshFaceA, out var meshFaceB))
+        {
+            snapFaceA = meshFaceA;
+            snapFaceB = meshFaceB;
+            if (resetAncestorDepth) ResetAncestorDepth();
+            return;
+        }
+
         Bounds bA = GetBounds(a), bB = GetBounds(b);
         Vector3 dir = GetDirection(bA, bB); // direction from A toward B
 
@@ -2282,6 +2298,113 @@ public class JointAssistWindow : EditorWindow
         // clobber the user's manual ancestor-depth choice each time Snap is pressed.
         if (resetAncestorDepth)
             ResetAncestorDepth();
+    }
+
+    struct MeshFaceCandidate { public Vector3 normal; public Vector3 point; public float area; }
+
+    // Clusters a's/b's render-mesh triangles into distinct coplanar faces (by shared normal,
+    // same grouping approach as Rotate Stops on Flush's CollectCandidateFacesOnA), then picks a
+    // pair (one face from A, one from B) using a two-stage rule — same reasoning as Rotate Stops
+    // on Flush's candidate ranking: pure "closest by distance" let a small, coincidentally-closer
+    // sliver face win over the real, larger back face that was only marginally farther away.
+    // Stage 1 narrows to face PAIRS within a small tolerance of the closest pair-distance found
+    // (i.e. genuinely close, not just "closest of all options" by a hair) and whose normals are
+    // at least roughly opposing (rules out two faces that happen to be near each other but point
+    // the same way, e.g. two side panels that would never actually come together). Stage 2 picks
+    // the largest-combined-area pair among that close bracket, favoring the real dominant face
+    // over an incidental sliver.
+    static bool TryFindClosestFacingFaces(GameObject a, GameObject b, out PickedFace faceA, out PickedFace faceB)
+    {
+        var facesA = CollectMeshFaces(a.transform);
+        var facesB = CollectMeshFaces(b.transform);
+
+        const float minOpposingDot = 0.3f; // ~72 degrees from exactly opposing; generous since
+                                            // the two parts aren't necessarily aligned yet
+
+        float bestDist = float.MaxValue;
+        foreach (var ca in facesA)
+            foreach (var cb in facesB)
+            {
+                if (Vector3.Dot(ca.normal, -cb.normal) < minOpposingDot) continue;
+                float dist = Vector3.Distance(ca.point, cb.point);
+                if (dist < bestDist) bestDist = dist;
+            }
+
+        if (bestDist == float.MaxValue) { faceA = default; faceB = default; return false; }
+
+        // Bracket tolerance scales with the closest distance itself (relative, not a fixed
+        // meters value) so it behaves sensibly whether the two parts are centimeters or meters
+        // apart, then adds a small absolute floor for the near-zero/already-touching case.
+        float bracket = Mathf.Max(bestDist * 0.25f, 0.02f);
+
+        MeshFaceCandidate bestA = default, bestB = default;
+        float bestArea = -1f;
+        bool found = false;
+
+        foreach (var ca in facesA)
+        {
+            foreach (var cb in facesB)
+            {
+                if (Vector3.Dot(ca.normal, -cb.normal) < minOpposingDot) continue;
+                float dist = Vector3.Distance(ca.point, cb.point);
+                if (dist > bestDist + bracket) continue; // not among the closest pairs
+
+                float combinedArea = ca.area + cb.area;
+                if (combinedArea > bestArea) { bestArea = combinedArea; bestA = ca; bestB = cb; found = true; }
+            }
+        }
+
+        if (!found) { faceA = default; faceB = default; return false; }
+
+        faceA = new PickedFace { point = bestA.point, normal = bestA.normal, source = a,
+            localNormal = a.transform.worldToLocalMatrix.MultiplyVector(bestA.normal) };
+        faceB = new PickedFace { point = bestB.point, normal = bestB.normal, source = b,
+            localNormal = b.transform.worldToLocalMatrix.MultiplyVector(bestB.normal) };
+        return true;
+    }
+
+    static List<MeshFaceCandidate> CollectMeshFaces(Transform root)
+    {
+        var groups = new List<MeshFaceCandidate>();
+        const float normalGroupTolerance = 0.05f; // ~18 degrees
+
+        foreach (var mf in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (mf.sharedMesh == null) continue;
+            var mesh = mf.sharedMesh;
+            var verts = mesh.vertices; var tris = mesh.triangles;
+            var m = mf.transform.localToWorldMatrix;
+
+            for (int ti = 0; ti < tris.Length; ti += 3)
+            {
+                var v0 = m.MultiplyPoint3x4(verts[tris[ti]]);
+                var v1 = m.MultiplyPoint3x4(verts[tris[ti + 1]]);
+                var v2 = m.MultiplyPoint3x4(verts[tris[ti + 2]]);
+                var normal = Vector3.Cross(v1 - v0, v2 - v0).normalized;
+                float area = Vector3.Cross(v1 - v0, v2 - v0).magnitude * 0.5f;
+                if (area < 1e-8f) continue;
+                var center = (v0 + v1 + v2) / 3f;
+
+                bool merged = false;
+                for (int g = 0; g < groups.Count; g++)
+                {
+                    if (Vector3.Dot(groups[g].normal, normal) < 1f - normalGroupTolerance) continue;
+                    var existing = groups[g];
+                    // Area-weighted running average keeps 'point' representative of the whole
+                    // face rather than drifting toward whichever triangle happened to merge last.
+                    float totalArea = existing.area + area;
+                    existing.point = (existing.point * existing.area + center * area) / totalArea;
+                    existing.area = totalArea;
+                    groups[g] = existing;
+                    merged = true;
+                    break;
+                }
+                if (!merged)
+                    groups.Add(new MeshFaceCandidate { normal = normal, point = center, area = area });
+            }
+        }
+
+        return groups;
     }
 
     void ApplyFaceSnap(float overlap)
