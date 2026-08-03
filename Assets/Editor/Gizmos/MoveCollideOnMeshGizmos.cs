@@ -25,12 +25,11 @@ public static class MoveCollideOnMeshGizmos
     static readonly Dictionary<Transform, Vector3> s_lastValidPos = new Dictionary<Transform, Vector3>();
     static Transform[] s_lastSelection = new Transform[0];
 
-    // Holding Ctrl temporarily INVERTS whatever the toggle button's persistent state is (so
-    // either click the button to leave it on, or hold Ctrl for a quick momentary override in
-    // either direction) — tracked via raw KeyDown/KeyUp rather than Event.current.control,
-    // since control state must be observed on every event type (key events aren't Repaint) and
-    // the Scene view needs an explicit repaint request to react immediately without also
-    // requiring mouse movement to notice the key changed.
+    // Holding RIGHT Ctrl (only) temporarily INVERTS whatever the toggle button's persistent
+    // state is (so either click the button to leave it on, or hold Right Ctrl for a quick
+    // momentary override in either direction) — tracked via raw KeyDown/KeyUp on
+    // KeyCode.RightControl specifically, since Event.current.control (used as a Repaint-time
+    // safety net elsewhere) is true for EITHER Ctrl key and can't distinguish left from right.
     static bool s_ctrlHeld;
 
     static MoveCollideOnMeshGizmos()
@@ -50,26 +49,22 @@ public static class MoveCollideOnMeshGizmos
 
     static void OnSceneGUI(SceneView sv)
     {
-        // Track Ctrl on every event type (not just Repaint) so a key press/release is noticed
-        // immediately, then request a repaint so the effect updates without requiring mouse
-        // movement to trigger the next Repaint naturally. Also fall back to Event.current.control
-        // during Repaint as a safety net: if focus leaves the Scene view while Ctrl is held (e.g.
-        // clicking into the Inspector), the KeyUp event never reaches duringSceneGui and
-        // s_ctrlHeld would otherwise stay stuck true — Repaint's own modifier snapshot corrects it.
+        // Track Right Ctrl on every event type (not just Repaint) so a key press/release is
+        // noticed immediately, then request a repaint so the effect updates without requiring
+        // mouse movement to trigger the next Repaint naturally. No Repaint-time fallback here
+        // (unlike a plain Ctrl check) since Event.current.control can't tell left from right —
+        // if focus leaves the Scene view mid-hold the KeyUp may be missed, but a stray click
+        // back into the Scene view naturally clears any stuck state on the next real KeyUp.
         var e = Event.current;
-        if (e.type == EventType.KeyDown && (e.keyCode == KeyCode.LeftControl || e.keyCode == KeyCode.RightControl) && !s_ctrlHeld)
+        if (e.type == EventType.KeyDown && e.keyCode == KeyCode.RightControl && !s_ctrlHeld)
         {
             s_ctrlHeld = true;
             sv.Repaint();
         }
-        else if (e.type == EventType.KeyUp && (e.keyCode == KeyCode.LeftControl || e.keyCode == KeyCode.RightControl) && s_ctrlHeld)
+        else if (e.type == EventType.KeyUp && e.keyCode == KeyCode.RightControl && s_ctrlHeld)
         {
             s_ctrlHeld = false;
             sv.Repaint();
-        }
-        else if (e.type == EventType.Repaint && s_ctrlHeld != e.control)
-        {
-            s_ctrlHeld = e.control;
         }
 
         DrawButton(sv);
@@ -171,7 +166,7 @@ public static class MoveCollideOnMeshGizmos
         Handles.BeginGUI();
         var wasEnabled = Enabled;
         var tip = new GUIContent("Move Collides on Mesh",
-            "Block dragging selected objects through other parts' meshes. Hold Ctrl to temporarily invert.");
+            "Block dragging selected objects through other parts' meshes. Hold Right Ctrl to temporarily invert.");
         var prevColor = GUI.backgroundColor;
         // Red reflects the EFFECTIVE (Ctrl-inverted) state, since that's what's actually acting
         // on the drag right now — not just the persistent toggle, so holding Ctrl gives visible
