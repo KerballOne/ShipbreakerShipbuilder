@@ -7,7 +7,9 @@ using BBI.Unity.Game;
 /// <summary>
 /// Right-click a GameObject in the hierarchy → "Register Components in Parent ACL"
 /// Finds the nearest ancestor AddressableComponentLoader, then appends one entry per
-/// StructurePart and EntityBlueprintComponent found in the selected GO's descendants.
+/// StructurePart, EntityBlueprintComponent, InteractableObject, TrackIfSeen, TriggerablePATSender,
+/// and Animator (with a controller assigned) found in the selected GO's descendants — every field
+/// this project's tooling has found to reference a runtime-bundle-only asset (broken PPtr on save).
 /// Resolves addresses by: (1) name-matching against all prefab ACLs on disc,
 /// (2) existing entries in the parent ACL, (3) manual picker as fallback.
 /// All confirmations and address selections are shown in a single window.
@@ -71,7 +73,7 @@ public static class AclRegisterContextMenu
 
         if (targets.Count == 0)
         {
-            EditorUtility.DisplayDialog("Register in ACL", "No StructurePart or EntityBlueprintComponent found under the selected objects.", "OK");
+            EditorUtility.DisplayDialog("Register in ACL", "No StructurePart, EntityBlueprintComponent, InteractableObject, TrackIfSeen, TriggerablePATSender, or Animator (with a controller) found under the selected objects.", "OK");
             return;
         }
 
@@ -280,6 +282,20 @@ public static class AclRegisterContextMenu
             result.Add((sp, "m_StructurePartAsset"));
         foreach (var ebc in t.GetComponentsInChildren<EntityBlueprintComponent>(true))
             result.Add((ebc, "m_BlueprintAsset"));
+        // Interaction-related fields — same broken-PPtr problem as SP_Mat/Blueprint (the referenced
+        // asset lives in the runtime bundle, can't be stored directly). Without these, a part built via
+        // this tool alone gets a present-but-unresolved InteractableObject (Asset=null at runtime,
+        // self-disables) even though the SP/BP entries resolve fine — see
+        // project_baked_pickup_interaction_fix memory for the full failure mode this fixes.
+        foreach (var io in t.GetComponentsInChildren<InteractableObject>(true))
+            result.Add((io, "m_Asset"));
+        foreach (var tis in t.GetComponentsInChildren<TrackIfSeen>(true))
+            result.Add((tis, "m_ActionOfSeeingObject"));
+        foreach (var pat in t.GetComponentsInChildren<TriggerablePATSender>(true))
+            result.Add((pat, "m_PAT"));
+        foreach (var anim in t.GetComponentsInChildren<Animator>(true))
+            if (anim.runtimeAnimatorController != null)
+                result.Add((anim, "m_Controller"));
         return result;
     }
 
@@ -452,7 +468,16 @@ public class AclRegisterWindow : EditorWindow
             EditorGUILayout.LabelField(row.Comp.gameObject.name, GUILayout.Width(160));
 
             // Component type (abbreviated)
-            string typeName = row.Comp.GetType().Name == "EntityBlueprintComponent" ? "EBC" : "SP";
+            string typeName = row.Comp.GetType().Name switch
+            {
+                "EntityBlueprintComponent" => "EBC",
+                "StructurePart" => "SP",
+                "InteractableObject" => "IO",
+                "TrackIfSeen" => "TIS",
+                "TriggerablePATSender" => "PAT",
+                "Animator" => "Anim",
+                _ => row.Comp.GetType().Name,
+            };
             EditorGUILayout.LabelField(typeName, GUILayout.Width(90));
 
             // Address picker / status

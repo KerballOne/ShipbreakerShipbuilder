@@ -8,14 +8,22 @@ using UnityEngine;
 
 /// <summary>
 /// Manual, inspectable fixup tool for baked (non-addressable) prefabs that need real interaction
-/// (pickup / interact prompt) support — see project_baked_pickup_interaction_fix memory. AddressableBaker
-/// only clones a fixed component allowlist (Mesh/StructurePart/EntityBlueprintComponent/
-/// MandatoryJointContainer/Light) and never touches an "Interaction" marker child's InteractableObject/
-/// TriggerableSalvage/NarrativeItemComponent — those only exist on the live source addressable, which
-/// the baked prefab has no stored reference back to. This window takes BOTH a baked prefab root and the
-/// original source addressable (found by name search, since it can't be loaded as a normal asset
-/// reference) and copies the missing interaction wiring across, resolving the InteractableObjectAsset
-/// GUID the same way AddressableBaker already resolves SP_Mat/Blueprint GUIDs.
+/// (pickup / interact prompt / grant / ITEM COLLECTED popup) support — see
+/// project_baked_pickup_interaction_fix and project_baked_interactable_procedure memories.
+/// AddressableBaker only clones a fixed component allowlist (Mesh/StructurePart/
+/// EntityBlueprintComponent/MandatoryJointContainer/Light) and never touches an "Interaction" marker
+/// child's InteractableObject/TriggerableSalvage/NarrativeItemComponent/grant component (Triggerable
+/// ThrusterCharge or TriggerableVitalityChange) — those only exist on the live source addressable,
+/// which the baked prefab has no stored reference back to. This window takes BOTH a baked prefab root
+/// and the original source addressable (found by name search, since it can't be loaded as a normal
+/// asset reference) and copies the missing interaction wiring across, resolving the
+/// InteractableObjectAsset GUID the same way AddressableBaker already resolves SP_Mat/Blueprint GUIDs.
+/// It also explicitly rebuilds TriggerableOnInteractProgressComplete's UnityEvent to call the target's
+/// own TriggerableSalvage.Trigger() — a raw component copy does NOT safely carry this over, since
+/// persistent UnityEvent call targets are object references into the SOURCE hierarchy and can silently
+/// resolve to the wrong object on copy (this broke the ITEM COLLECTED popup once already; see
+/// project_baked_thrusterfuel_backpack_resolved memory). Covers all 5 known pickup types: Helmet (data
+/// drive), ThrusterFuel, O2 tank, Patch Kit, Med Kit.
 ///
 /// This is the manual first pass — once proven reliable on real prefabs, this logic should be folded
 /// into AddressableBaker.BakeOnto itself so future bakes get it automatically. Do that only after this
@@ -53,10 +61,13 @@ public class MakeInteractableWindow : EditorWindow
     {
         EditorGUILayout.LabelField("Make Interactable", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "Copies pickup/interact wiring (InteractableObject, TriggerableSalvage, NarrativeItemComponent) " +
-            "onto a baked prefab's matching child GameObjects, from either the original live addressable " +
-            "or another already-fixed prefab. AddressableBaker never clones these — they only exist on the " +
-            "real, un-baked asset.",
+            "Copies pickup/interact wiring (InteractableObject, TriggerableSalvage, NarrativeItemComponent, " +
+            "TriggerableThrusterCharge/TriggerableVitalityChange grant components) onto a baked prefab's " +
+            "matching child GameObjects, from either the original live addressable or another already-fixed " +
+            "prefab, and rewires TriggerableOnInteractProgressComplete to call the target's own " +
+            "TriggerableSalvage.Trigger() (needed for the ITEM COLLECTED popup). AddressableBaker never " +
+            "clones any of this — it only exists on the real, un-baked asset. Covers Helmet/ThrusterFuel/" +
+            "O2/PatchKit/MedKit pickups; see project_baked_interactable_procedure memory.",
             MessageType.Info);
 
         EditorGUILayout.Space();
@@ -196,6 +207,12 @@ public class MakeInteractableWindow : EditorWindow
                 var srcIoNode = interactables[0].transform;
                 var srcSpNode = source.GetComponentsInChildren<StructurePart>(true).FirstOrDefault()?.transform;
 
+                if (interactables.Length > 1)
+                    notes.Add($"ℹ Source has {interactables.Length} InteractableObject nodes — using the first one found ('{srcIoNode.name}'). " +
+                        $"Others: {string.Join(", ", interactables.Skip(1).Select(io => io.name))}.");
+                var srcIoAssetPreview = ReadObjectField(interactables[0], "m_Asset");
+                notes.Add($"ℹ Reading from source node '{srcIoNode.name}': m_Asset = {(srcIoAssetPreview != null ? srcIoAssetPreview.name : "null")}.");
+
                 // The target needs its own trigger-collider child for the interact raycast to hit —
                 // reuse one named "Interaction" if present, else create one at the target's origin.
                 var targetInteractionNode = m_TargetNode.transform.Find("Interaction");
@@ -324,31 +341,29 @@ public class MakeInteractableWindow : EditorWindow
 
         // InteractableObject — the actual gate InteractionController checks. m_Asset can't be stored
         // directly (lives in the runtime bundle, broken PPtr on save) — resolve by name and record for
-        // the AddressableComponentLoader to fill in at load, same as SP_Mat/Blueprint.
+        // the AddressableComponentLoader to fill in at load, same as SP_Mat/Blueprint. Always
+        // re-resolved and overwrites any existing ACL entry (see UpsertAclEntry) — re-running Apply
+        // against a corrected/different source is how a wrong address (e.g. from AclRegisterContextMenu's
+        // name-matching landing on an unrelated same-named part) gets fixed, not left alone.
         if (srcNode.TryGetComponent<InteractableObject>(out var srcIo))
         {
             var newIo = targetNode.GetComponent<InteractableObject>() ?? targetNode.AddComponent<InteractableObject>();
             UnityEditor.EditorUtility.CopySerialized(srcIo, newIo);
 
-            bool alreadyHasAssetAcl = acl.componentValues.Any(cv => cv.component == newIo && cv.field == "m_Asset");
-            var targetAssetAlreadySet = ReadObjectField(newIo, "m_Asset");
-            if (!alreadyHasAssetAcl && targetAssetAlreadySet == null)
-            {
-                var srcAsset = ReadObjectField(srcIo, "m_Asset");
-                NullObjectField(newIo, "m_Asset");
+            var srcAsset = ReadObjectField(srcIo, "m_Asset");
+            NullObjectField(newIo, "m_Asset");
 
-                if (srcAsset != null)
+            if (srcAsset != null)
+            {
+                var guid = AddressableBaker.ResolveAssetGuidByName(srcAsset.name);
+                if (!string.IsNullOrEmpty(guid))
                 {
-                    var guid = AddressableBaker.ResolveAssetGuidByName(srcAsset.name);
-                    if (!string.IsNullOrEmpty(guid))
-                    {
-                        acl.componentValues.Add(new AddressableComponentValue { component = newIo, field = "m_Asset", address = guid });
-                    }
-                    else
-                    {
-                        notes.Add($"⚠ Could not resolve GUID for InteractableObjectAsset '{srcAsset.name}' on '{srcNode.name}' — " +
-                            "search for it manually via Import Game Part Wizard and add the address by hand.");
-                    }
+                    UpsertAclEntry(acl, newIo, "m_Asset", guid);
+                }
+                else
+                {
+                    notes.Add($"⚠ Could not resolve GUID for InteractableObjectAsset '{srcAsset.name}' on '{srcNode.name}' — " +
+                        "search for it manually via Import Game Part Wizard and add the address by hand.");
                 }
             }
 
@@ -360,11 +375,27 @@ public class MakeInteractableWindow : EditorWindow
 
         // TriggerableSalvage — the actual "pickup complete" action. Preserve TriggerOn exactly (the
         // real gate — must NOT default to OnStart, see project_baked_pickup_interaction_fix memory).
+        // MUST end up enabled — CopySerialized normally carries this over correctly from a working
+        // source, but the baked backpack was found with this false after an earlier bake/copy pass, so
+        // force it explicitly rather than trusting the copy alone (see
+        // project_baked_thrusterfuel_backpack_resolved memory).
+        TriggerableSalvage newSalvage = null;
         if (srcNode.TryGetComponent<TriggerableSalvage>(out var srcTs))
         {
-            var newTs = targetNode.GetComponent<TriggerableSalvage>() ?? targetNode.AddComponent<TriggerableSalvage>();
-            UnityEditor.EditorUtility.CopySerialized(srcTs, newTs);
+            newSalvage = targetNode.GetComponent<TriggerableSalvage>() ?? targetNode.AddComponent<TriggerableSalvage>();
+            UnityEditor.EditorUtility.CopySerialized(srcTs, newSalvage);
+            newSalvage.enabled = true;
         }
+
+        // Grant component — TriggerableThrusterCharge (fuel) or TriggerableVitalityChange (O2/PatchKit/
+        // MedKit). Lives on the Interaction node in every real source prefab. A straight CopySerialized
+        // is safe here since these components don't reference other GameObjects (no persistent UnityEvent
+        // targets to rebind), unlike TriggerableOnInteractProgressComplete below.
+        if (srcNode.TryGetComponent<TriggerableThrusterCharge>(out var srcCharge) && targetNode.GetComponent<TriggerableThrusterCharge>() == null)
+            UnityEditor.EditorUtility.CopySerialized(srcCharge, targetNode.AddComponent<TriggerableThrusterCharge>());
+
+        if (srcNode.TryGetComponent<TriggerableVitalityChange>(out var srcVitality) && targetNode.GetComponent<TriggerableVitalityChange>() == null)
+            UnityEditor.EditorUtility.CopySerialized(srcVitality, targetNode.AddComponent<TriggerableVitalityChange>());
 
         if (srcNode.TryGetComponent<NarrativeItemComponent>(out var srcNic))
         {
@@ -384,26 +415,58 @@ public class MakeInteractableWindow : EditorWindow
                 UnityEditor.EditorUtility.CopySerialized(srcEbc, newEbc);
             }
 
-            bool alreadyHasAcl = acl.componentValues.Any(cv => cv.component == newEbc && cv.field == "m_BlueprintAsset");
-            var targetBpAlreadySet = ReadObjectField(newEbc, "m_BlueprintAsset");
-            if (!alreadyHasAcl && targetBpAlreadySet == null)
-            {
-                var srcBp = ReadObjectField(srcEbc, "m_BlueprintAsset");
-                NullObjectField(newEbc, "m_BlueprintAsset");
+            var srcBp = ReadObjectField(srcEbc, "m_BlueprintAsset");
+            NullObjectField(newEbc, "m_BlueprintAsset");
 
-                if (srcBp != null)
-                {
-                    var guid = AddressableBaker.ResolveAssetGuidByName(srcBp.name);
-                    if (!string.IsNullOrEmpty(guid))
-                        acl.componentValues.Add(new AddressableComponentValue { component = newEbc, field = "m_BlueprintAsset", address = guid });
-                    else
-                        notes.Add($"⚠ Could not resolve GUID for blueprint '{srcBp.name}' on '{srcNode.name}'.");
-                }
+            if (srcBp != null)
+            {
+                var guid = AddressableBaker.ResolveAssetGuidByName(srcBp.name);
+                if (!string.IsNullOrEmpty(guid))
+                    UpsertAclEntry(acl, newEbc, "m_BlueprintAsset", guid);
+                else
+                    notes.Add($"⚠ Could not resolve GUID for blueprint '{srcBp.name}' on '{srcNode.name}'.");
             }
         }
 
-        if (srcNode.TryGetComponent<TriggerableOnInteractProgressComplete>(out var srcTip) && targetNode.GetComponent<TriggerableOnInteractProgressComplete>() == null)
-            UnityEditor.EditorUtility.CopySerialized(srcTip, targetNode.AddComponent<TriggerableOnInteractProgressComplete>());
+        // TriggerableOnInteractProgressComplete — the component whose OnTriggered UnityEvent actually
+        // calls TriggerableSalvage.Trigger() to fire the pickup-collected popup (see
+        // project_baked_thrusterfuel_backpack_resolved memory). A straight CopySerialized does NOT
+        // safely carry this over: persistent UnityEvent call targets are object references into the
+        // SOURCE hierarchy, and Unity's serialization can silently resolve them to the wrong object
+        // type (observed: ended up bound to an unrelated TextAsset with an empty method name) rather
+        // than erroring. So the event is rebuilt explicitly here instead of trusted from the copy —
+        // cleared, then a fresh persistent call added pointing at THIS target's own TriggerableSalvage
+        // (found via GetComponentInParent, since Interaction is always a child of the SP root that
+        // carries it), calling Trigger().
+        if (srcNode.TryGetComponent<TriggerableOnInteractProgressComplete>(out var srcTip))
+        {
+            var newTip = targetNode.GetComponent<TriggerableOnInteractProgressComplete>() ?? targetNode.AddComponent<TriggerableOnInteractProgressComplete>();
+            UnityEditor.EditorUtility.CopySerialized(srcTip, newTip);
+
+            var targetSalvage = newSalvage != null ? newSalvage : targetNode.GetComponentInParent<TriggerableSalvage>();
+            if (targetSalvage != null)
+            {
+                var so = new SerializedObject(newTip);
+                var eventProp = so.FindProperty("m_TriggerUnityEvent.m_PersistentCalls.m_Calls");
+                if (eventProp != null)
+                {
+                    eventProp.ClearArray();
+                    eventProp.InsertArrayElementAtIndex(0);
+                    var call = eventProp.GetArrayElementAtIndex(0);
+                    call.FindPropertyRelative("m_Target").objectReferenceValue = targetSalvage;
+                    call.FindPropertyRelative("m_TargetAssemblyTypeName").stringValue = "TriggerableComponent, BBI.Unity.Game";
+                    call.FindPropertyRelative("m_MethodName").stringValue = "Trigger";
+                    call.FindPropertyRelative("m_Mode").enumValueIndex = 1; // PersistentListenerMode.Void
+                    call.FindPropertyRelative("m_CallState").enumValueIndex = 2; // UnityEventCallState.RuntimeOnly
+                    so.ApplyModifiedProperties();
+                    notes.Add($"ℹ Wired '{targetNode.name}'.TriggerableOnInteractProgressComplete → TriggerableSalvage('{targetSalvage.gameObject.name}').Trigger().");
+                }
+            }
+            else
+            {
+                notes.Add($"⚠ No TriggerableSalvage found on '{targetNode.name}' or its parents — could not wire TriggerableOnInteractProgressComplete's trigger event. Add TriggerableSalvage to the SP root first.");
+            }
+        }
 
         // TriggerablePATSender — progression tracking, not required for the pickup action itself. Its
         // PAT reference has the same broken-PPtr problem as SP_Mat/Blueprint/InteractableObjectAsset —
@@ -421,21 +484,16 @@ public class MakeInteractableWindow : EditorWindow
                 UnityEditor.EditorUtility.CopySerialized(srcPat, newPat);
             }
 
-            bool alreadyHasAcl = acl.componentValues.Any(cv => cv.component == newPat && cv.field == "m_PAT");
-            var targetPatAlreadySet = ReadObjectField(newPat, "m_PAT");
-            if (!alreadyHasAcl && targetPatAlreadySet == null)
-            {
-                var srcPatAsset = ReadObjectField(srcPat, "m_PAT");
-                NullObjectField(newPat, "m_PAT");
+            var srcPatAsset = ReadObjectField(srcPat, "m_PAT");
+            NullObjectField(newPat, "m_PAT");
 
-                if (srcPatAsset != null)
-                {
-                    var guid = AddressableBaker.ResolveAssetGuidByName(srcPatAsset.name);
-                    if (!string.IsNullOrEmpty(guid))
-                        acl.componentValues.Add(new AddressableComponentValue { component = newPat, field = "m_PAT", address = guid });
-                    else
-                        notes.Add($"⚠ Could not resolve GUID for PAT asset '{srcPatAsset.name}' on '{srcNode.name}'.");
-                }
+            if (srcPatAsset != null)
+            {
+                var guid = AddressableBaker.ResolveAssetGuidByName(srcPatAsset.name);
+                if (!string.IsNullOrEmpty(guid))
+                    UpsertAclEntry(acl, newPat, "m_PAT", guid);
+                else
+                    notes.Add($"⚠ Could not resolve GUID for PAT asset '{srcPatAsset.name}' on '{srcNode.name}'.");
             }
         }
 
@@ -459,20 +517,16 @@ public class MakeInteractableWindow : EditorWindow
                 UnityEditor.EditorUtility.CopySerialized(srcAnim, newAnim);
             }
 
-            bool alreadyHasAcl = acl.componentValues.Any(cv => cv.component == newAnim && cv.field == "m_Controller");
-            if (!alreadyHasAcl && newAnim.runtimeAnimatorController == null)
-            {
-                var srcController = srcAnim.runtimeAnimatorController;
-                NullObjectField(newAnim, "m_Controller");
+            var srcController = srcAnim.runtimeAnimatorController;
+            NullObjectField(newAnim, "m_Controller");
 
-                if (srcController != null)
-                {
-                    var guid = AddressableBaker.ResolveAssetGuidByName(srcController.name);
-                    if (!string.IsNullOrEmpty(guid))
-                        acl.componentValues.Add(new AddressableComponentValue { component = newAnim, field = "m_Controller", address = guid });
-                    else
-                        notes.Add($"⚠ Could not resolve GUID for AnimatorController '{srcController.name}' on '{srcNode.name}' (cosmetic only, not required for pickup).");
-                }
+            if (srcController != null)
+            {
+                var guid = AddressableBaker.ResolveAssetGuidByName(srcController.name);
+                if (!string.IsNullOrEmpty(guid))
+                    UpsertAclEntry(acl, newAnim, "m_Controller", guid);
+                else
+                    notes.Add($"⚠ Could not resolve GUID for AnimatorController '{srcController.name}' on '{srcNode.name}' (cosmetic only, not required for pickup).");
             }
         }
 
@@ -488,23 +542,29 @@ public class MakeInteractableWindow : EditorWindow
                 UnityEditor.EditorUtility.CopySerialized(srcTis, newTis);
             }
 
-            bool alreadyHasAcl = acl.componentValues.Any(cv => cv.component == newTis && cv.field == "m_ActionOfSeeingObject");
-            var targetSeenAlreadySet = ReadObjectField(newTis, "m_ActionOfSeeingObject");
-            if (!alreadyHasAcl && targetSeenAlreadySet == null)
-            {
-                var srcSeenAction = ReadObjectField(srcTis, "m_ActionOfSeeingObject");
-                NullObjectField(newTis, "m_ActionOfSeeingObject");
+            var srcSeenAction = ReadObjectField(srcTis, "m_ActionOfSeeingObject");
+            NullObjectField(newTis, "m_ActionOfSeeingObject");
 
-                if (srcSeenAction != null)
-                {
-                    var guid = AddressableBaker.ResolveAssetGuidByName(srcSeenAction.name);
-                    if (!string.IsNullOrEmpty(guid))
-                        acl.componentValues.Add(new AddressableComponentValue { component = newTis, field = "m_ActionOfSeeingObject", address = guid });
-                    else
-                        notes.Add($"⚠ Could not resolve GUID for PAT asset '{srcSeenAction.name}' on '{srcNode.name}'.");
-                }
+            if (srcSeenAction != null)
+            {
+                var guid = AddressableBaker.ResolveAssetGuidByName(srcSeenAction.name);
+                if (!string.IsNullOrEmpty(guid))
+                    UpsertAclEntry(acl, newTis, "m_ActionOfSeeingObject", guid);
+                else
+                    notes.Add($"⚠ Could not resolve GUID for PAT asset '{srcSeenAction.name}' on '{srcNode.name}'.");
             }
         }
+    }
+
+    /// <summary>Adds an AddressableComponentValue entry for (component, field), replacing any existing
+    /// entry for the same pair rather than skipping. Re-running Apply against a corrected or different
+    /// source is the intended way to fix a wrong address (e.g. one that AclRegisterContextMenu's
+    /// name-matching pulled from an unrelated same-named part) — silently leaving stale data in place
+    /// would make that impossible without manually editing the ACL list by hand.</summary>
+    static void UpsertAclEntry(AddressableComponentLoader acl, Component component, string field, string address)
+    {
+        acl.componentValues.RemoveAll(cv => cv.component == component && cv.field == field);
+        acl.componentValues.Add(new AddressableComponentValue { component = component, field = field, address = address });
     }
 
     /// <summary>Best-effort remap for a Transform/GameObject-typed field that referenced a node within
