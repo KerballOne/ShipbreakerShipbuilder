@@ -140,7 +140,7 @@ public class BuildContent
                 var shipName = char.ToUpper(shipNameRaw[0]) + shipNameRaw.Substring(1);
                 Debug.Log($"Processing root bundle for ship: {shipName} ({rootBundle})");
                 MoveShipBundle(shipName, mainCatalogPath, rootBundle, manifest);
-                SplitBundleForRepo(shipName);
+                ZipShipForRelease(shipName);
             }
 
             // Move each custom bundle
@@ -152,7 +152,7 @@ public class BuildContent
                 Debug.Log("Current bundlePath is: " + bundlePath);
 
                 MoveShipBundle(shipName, Path.Combine(shipDirectory, shipName + ".json"), bundlePath, manifest);
-                SplitBundleForRepo(shipName);
+                ZipShipForRelease(shipName);
             }
             Debug.Log("Moving ship bundles completed");
 
@@ -252,26 +252,21 @@ public class BuildContent
         File.WriteAllText(Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, shipPath, "manifest.json"), JsonConvert.SerializeObject(manifest));
     }
 
-    // GitHub blocks files over 100MB, so bundles are committed as a 7z archive under BundleParts/
-    // instead of the raw .bundle (which is gitignored). The archive includes catalog.json and
-    // manifest.json alongside the bundle so the ship folder can be reconstructed by extracting
-    // with 7-Zip (or any tool that understands .7z / split volumes, e.g. WinZip, PeaZip).
-    const long SPLIT_THRESHOLD_BYTES = 99L * 1024 * 1024;
-    const long VOLUME_SIZE_BYTES = 99L * 1024 * 1024;
-
+    // Packages the deployed ship folder as a single zip under BundleParts/ (gitignored) for
+    // uploading as a GitHub release asset. Bundles are not committed to the repo: they exceed
+    // GitHub's 100MB per-file limit and every rebuild would bloat history. The zip contains the
+    // {Ship}.{Author}/ folder itself, so players extract it straight into ModdedShipLoader/Ships/.
     private static readonly string[] SevenZipCandidates =
     {
         @"C:\Program Files\7-Zip\7z.exe",
         @"C:\Program Files (x86)\7-Zip\7z.exe",
     };
 
-    private static void SplitBundleForRepo(string shipName)
+    private static void ZipShipForRelease(string shipName)
     {
-        var modPath = Path.Combine("BepInEx", "plugins", "ModdedShipLoader", "Ships");
-        var shipFolder = Path.Combine(Settings.buildSettings.ShipbreakerPath, modPath, $"{shipName}.{Settings.buildSettings.Author}");
-        var bundlePath = Path.Combine(shipFolder, shipName + "_assets_all.bundle");
-        var catalogPath = Path.Combine(shipFolder, "catalog.json");
-        var manifestPath = Path.Combine(shipFolder, "manifest.json");
+        var shipsDir = Path.Combine(Settings.buildSettings.ShipbreakerPath, "BepInEx", "plugins", "ModdedShipLoader", "Ships");
+        var shipFolderName = $"{shipName}.{Settings.buildSettings.Author}";
+        var bundlePath = Path.Combine(shipsDir, shipFolderName, shipName + "_assets_all.bundle");
 
         if (!File.Exists(bundlePath))
         {
@@ -286,40 +281,28 @@ public class BuildContent
             return;
         }
 
-        var partsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BundleParts", shipName));
-        if (Directory.Exists(partsDir))
-        {
-            Directory.Delete(partsDir, true);
-        }
+        var partsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BundleParts"));
         Directory.CreateDirectory(partsDir);
 
-        var bundleSize = new FileInfo(bundlePath).Length;
+        // Clear outputs from older builds of this ship (previous zip, or legacy split 7z volumes)
+        var zipPath = Path.Combine(partsDir, shipFolderName + ".zip");
+        if (File.Exists(zipPath))
+            File.Delete(zipPath);
+        var legacyDir = Path.Combine(partsDir, shipName);
+        if (Directory.Exists(legacyDir))
+            Directory.Delete(legacyDir, true);
 
-        if (bundleSize <= SPLIT_THRESHOLD_BYTES)
+        // Run from the Ships dir with a relative folder name so the zip contains {Ship}.{Author}/.
+        // -mx=1: fast; the bundle is already compressed so higher levels gain almost nothing.
+        var args = $"a -tzip -mx=1 \"{zipPath}\" \"{shipFolderName}\"";
+
+        if (!RunSevenZip(sevenZip, args, shipsDir, out string error))
         {
-            // Under threshold: no archive needed, just copy the loose files.
-            File.Copy(bundlePath, Path.Combine(partsDir, Path.GetFileName(bundlePath)), true);
-            File.Copy(catalogPath, Path.Combine(partsDir, Path.GetFileName(catalogPath)), true);
-            File.Copy(manifestPath, Path.Combine(partsDir, Path.GetFileName(manifestPath)), true);
-            Debug.Log($"{shipName} - Bundle is {bundleSize / (1024 * 1024)} MB, copied loose (no archive needed) to {partsDir}");
+            Debug.LogError($"{shipName} - zip creation failed: {error}");
             return;
         }
 
-        // Over threshold: split into 7z volumes (7z -v produces {archive}.7z.001, .002, ...)
-        // -mx=0: store only, no compression — bundle contents are already compressed and
-        // large ships otherwise take a long time to archive for little size benefit.
-        var archivePath = Path.Combine(partsDir, $"{shipName}.7z");
-        var inputFiles = $"\"{bundlePath}\" \"{catalogPath}\" \"{manifestPath}\"";
-        var args = $"a -mx=0 -v{VOLUME_SIZE_BYTES}b \"{archivePath}\" {inputFiles}";
-
-        if (!RunSevenZip(sevenZip, args, out string error))
-        {
-            Debug.LogError($"{shipName} - 7z archive creation failed: {error}");
-            return;
-        }
-
-        var volumeCount = Directory.GetFiles(partsDir, $"{shipName}.7z.*").Length;
-        Debug.Log($"{shipName} - Bundle was {bundleSize / (1024 * 1024)} MB, split into {volumeCount} volume(s) under {partsDir}");
+        Debug.Log($"{shipName} - Release zip ({new FileInfo(zipPath).Length / (1024 * 1024)} MB) written to {zipPath}");
     }
 
     private static string FindSevenZip()
@@ -352,10 +335,11 @@ public class BuildContent
         return null;
     }
 
-    private static bool RunSevenZip(string sevenZipPath, string args, out string error)
+    private static bool RunSevenZip(string sevenZipPath, string args, string workingDirectory, out string error)
     {
         var psi = new System.Diagnostics.ProcessStartInfo(sevenZipPath, args)
         {
+            WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
