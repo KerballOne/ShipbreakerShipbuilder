@@ -292,7 +292,19 @@ MonoBehaviour:
     WwiseGuid: 
   m_TriggerUnityEvent:
     m_PersistentCalls:
-      m_Calls: []
+      m_Calls:
+      - m_Target: {fileID: 3629804504584843937}
+        m_TargetAssemblyTypeName: TriggerableComponent, BBI.Unity.Game
+        m_MethodName: Trigger
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
   m_GameStateWhenTriggered: 0
 --- !u!114 &4180091209457592722
 MonoBehaviour:
