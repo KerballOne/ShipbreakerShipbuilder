@@ -549,6 +549,7 @@ public static class ClaudeBridge
             pru.Render(true, true);
             tex = pru.EndStaticPreview();
             File.WriteAllBytes(png, tex.EncodeToPNG());
+            File.WriteAllText(png + ".txt", $"{b.size.x:F2}x{b.size.y:F2}x{b.size.z:F2} c=({b.center.x:F2},{b.center.y:F2},{b.center.z:F2})");
             return png;
         }
         finally
