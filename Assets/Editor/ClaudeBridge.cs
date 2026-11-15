@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Experimental.SceneManagement;
@@ -38,7 +37,17 @@ public static class ClaudeBridge
 
     static void Poll()
     {
-        if (s_Busy || EditorApplication.timeSinceStartup < s_NextPoll) return;
+        if (s_Busy)
+        {
+            // Escape hatch: a file named "reset" un-sticks a hung command and recompiles.
+            var reset = Path.Combine(InDir, "reset");
+            if (!File.Exists(reset)) return;
+            File.Delete(reset);
+            s_Busy = false;
+            AssetDatabase.Refresh();
+            return;
+        }
+        if (EditorApplication.timeSinceStartup < s_NextPoll) return;
         s_NextPoll = EditorApplication.timeSinceStartup + 0.25;
         if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
 
@@ -55,7 +64,7 @@ public static class ClaudeBridge
         Run(Path.GetFileName(file), text);
     }
 
-    static async void Run(string name, string text)
+    static void Run(string name, string text)
     {
         var res = new JObject();
         try
@@ -71,7 +80,12 @@ public static class ClaudeBridge
                 case "menu":      result = EditorApplication.ExecuteMenuItem((string)cmd["path"]); break;
                 case "hierarchy": result = Hierarchy(cmd); break;
                 case "capture":   result = Capture(cmd); break;
-                case "catalog":   result = await Catalog(cmd); break;
+                case "catalog":   result = Catalog(cmd); break;
+                case "group":     result = Group(cmd); break;
+                case "place":     result = Place(cmd); break;
+                case "move":      result = Move(cmd); break;
+                case "delete":    result = Delete(cmd); break;
+                case "save":      result = UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); break;
                 case "refresh":
                     res["ok"] = true; res["result"] = "refreshing";
                     WriteResult(name, res);
@@ -290,21 +304,164 @@ public static class ClaudeBridge
         }
     }
 
+    // ── placement ────────────────────────────────────────────────────────────
+    // No Undo records are registered anywhere here (Undo is unstable in this project); every object the
+    // bridge creates is written to a ledger, and "delete" only removes ledgered objects.
+    //
+    // { op:"group", parent:"Tachi/.../CommandDeck", name:"Command Consoles" }
+    // { op:"place", guid, name, parent, euler:[x,y,z], center:[x,y,z] (bounds centre; y ignored when floorY set),
+    //   floorY: y of the bounds bottom, pos:[x,y,z] (raw transform position instead of center) }
+    // { op:"move", path, euler?, center?, floorY?, pos?, delta? }
+    // { op:"delete", path }
+
+    static readonly string LedgerFile = Path.Combine(Root, "placed.txt");
+
+    static void Ledger(GameObject go) => File.AppendAllText(LedgerFile, PathOf(go) + "\n");
+    static bool InLedger(string path) =>
+        File.Exists(LedgerFile) && File.ReadAllLines(LedgerFile).Any(l => l == path || path.StartsWith(l + "/"));
+
+    static void Dirty(GameObject go) => UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(go.scene);
+
+    static string UniqueName(Transform parent, string name)
+    {
+        var used = new HashSet<string>();
+        foreach (Transform c in parent) used.Add(c.name);
+        if (!used.Contains(name)) return name;
+        for (int i = 1; ; i++) if (!used.Contains($"{name} ({i})")) return $"{name} ({i})";
+    }
+
+    static JToken Group(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var name = (string)cmd["name"];
+        foreach (Transform c in parent) if (c.name == name) return PathOf(c.gameObject);
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+        Ledger(go);
+        Dirty(go);
+        return PathOf(go);
+    }
+
+    // Mesh-only stand-in for the game prefab so the part is visible in the editor (same idea as the
+    // project's FakePrefabDisplay previews; "Force View Refresh" replaces it with the real preview).
+    static void CloneVisual(Transform src, Transform parent, string guid, List<Material> created, Dictionary<Material, Material> map, bool isRoot)
+    {
+        if (!src.gameObject.activeSelf) return;
+        var go = new GameObject(isRoot ? guid : src.name) { hideFlags = HideFlags.DontSave };
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = src.localPosition;
+        go.transform.localRotation = src.localRotation;
+        go.transform.localScale    = src.localScale;
+        if (isRoot) go.AddComponent<FakePrefabDisplay>();
+        go.AddComponent<SelectAddressableParent>().sourceGUID = guid;
+
+        var mf = src.GetComponent<MeshFilter>();
+        var mr = src.GetComponent<MeshRenderer>();
+        if (mf != null && mr != null && mr.enabled && mf.sharedMesh != null)
+        {
+            go.AddComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
+            var fake = Shader.Find("Fake/_Lynx/Surface/HDRP/Lit");
+            var mats = (Material[])mr.sharedMaterials.Clone();
+            for (int i = 0; i < mats.Length; i++)
+            {
+                var m = mats[i];
+                if (m == null) continue;
+                if (!map.TryGetValue(m, out var rep))
+                {
+                    if (fake != null && m.shader != null && m.shader.name == "_Lynx/Surface/HDRP/Lit")
+                    {
+                        rep = new Material(fake) { hideFlags = HideFlags.DontSave };
+                        rep.CopyPropertiesFromMaterial(m);
+                    }
+                    else rep = m;
+                    map[m] = rep;
+                }
+                mats[i] = rep;
+            }
+            go.AddComponent<MeshRenderer>().sharedMaterials = mats;
+        }
+        foreach (Transform c in src) CloneVisual(c, go.transform, guid, created, map, false);
+    }
+
+    static void ApplyPose(Transform t, JObject cmd)
+    {
+        if (cmd["euler"] != null) t.rotation = Quaternion.Euler(ToV(cmd["euler"], Vector3.zero));
+        if (cmd["pos"] != null)   t.position = ToV(cmd["pos"], Vector3.zero);
+        if (cmd["delta"] != null) t.position += ToV(cmd["delta"], Vector3.zero);
+        if ((cmd["center"] != null || cmd["floorY"] != null) && TryBounds(t, out var b))
+        {
+            var shift = Vector3.zero;
+            if (cmd["center"] != null) shift = ToV(cmd["center"], b.center) - b.center;
+            if (cmd["floorY"] != null) shift.y = (float)cmd["floorY"] - b.min.y;
+            t.position += shift;
+        }
+    }
+
+    static JObject Describe(GameObject go)
+    {
+        var o = new JObject { ["path"] = PathOf(go), ["pos"] = V(go.transform.position), ["euler"] = V(go.transform.rotation.eulerAngles) };
+        if (TryBounds(go.transform, out var b)) { o["bc"] = V(b.center); o["bs"] = V(b.size); o["min"] = V(b.min); o["max"] = V(b.max); }
+        return o;
+    }
+
+    static JToken Place(JObject cmd)
+    {
+        var guid = (string)cmd["guid"];
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
+        var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+        if (src == null) throw new Exception("Could not load addressable " + guid);
+
+        var go = new GameObject(UniqueName(parent, (string)cmd["name"] ?? src.name));
+        go.transform.SetParent(parent, false);
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+        go.AddComponent<BBI.Unity.Game.AddressableLoader>().assetGUID = guid;
+        CloneVisual(src.transform, go.transform, guid, null, new Dictionary<Material, Material>(), true);
+        ApplyPose(go.transform, cmd);
+        Ledger(go);
+        Dirty(go);
+        return Describe(go);
+    }
+
+    static JToken Move(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        if (!InLedger((string)cmd["path"])) throw new Exception("Refusing to move an object the bridge did not create: " + cmd["path"]);
+        ApplyPose(t, cmd);
+        Dirty(t.gameObject);
+        return Describe(t.gameObject);
+    }
+
+    static JToken Delete(JObject cmd)
+    {
+        var path = (string)cmd["path"];
+        var t = Find(path);
+        if (t == null) throw new Exception("Not found: " + path);
+        if (!InLedger(path)) throw new Exception("Refusing to delete an object the bridge did not create: " + path);
+        var scene = t.gameObject.scene;
+        UnityEngine.Object.DestroyImmediate(t.gameObject);
+        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+        return "deleted " + path;
+    }
+
     // ── catalog ──────────────────────────────────────────────────────────────
     // { op:"catalog", guids:["..."], size:256, dir:"catalog", force:false }
-    // Renders each addressable (via its EditorCache prefab, building it when missing) to <dir>/<guid>.png.
+    // Renders each addressable to <dir>/<guid>.png. Fully synchronous (WaitForCompletion inside
+    // AddressableBaker) — awaiting Addressables tasks from here never completes in an idle editor.
 
-    static MethodInfo s_LoadAddress;
-
-    static async Task<JToken> Catalog(JObject cmd)
+    static JToken Catalog(JObject cmd)
     {
         int size  = (int?)cmd["size"] ?? 256;
         bool force = (bool?)cmd["force"] ?? false;
         var dir   = Path.Combine(Root, (string)cmd["dir"] ?? "catalog");
         Directory.CreateDirectory(dir);
-
-        if (s_LoadAddress == null)
-            s_LoadAddress = typeof(AddressableRendering).GetMethod("LoadAddress", BindingFlags.NonPublic | BindingFlags.Static);
+        if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
 
         var done = new JArray(); var failed = new JObject();
         foreach (var g in cmd["guids"])
@@ -314,18 +471,9 @@ public static class ClaudeBridge
             if (!force && File.Exists(png)) { done.Add(guid); continue; }
             try
             {
-                var cachePath = $"Assets/EditorCache/{guid}.prefab";
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cachePath);
-                if (prefab == null)
-                {
-                    if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
-                    var task = (Task<GameObject>)s_LoadAddress.Invoke(null, new object[] { guid, null, false, "", null });
-                    await task;
-                    prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cachePath);
-                }
-                if (prefab == null) throw new Exception("No cache prefab produced");
-                var info = RenderPrefab(prefab, png, size);
-                if (info == null) { failed[guid] = "no renderers"; continue; }
+                var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+                if (src == null) { failed[guid] = "load failed"; continue; }
+                if (RenderPrefab(src, png, size) == null) { failed[guid] = "no renderers"; continue; }
                 done.Add(guid);
             }
             catch (Exception ex)
@@ -336,13 +484,46 @@ public static class ClaudeBridge
         return new JObject { ["dir"] = dir, ["done"] = done.Count, ["failed"] = failed };
     }
 
+    // Game materials use a shader the editor can't draw; swap to the project's stand-in (as CustomStage does).
+    static void SwapToFakeShader(GameObject inst, List<Material> created)
+    {
+        var fake = Shader.Find("Fake/_Lynx/Surface/HDRP/Lit");
+        if (fake == null) return;
+        var map = new Dictionary<Material, Material>();
+        foreach (var r in inst.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            var mats = (Material[])r.sharedMaterials.Clone();
+            for (int i = 0; i < mats.Length; i++)
+            {
+                var m = mats[i];
+                if (m == null) continue;
+                if (!map.TryGetValue(m, out var rep))
+                {
+                    if (m.shader != null && m.shader.name == "_Lynx/Surface/HDRP/Lit")
+                    {
+                        rep = new Material(fake);
+                        rep.CopyPropertiesFromMaterial(m);
+                        created.Add(rep);
+                    }
+                    else rep = m;
+                    map[m] = rep;
+                }
+                mats[i] = rep;
+            }
+            r.sharedMaterials = mats;
+        }
+    }
+
     static string RenderPrefab(GameObject prefab, string png, int size)
     {
         var pru = new PreviewRenderUtility();
         Texture2D tex = null;
+        var created = new List<Material>();
         try
         {
-            var inst = UnityEngine.Object.Instantiate(prefab);
+            var inst = UnityEngine.Object.Instantiate(prefab, Vector3.zero, Quaternion.identity);
+            inst.hideFlags = HideFlags.HideAndDontSave;
+            SwapToFakeShader(inst, created);
             pru.AddSingleGO(inst);
             if (!TryBounds(inst.transform, out var b)) return null;
 
@@ -374,6 +555,7 @@ public static class ClaudeBridge
         {
             if (tex != null) UnityEngine.Object.DestroyImmediate(tex);
             pru.Cleanup();
+            foreach (var m in created) UnityEngine.Object.DestroyImmediate(m);
         }
     }
 }
