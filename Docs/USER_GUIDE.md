@@ -1231,3 +1231,39 @@ These exceptions appear in the Unity console during normal editor use and do not
 | `ThemesSettings.get_Database / ThemeManager` NullReferenceException | **[suppressed]** | Triggered by Doozy UI components on game assets loaded into the editor, harmless |
 
 **[suppressed]** = filtered by the project's LogHandler and will not appear in the console.
+
+## 10. Scripted Placement (ClaudeBridge) and In-Game Placement Check
+
+### 10.1 ClaudeBridge
+
+`Assets/Editor/ClaudeBridge.cs` lets an external script drive the open editor. It polls `.claude/bridge/in/` for JSON command files and writes each result to `.claude/bridge/out/` under the same file name. It runs while Unity is unfocused.
+
+| Command | What it does |
+|---|---|
+| `state`, `hierarchy` | Report the open scene, selection, and object names/positions/bounds |
+| `capture` | Render a camera at a given pose to `.claude/bridge/shots/<name>.png` |
+| `catalog` | Render game parts to thumbnails in `.claude/bridge/catalog/` |
+| `group`, `place`, `move`, `delete` | Create a container, place an `AddressableLoader` part by its bounds (`center` + `floorY`), reposition, or remove |
+| `manifest` | Write `placement_manifest.json` (see 10.2) |
+| `save`, `refresh`, `menu` | Save open scenes, recompile/reimport, run a menu item |
+
+- No Undo records are registered. Every created object is listed in `.claude/bridge/placed.txt`, and `move`/`delete` refuse to touch anything not in that list.
+- Saving the scene applies the additions to the ship prefab (via `SavePrefabOverride`).
+- If a command hangs, create an empty file `.claude/bridge/in/reset`.
+
+### 10.2 In-game placement check (PartInfoLogger)
+
+1. In the editor, run the bridge `manifest` command. It writes `placement_manifest.json` to the repo root: one entry per bridge-placed part, listing the renderer meshes and colliders its game prefab contains. Rerun it if `unresolvedParts` is not 0.
+2. Build the ship and load it in-game with PartInfoLogger installed (`[PlacementCheck] Enabled = true`, the default).
+3. About 5 seconds after gameplay starts, the mod writes `placement_check.csv` next to its `OutputPath` and logs a one-line summary tagged `[PlacementCheck]`.
+
+| Status | Meaning |
+|---|---|
+| `OK` | Loader found, content loaded, all expected renderer meshes visible, all expected colliders present and enabled |
+| `MISSING_STUB` | No `AddressableLoader` with that name and GUID exists in the loaded ship |
+| `NOT_LOADED` | Loader exists but nothing was instantiated beneath it |
+| `RENDER_MISSING` / `HIDDEN` | An expected mesh is absent / present but disabled or inactive |
+| `BAD_MATERIAL` | A renderer has a null material or the error shader |
+| `COLLIDER_MISSING` / `COLLIDER_DISABLED` | An expected collider is absent / disabled |
+
+Extra renderers or colliders at runtime (for example hardpoint spawns) are not flagged. The check is skipped when the manifest is absent or none of its entries match the loaded ship.

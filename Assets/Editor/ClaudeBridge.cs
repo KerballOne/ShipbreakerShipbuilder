@@ -33,6 +33,34 @@ public static class ClaudeBridge
         Directory.CreateDirectory(OutDir);
         Directory.CreateDirectory(ShotDir);
         EditorApplication.update += Poll;
+        Application.logMessageReceived += OnLog;
+    }
+
+    // ── console monitoring ───────────────────────────────────────────────────
+    // Every error/exception/assert the editor logs is appended to .claude/bridge/console_errors.log and
+    // attached to the result of whichever command was running (or the next one) as "consoleErrors".
+    static readonly List<string> s_Errors = new List<string>();
+    static readonly string ErrorLog = Path.Combine(Root, "console_errors.log");
+
+    static void OnLog(string condition, string stack, LogType type)
+    {
+        if (type != LogType.Error && type != LogType.Exception && type != LogType.Assert) return;
+        var first = (stack ?? "").Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "";
+        var flat = condition.Replace("\n", " ");
+        var line = $"[{type}] {flat} @ {first.Trim()}";
+        if (line.Length > 400) line = line.Substring(0, 400);
+        lock (s_Errors) s_Errors.Add(line);
+        try { File.AppendAllText(ErrorLog, DateTime.Now.ToString("HH:mm:ss ") + line + "\n"); } catch { }
+    }
+
+    static JArray DrainErrors()
+    {
+        lock (s_Errors)
+        {
+            var arr = new JArray(s_Errors.GroupBy(e => e).Select(g => g.Count() > 1 ? $"x{g.Count()} {g.Key}" : g.Key));
+            s_Errors.Clear();
+            return arr;
+        }
     }
 
     static void Poll()
@@ -85,6 +113,20 @@ public static class ClaudeBridge
                 case "place":     result = Place(cmd); break;
                 case "move":      result = Move(cmd); break;
                 case "delete":    result = Delete(cmd); break;
+                case "manifest":  result = Manifest(); break;
+                case "wall":      result = Wall(cmd); break;
+                case "reloadscene":   // discard unsaved scene changes by reopening the scene from disk
+                {
+                    var sp = SceneManager.GetActiveScene().path;
+                    UnityEditor.SceneManagement.EditorSceneManager.OpenScene(sp, UnityEditor.SceneManagement.OpenSceneMode.Single);
+                    result = "reloaded " + sp;
+                    break;
+                }
+                case "deletemany": result = DeleteMany(cmd); break;
+                case "inspect":   result = Inspect(cmd); break;
+                case "placeprefab": result = PlacePrefab(cmd); break;
+                case "console":   result = "drained"; break;   // errors ride along as consoleErrors
+                case "validate":  result = Validate(); break;
                 case "save":      result = UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); break;
                 case "refresh":
                     res["ok"] = true; res["result"] = "refreshing";
@@ -108,6 +150,8 @@ public static class ClaudeBridge
 
     static void WriteResult(string name, JObject res)
     {
+        var errs = DrainErrors();
+        if (errs.Count > 0) res["consoleErrors"] = errs;
         var tmp = Path.Combine(OutDir, name + ".tmp");
         File.WriteAllText(tmp, res.ToString());
         var dst = Path.Combine(OutDir, name);
@@ -445,9 +489,265 @@ public static class ClaudeBridge
         if (t == null) throw new Exception("Not found: " + path);
         if (!InLedger(path)) throw new Exception("Refusing to delete an object the bridge did not create: " + path);
         var scene = t.gameObject.scene;
+        var instRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(t.gameObject);
+        if (instRoot != null && !PrefabUtility.IsAddedGameObjectOverride(t.gameObject))
+        {
+            // Already saved into the ship prefab: Unity forbids destroying it on the instance, so remove it
+            // from the prefab asset itself (the scene instance then updates to match).
+            var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instRoot);
+            var rel = RelPath(t, instRoot.transform);
+            var contents = PrefabUtility.LoadPrefabContents(assetPath);
+            try
+            {
+                var target = contents.transform.Find(rel);
+                if (target == null) throw new Exception($"'{rel}' not found inside {assetPath}");
+                UnityEngine.Object.DestroyImmediate(target.gameObject);
+                PrefabUtility.SaveAsPrefabAsset(contents, assetPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(contents); }
+            return $"deleted {path} from {assetPath}";
+        }
         UnityEngine.Object.DestroyImmediate(t.gameObject);
         UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
         return "deleted " + path;
+    }
+
+    // ── inspect / placeprefab ────────────────────────────────────────────────
+    // { op:"inspect", path, depth:1 } → prefab source, local scale, components and mesh names per node.
+    static JToken Inspect(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        return InspectNode(t, (int?)cmd["depth"] ?? 1);
+    }
+
+    static JObject InspectNode(Transform t, int depth)
+    {
+        var o = new JObject
+        {
+            ["name"] = t.name, ["localPos"] = V(t.localPosition), ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale),
+            ["lossyScale"] = V(t.lossyScale),
+            ["components"] = new JArray(t.GetComponents<Component>().Where(c => c != null && !(c is Transform)).Select(c => c.GetType().Name)),
+        };
+        var src = PrefabUtility.GetCorrespondingObjectFromSource(t.gameObject);
+        if (src != null && PrefabUtility.IsAnyPrefabInstanceRoot(t.gameObject))
+            o["prefab"] = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(t.gameObject);
+        var mf = t.GetComponent<MeshFilter>();
+        if (mf != null && mf.sharedMesh != null)
+        {
+            o["mesh"] = mf.sharedMesh.name; o["meshAsset"] = AssetDatabase.GetAssetPath(mf.sharedMesh);
+            o["meshSize"] = V(mf.sharedMesh.bounds.size);
+        }
+        var mr = t.GetComponent<MeshRenderer>();
+        if (mr != null) o["materials"] = new JArray(mr.sharedMaterials.Select(m => m != null ? m.name : null));
+        if (TryBounds(t, out var b)) { o["bc"] = V(b.center); o["bs"] = V(b.size); }
+        if (depth > 0)
+        {
+            var kids = new JArray();
+            foreach (Transform c in t)
+                if (c.GetComponent<FakePrefabDisplay>() == null) kids.Add(InspectNode(c, depth - 1));
+            if (kids.Count > 0) o["kids"] = kids;
+        }
+        return o;
+    }
+
+    // { op:"placeprefab", asset:"Assets/.../X.prefab", name, parent, euler, center, floorY, pos }
+    // Instantiates a local project prefab (e.g. a baked part) as a linked prefab instance.
+    static JToken PlacePrefab(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var asset = AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["asset"]);
+        if (asset == null) throw new Exception("Prefab not found: " + cmd["asset"]);
+        var go = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
+        go.name = UniqueName(parent, (string)cmd["name"] ?? asset.name);
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+        ApplyPose(go.transform, cmd);
+        Ledger(go);
+        Dirty(go);
+        return Describe(go);
+    }
+
+    // ── wall ─────────────────────────────────────────────────────────────────
+    // { op:"wall", parent, name, width, height, glass:bool, euler:[0,yaw,0], center:[x,_,z], floorY }
+    // Builds one wall panel the way deck 9's airlock walls were built: an instance of the baked board
+    // prefab, resized with the project's Lock In Rescale (scale baked into the mesh, localScale back to 1),
+    // optionally with the Glass material. At yaw 0 the panel spans X; yaw 90 spans Z.
+    const string BoardPrefab = "Assets/_CustomShips/Tachi/Prefabs/Prefabs/PRF_AirLock_Board_Wall_Baked.prefab";
+    const string GlassMat = "Assets/_CustomShips/FirstShip/Materials/Glass/Glass.mat";
+
+    static JToken Wall(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var asset = AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["asset"] ?? BoardPrefab);
+        if (asset == null) throw new Exception("Board prefab not found");
+        float width = (float)cmd["width"], height = (float)cmd["height"];
+
+        var go = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
+        go.name = UniqueName(parent, (string)cmd["name"] ?? "Wall");
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+        if (!TryBounds(go.transform, out var nb)) throw new Exception("Board prefab has no renderers");
+        go.transform.localScale = new Vector3(width / nb.size.x, height / nb.size.y, 1f);
+        RescaleLocker.LockRescale(go);
+
+        if ((bool?)cmd["glass"] ?? false)
+        {
+            var glass = AssetDatabase.LoadAssetAtPath<Material>(GlassMat);
+            if (glass == null) throw new Exception("Glass material not found");
+            foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
+                mr.sharedMaterials = Enumerable.Repeat(glass, mr.sharedMaterials.Length).ToArray();
+        }
+        ApplyPose(go.transform, cmd);
+        Ledger(go);
+        Dirty(go);
+        return Describe(go);
+    }
+
+    // { op:"deletemany", paths:[...] } — like delete, but one prefab load/save for all saved objects.
+    static JToken DeleteMany(JObject cmd)
+    {
+        var byAsset = new Dictionary<string, List<string>>();
+        int direct = 0; var notFound = new JArray();
+        foreach (var p in cmd["paths"])
+        {
+            var path = (string)p;
+            var t = Find(path);
+            if (t == null) { notFound.Add(path); continue; }
+            if (!InLedger(path)) throw new Exception("Refusing to delete an object the bridge did not create: " + path);
+            var instRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(t.gameObject);
+            // Saved into the outer ship prefab (this also covers nested prefab instances such as wall panels).
+            if (instRoot != null && instRoot != t.gameObject && !PrefabUtility.IsAddedGameObjectOverride(t.gameObject))
+            {
+                var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instRoot);
+                if (!byAsset.TryGetValue(assetPath, out var l)) byAsset[assetPath] = l = new List<string>();
+                l.Add(RelPath(t, instRoot.transform));
+            }
+            else
+            {
+                var scene = t.gameObject.scene;
+                UnityEngine.Object.DestroyImmediate(t.gameObject);
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+                direct++;
+            }
+        }
+        int fromPrefab = 0;
+        foreach (var kv in byAsset)
+        {
+            var contents = PrefabUtility.LoadPrefabContents(kv.Key);
+            try
+            {
+                foreach (var rel in kv.Value)
+                {
+                    var target = contents.transform.Find(rel);
+                    if (target == null) { notFound.Add(rel); continue; }
+                    UnityEngine.Object.DestroyImmediate(target.gameObject);
+                    fromPrefab++;
+                }
+                PrefabUtility.SaveAsPrefabAsset(contents, kv.Key);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(contents); }
+        }
+        return new JObject { ["deletedInScene"] = direct, ["deletedFromPrefab"] = fromPrefab, ["notFound"] = notFound };
+    }
+
+    // ── validate ─────────────────────────────────────────────────────────────
+    // { op:"validate" } runs the project's pre-build ShipValidator and returns its issues.
+    static JToken Validate()
+    {
+        var r = ShipValidator.Validate();
+        var arr = new JArray();
+        foreach (var i in r.Issues)
+            arr.Add(new JObject { ["error"] = i.IsError, ["kind"] = i.Kind.ToString(), ["message"] = i.Message });
+        return new JObject { ["hasErrors"] = r.HasErrors, ["count"] = arr.Count, ["issues"] = arr };
+    }
+
+    // ── manifest ─────────────────────────────────────────────────────────────
+    // { op:"manifest" } writes <repo>/placement_manifest.json: for every bridge-placed AddressableLoader,
+    // the renderer meshes and colliders its game prefab contains. PartInfoLogger's PlacementCheck reads it
+    // in-game and reports which parts actually spawned with those renderers/colliders.
+
+    static bool ActiveInPrefab(Transform t, Transform root)
+    {
+        for (var c = t; c != null; c = c.parent)
+        {
+            if (!c.gameObject.activeSelf) return false;
+            if (c == root) break;
+        }
+        return true;
+    }
+
+    static string RelPath(Transform t, Transform root)
+    {
+        if (t == root) return "";
+        var p = t.name;
+        for (var c = t.parent; c != null && c != root; c = c.parent) p = c.name + "/" + p;
+        return p;
+    }
+
+    static JToken Manifest()
+    {
+        if (!File.Exists(LedgerFile)) throw new Exception("Nothing placed yet");
+        if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
+        var entries = new JArray();
+        var expectedByGuid = new Dictionary<string, JObject>();
+        string shipName = null;
+        int missing = 0;
+        foreach (var path in File.ReadAllLines(LedgerFile).Distinct())
+        {
+            var t = Find(path);
+            if (t == null) { missing++; continue; }   // deleted since
+            var loader = t.GetComponent<BBI.Unity.Game.AddressableLoader>();
+            if (loader == null) continue;              // group container
+            var guid = loader.assetGUID;
+            if (!expectedByGuid.TryGetValue(guid, out var exp))
+            {
+                // The first lookup after a domain reload sometimes returns no location; retry.
+                GameObject src = null;
+                for (int attempt = 0; attempt < 4 && src == null; attempt++)
+                    src = AddressableBaker.LoadAddressableAsync(guid, loader.childPath ?? "").Result;
+                var rs = new JArray(); var cs = new JArray();
+                if (src != null)
+                {
+                    foreach (var mr in src.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        var mf = mr.GetComponent<MeshFilter>();
+                        if (!mr.enabled || mf == null || mf.sharedMesh == null || !ActiveInPrefab(mr.transform, src.transform)) continue;
+                        rs.Add(new JObject { ["p"] = RelPath(mr.transform, src.transform), ["m"] = mf.sharedMesh.name, ["v"] = mf.sharedMesh.vertexCount });
+                    }
+                    foreach (var col in src.GetComponentsInChildren<Collider>(true))
+                    {
+                        if (!col.enabled || !ActiveInPrefab(col.transform, src.transform)) continue;
+                        var mc = col as MeshCollider;
+                        cs.Add(new JObject
+                        {
+                            ["p"] = RelPath(col.transform, src.transform), ["t"] = col.GetType().Name,
+                            ["m"] = mc != null && mc.sharedMesh != null ? mc.sharedMesh.name : "",
+                            ["convex"] = mc != null && mc.convex, ["trigger"] = col.isTrigger,
+                        });
+                    }
+                }
+                exp = new JObject { ["asset"] = src != null ? src.name : null, ["renderers"] = rs, ["colliders"] = cs };
+                expectedByGuid[guid] = exp;
+            }
+            var root = t.root;
+            shipName = root.name;
+            entries.Add(new JObject
+            {
+                ["key"] = path, ["name"] = t.name,
+                ["group"] = t.parent != null ? t.parent.name : "",
+                ["deck"] = t.parent != null && t.parent.parent != null ? t.parent.parent.name : "",
+                ["guid"] = guid, ["shipLocalPos"] = V(root.InverseTransformPoint(t.position)),
+                ["asset"] = exp["asset"], ["renderers"] = exp["renderers"], ["colliders"] = exp["colliders"],
+            });
+        }
+        var file = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "placement_manifest.json"));
+        File.WriteAllText(file, new JObject { ["ship"] = shipName, ["entries"] = entries }.ToString(Newtonsoft.Json.Formatting.None));
+        return new JObject { ["file"] = file, ["entries"] = entries.Count, ["ledgerPathsNotInScene"] = missing, ["distinctParts"] = expectedByGuid.Count,
+            // A part whose prefab failed to load has no expectations and would pass vacuously in-game — rerun until 0.
+            ["unresolvedParts"] = expectedByGuid.Count(kv => ((JArray)kv.Value["renderers"]).Count == 0 && ((JArray)kv.Value["colliders"]).Count == 0) };
     }
 
     // ── catalog ──────────────────────────────────────────────────────────────
