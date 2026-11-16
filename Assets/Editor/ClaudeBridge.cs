@@ -116,6 +116,7 @@ public static class ClaudeBridge
                 case "manifest":  result = Manifest(); break;
                 case "wall":      result = Wall(cmd); break;
                 case "clone":     result = Clone(cmd); break;
+                case "rescale":   result = Rescale(cmd); break;
                 case "bake":      result = Bake(cmd); break;
                 case "meshuv":    result = MeshUv(cmd); break;
                 case "postervariant": result = PosterVariant(cmd); break;
@@ -857,6 +858,21 @@ public static class ClaudeBridge
         EditorUtility.SetDirty(mat);
         AssetDatabase.SaveAssets();
         return matPath;
+    }
+
+
+    // { op:"rescale", path, scale:[sx,sy,sz], euler, center, floorY, pos } — multiplies the object's LOCAL scale and bakes it
+    // into the mesh with Lock In Rescale (localScale returns to 1), then applies the pose. For bridge-made objects.
+    static JToken Rescale(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var s = ToV(cmd["scale"], Vector3.one);
+        t.localScale = Vector3.Scale(t.localScale, s);
+        RescaleLocker.LockRescale(t.gameObject);
+        ApplyPose(t, cmd);
+        Dirty(t.gameObject);
+        return Describe(t.gameObject);
     }
 
     // { op:"clone", source:"Tachi/.../PDC_Barrel.003", parent, name, euler:[x,y,z], center, floorY }
