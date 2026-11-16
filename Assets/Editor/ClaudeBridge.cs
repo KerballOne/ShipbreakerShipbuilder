@@ -750,12 +750,16 @@ public static class ClaudeBridge
     {
         float max = (float?)cmd["max"] ?? 5f;
         var ignore = cmd["ignore"] != null ? cmd["ignore"].Select(t => (string)t).ToList() : new List<string>();
+        // inactive:true also tests disabled objects (e.g. hull walls switched off for access); only:[..] restricts by path.
+        bool inactive = (bool?)cmd["inactive"] ?? false;
+        var only = cmd["only"] != null ? cmd["only"].Select(t => (string)t).ToList() : null;
         var filters = new List<MeshFilter>();
         foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
-            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(false))
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(inactive))
             {
                 var mr = mf.GetComponent<MeshRenderer>();
                 if (mr == null || !mr.enabled || mf.sharedMesh == null) continue;
+                if (only != null) { var pth = PathOf(mf.gameObject); if (!only.Any(i => pth.Contains(i))) continue; }
                 filters.Add(mf);
             }
         var unreadable = new HashSet<string>();
@@ -767,7 +771,16 @@ public static class ClaudeBridge
             float best = max; Vector3 bn = Vector3.zero; MeshFilter bf = null;
             foreach (var mf in filters)
             {
-                var b = mf.GetComponent<MeshRenderer>().bounds; b.Expand(0.01f);
+                Bounds b;
+                if (mf.gameObject.activeInHierarchy) b = mf.GetComponent<MeshRenderer>().bounds;
+                else
+                {   // a disabled renderer has no valid world bounds: transform the mesh bounds by hand
+                    var mb = mf.sharedMesh.bounds; var l2w = mf.transform.localToWorldMatrix;
+                    b = new Bounds(l2w.MultiplyPoint3x4(mb.center), Vector3.zero);
+                    for (int cx = -1; cx <= 1; cx += 2) for (int cy = -1; cy <= 1; cy += 2) for (int cz = -1; cz <= 1; cz += 2)
+                        b.Encapsulate(l2w.MultiplyPoint3x4(mb.center + Vector3.Scale(mb.extents, new Vector3(cx, cy, cz))));
+                }
+                b.Expand(0.01f);
                 if (!b.IntersectRay(ray, out float bd) || bd > best) continue;
                 var path = PathOf(mf.gameObject);
                 if (ignore.Any(i => path.Contains(i))) continue;
