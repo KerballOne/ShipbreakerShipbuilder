@@ -115,6 +115,10 @@ public static class ClaudeBridge
                 case "delete":    result = Delete(cmd); break;
                 case "manifest":  result = Manifest(); break;
                 case "wall":      result = Wall(cmd); break;
+                case "clone":     result = Clone(cmd); break;
+                case "bake":      result = Bake(cmd); break;
+                case "meshuv":    result = MeshUv(cmd); break;
+                case "postervariant": result = PosterVariant(cmd); break;
                 case "reloadscene":   // discard unsaved scene changes by reopening the scene from disk
                 {
                     var sp = SceneManager.GetActiveScene().path;
@@ -124,6 +128,9 @@ public static class ClaudeBridge
                 }
                 case "deletemany": result = DeleteMany(cmd); break;
                 case "inspect":   result = Inspect(cmd); break;
+                case "setoi":     result = SetOi(cmd); break;
+                case "meshcast":  result = MeshCast(cmd); break;
+                case "signmat":   result = SignMat(cmd); break;
                 case "placeprefab": result = PlacePrefab(cmd); break;
                 case "console":   result = "drained"; break;   // errors ride along as consoleErrors
                 case "validate":  result = Validate(); break;
@@ -476,7 +483,7 @@ public static class ClaudeBridge
     {
         var t = Find((string)cmd["path"]);
         if (t == null) throw new Exception("Not found: " + cmd["path"]);
-        if (!InLedger((string)cmd["path"])) throw new Exception("Refusing to move an object the bridge did not create: " + cmd["path"]);
+        if (!InLedger((string)cmd["path"]) && !((bool?)cmd["force"] ?? false)) throw new Exception("Refusing to move an object the bridge did not create (pass force:true if the user asked for it): " + cmd["path"]);
         ApplyPose(t, cmd);
         Dirty(t.gameObject);
         return Describe(t.gameObject);
@@ -559,8 +566,9 @@ public static class ClaudeBridge
         if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
         var asset = AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["asset"]);
         if (asset == null) throw new Exception("Prefab not found: " + cmd["asset"]);
+        var wanted = UniqueName(parent, (string)cmd["name"] ?? asset.name);   // before instantiating, or the new child counts as a clash
         var go = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
-        go.name = UniqueName(parent, (string)cmd["name"] ?? asset.name);
+        go.name = wanted;
         go.transform.position = parent.position;
         go.transform.rotation = Quaternion.identity;
         ApplyPose(go.transform, cmd);
@@ -593,6 +601,14 @@ public static class ClaudeBridge
         go.transform.localScale = new Vector3(width / nb.size.x, height / nb.size.y, 1f);
         RescaleLocker.LockRescale(go);
 
+        if (cmd["material"] != null)
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>((string)cmd["material"]);
+            if (m == null) throw new Exception("Material not found: " + cmd["material"]);
+            foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
+                mr.sharedMaterials = Enumerable.Repeat(m, mr.sharedMaterials.Length).ToArray();
+        }
+        if (cmd["oi"] != null) ApplyOi(go, (string)cmd["oi"]);
         if ((bool?)cmd["glass"] ?? false)
         {
             var glass = AssetDatabase.LoadAssetAtPath<Material>(GlassMat);
@@ -606,6 +622,287 @@ public static class ClaudeBridge
         return Describe(go);
     }
 
+    // { op:"meshuv", asset:"Assets/.../mesh.asset" | guid:"<addressable>" } → UV ranges per channel (diagnostic).
+    static JToken MeshUv(JObject cmd)
+    {
+        var arr = new JArray();
+        var meshes = new List<Mesh>();
+        if (cmd["asset"] != null) meshes.AddRange(AssetDatabase.LoadAllAssetsAtPath((string)cmd["asset"]).OfType<Mesh>());
+        if (cmd["guid"] != null)
+        {
+            var src = AddressableBaker.LoadAddressableAsync((string)cmd["guid"], "").Result;
+            if (src != null) meshes.AddRange(src.GetComponentsInChildren<MeshFilter>(true).Where(f => f.sharedMesh != null).Select(f => f.sharedMesh));
+        }
+        foreach (var m in meshes)
+        {
+            var o = new JObject { ["mesh"] = m.name, ["verts"] = m.vertexCount, ["readable"] = m.isReadable, ["bounds"] = V(m.bounds.size) };
+            for (int ch = 0; ch < 4; ch++)
+            {
+                var uv = new List<Vector2>();
+                try { m.GetUVs(ch, uv); } catch (Exception ex) { o["uv" + ch] = "error: " + ex.Message; continue; }
+                if (uv.Count == 0) continue;
+                o["uv" + ch] = $"n={uv.Count} x[{uv.Min(u => u.x):F3},{uv.Max(u => u.x):F3}] y[{uv.Min(u => u.y):F3},{uv.Max(u => u.y):F3}]";
+            }
+            // per-face breakdown: which part of the texture each side of the mesh shows
+            var uv0 = new List<Vector2>(); m.GetUVs(0, uv0);
+            var normals = m.normals; var verts = m.vertices;
+            if (uv0.Count == normals.Length && uv0.Count > 0)
+            {
+                var faces = new JObject();
+                foreach (var g in Enumerable.Range(0, uv0.Count).GroupBy(i => $"{Mathf.Round(normals[i].x)},{Mathf.Round(normals[i].y)},{Mathf.Round(normals[i].z)}"))
+                {
+                    var us = g.Select(i => uv0[i]).ToList(); var ps = g.Select(i => verts[i]).ToList();
+                    faces[g.Key] = $"uv x[{us.Min(u => u.x):F4},{us.Max(u => u.x):F4}] y[{us.Min(u => u.y):F4},{us.Max(u => u.y):F4}] " +
+                                   $"size {ps.Max(p => p.x) - ps.Min(p => p.x):F3} x {ps.Max(p => p.y) - ps.Min(p => p.y):F3} x {ps.Max(p => p.z) - ps.Min(p => p.z):F3}";
+                }
+                o["faces"] = faces;
+            }
+            arr.Add(o);
+        }
+        return arr;
+    }
+
+    // { op:"bake", guid, name, folder:"Assets/_CustomShips/Tachi/Prefabs/Posters" }
+    // Bakes a game addressable into a self-contained local prefab the same way the Import Game Part
+    // wizard's Bake does (AddressableBaker.BakeTree + ACL for the GUID-resolved part assets).
+    static JToken Bake(JObject cmd)
+    {
+        var guid = (string)cmd["guid"];
+        var folder = ((string)cmd["folder"]).TrimEnd('/');
+        var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+        if (src == null) throw new Exception("Could not load addressable " + guid);
+        var name = (string)cmd["name"] ?? (src.name + "_Baked");
+        var assetFolder = $"{folder}/{name}_Assets";
+        var prefabPath = $"{folder}/{name}.prefab";
+        AddressableBaker.ClearCaches();
+        AddressableBaker.EnsureFolder(folder);
+        AddressableBaker.EnsureFolder(assetFolder);
+        var root = new GameObject(name);
+        try
+        {
+            var refs = new List<(Component component, string field, string guid)>();
+            AddressableBaker.BakeTree(src, root.transform, assetFolder, refs);
+            if (refs.Count > 0)
+            {
+                var acl = root.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
+                acl.componentValues = refs.Select(r => new BBI.Unity.Game.AddressableComponentValue { component = r.component, field = r.field, address = r.guid }).ToList();
+            }
+            PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+        }
+        finally { UnityEngine.Object.DestroyImmediate(root); }
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+        var mats = new JArray();
+        foreach (var mr in prefab.GetComponentsInChildren<MeshRenderer>(true))
+            foreach (var m in mr.sharedMaterials)
+            {
+                if (m == null) continue;
+                var tex = new JObject();
+                foreach (var tn in m.GetTexturePropertyNames())
+                {
+                    var t = m.GetTexture(tn);
+                    if (t != null) tex[tn] = AssetDatabase.GetAssetPath(t) + $" ({t.width}x{t.height}) st={m.GetTextureScale(tn)}/{m.GetTextureOffset(tn)}";
+                }
+                mats.Add(new JObject { ["renderer"] = mr.name, ["material"] = AssetDatabase.GetAssetPath(m), ["shader"] = m.shader.name, ["textures"] = tex });
+            }
+        return new JObject { ["prefab"] = prefabPath, ["materials"] = mats };
+    }
+
+    // { op:"postervariant", basePrefab, baseMaterial, texture:"Assets/.../art.png", texProp:"_BaseColorMap", name, folder }
+    // Copies a baked poster prefab and gives it a copy of the material with a different artwork texture.
+    static JToken PosterVariant(JObject cmd)
+    {
+        var folder = ((string)cmd["folder"]).TrimEnd('/');
+        var name = (string)cmd["name"];
+        var baseMat = AssetDatabase.LoadAssetAtPath<Material>((string)cmd["baseMaterial"]);
+        var tex = AssetDatabase.LoadAssetAtPath<Texture2D>((string)cmd["texture"]);
+        if (baseMat == null || tex == null) throw new Exception("Base material or texture not found");
+        var matPath = $"{folder}/{name}.mat";
+        var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+        if (mat == null) { mat = new Material(baseMat); AssetDatabase.CreateAsset(mat, matPath); }
+        foreach (var prop in ((string)cmd["texProp"]).Split(','))
+            if (mat.HasProperty(prop)) mat.SetTexture(prop, tex);
+        EditorUtility.SetDirty(mat);
+
+        var prefabPath = $"{folder}/{name}.prefab";
+        var inst = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["basePrefab"]));
+        try
+        {
+            PrefabUtility.UnpackPrefabInstance(inst, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            inst.name = name;
+            foreach (var mr in inst.GetComponentsInChildren<MeshRenderer>(true))
+                mr.sharedMaterials = mr.sharedMaterials.Select(m => m == baseMat ? mat : m).ToArray();
+            PrefabUtility.SaveAsPrefabAsset(inst, prefabPath);
+        }
+        finally { UnityEngine.Object.DestroyImmediate(inst); }
+        AssetDatabase.SaveAssets();
+        return new JObject { ["prefab"] = prefabPath, ["material"] = matPath };
+    }
+
+    // { op:"meshcast", rays:[{o:[x,y,z], d:[x,y,z]}], max:3, ignore:["name substring", ...] }
+    // Casts each ray against the render-mesh triangles of everything in the scene (the same geometry the
+    // game joints on) and returns the nearest hit: distance, point, world normal and object path.
+    static readonly Dictionary<Mesh, KeyValuePair<Vector3[], int[]>> meshCache = new Dictionary<Mesh, KeyValuePair<Vector3[], int[]>>();
+
+    static JToken MeshCast(JObject cmd)
+    {
+        float max = (float?)cmd["max"] ?? 5f;
+        var ignore = cmd["ignore"] != null ? cmd["ignore"].Select(t => (string)t).ToList() : new List<string>();
+        var filters = new List<MeshFilter>();
+        foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(false))
+            {
+                var mr = mf.GetComponent<MeshRenderer>();
+                if (mr == null || !mr.enabled || mf.sharedMesh == null) continue;
+                filters.Add(mf);
+            }
+        var unreadable = new HashSet<string>();
+        var res = new JArray();
+        foreach (var r in cmd["rays"])
+        {
+            var o = ToV(r["o"], Vector3.zero); var d = ToV(r["d"], Vector3.forward).normalized;
+            var ray = new Ray(o, d);
+            float best = max; Vector3 bn = Vector3.zero; MeshFilter bf = null;
+            foreach (var mf in filters)
+            {
+                var b = mf.GetComponent<MeshRenderer>().bounds; b.Expand(0.01f);
+                if (!b.IntersectRay(ray, out float bd) || bd > best) continue;
+                var path = PathOf(mf.gameObject);
+                if (ignore.Any(i => path.Contains(i))) continue;
+                if (!meshCache.TryGetValue(mf.sharedMesh, out var data))
+                {
+                    Vector3[] vs = null; int[] ts = null;
+                    try { vs = mf.sharedMesh.vertices; ts = mf.sharedMesh.triangles; } catch { }
+                    data = new KeyValuePair<Vector3[], int[]>(vs ?? new Vector3[0], ts ?? new int[0]);
+                    meshCache[mf.sharedMesh] = data;
+                }
+                if (data.Key.Length == 0) { unreadable.Add(mf.sharedMesh.name); continue; }
+                var w2l = mf.transform.worldToLocalMatrix;
+                var lo = w2l.MultiplyPoint3x4(o); var ld = w2l.MultiplyVector(d);   // not normalised: t stays in world units
+                var vsl = data.Key; var tsl = data.Value;
+                for (int i = 0; i + 2 < tsl.Length; i += 3)
+                {
+                    var a = vsl[tsl[i]]; var e1 = vsl[tsl[i + 1]] - a; var e2 = vsl[tsl[i + 2]] - a;
+                    var pv = Vector3.Cross(ld, e2); float det = Vector3.Dot(e1, pv);
+                    if (det > -1e-9f && det < 1e-9f) continue;
+                    float inv = 1f / det; var tv = lo - a;
+                    float u = Vector3.Dot(tv, pv) * inv; if (u < 0f || u > 1f) continue;
+                    var qv = Vector3.Cross(tv, e1);
+                    float v = Vector3.Dot(ld, qv) * inv; if (v < 0f || u + v > 1f) continue;
+                    float t = Vector3.Dot(e2, qv) * inv;
+                    if (t > 1e-4f && t < best)
+                    {
+                        best = t; bf = mf;
+                        bn = mf.transform.TransformDirection(Vector3.Cross(e1, e2)).normalized;
+                    }
+                }
+            }
+            if (bf == null) res.Add(JValue.CreateNull());
+            else res.Add(new JObject { ["t"] = Math.Round(best, 4), ["p"] = V(o + d * best), ["n"] = V(bn), ["obj"] = PathOf(bf.gameObject) });
+        }
+        return new JObject { ["hits"] = res, ["unreadable"] = new JArray(unreadable) };
+    }
+
+    // { op:"setoi", path, oi:"Assets/.../OI_X.asset" } — gives every StructurePart under `path` that display name
+    // (the ObjectInfoAsset override the project's Set Display Name tool wires). Omit `oi` to just report.
+    static int ApplyOi(GameObject go, string oiPath)
+    {
+        var oi = AssetDatabase.LoadAssetAtPath<BBI.Unity.Game.ObjectInfoAsset>(oiPath);
+        if (oi == null) throw new Exception("ObjectInfoAsset not found: " + oiPath);
+        int n = 0;
+        foreach (var sp in go.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+        {
+            var so = new SerializedObject(sp);
+            var prop = so.FindProperty("m_ObjectInfoAssetOverride");
+            if (prop == null) continue;
+            prop.objectReferenceValue = oi;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(sp);
+            n++;
+        }
+        return n;
+    }
+
+    static JToken SetOi(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        int set = 0;
+        if (cmd["oi"] != null) { set = ApplyOi(t.gameObject, (string)cmd["oi"]); Dirty(t.gameObject); }
+        var arr = new JArray();
+        foreach (var sp in t.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+        {
+            var oi = new SerializedObject(sp).FindProperty("m_ObjectInfoAssetOverride")?.objectReferenceValue;
+            arr.Add(new JObject { ["part"] = sp.name, ["oi"] = oi != null ? AssetDatabase.GetAssetPath(oi) : null,
+                ["displayName"] = oi != null ? new SerializedObject(oi).FindProperty("m_Data.m_ObjectName")?.stringValue : null });
+        }
+        return new JObject { ["set"] = set, ["parts"] = arr };
+    }
+
+    // { op:"signmat", baseMaterial, texture, texProp:"_MainTex,_BaseColorMap", name, folder } → a copy of the base
+    // material showing `texture` (created once, reused after). Used with wall{asset,material} for text signs.
+    static JToken SignMat(JObject cmd)
+    {
+        var folder = ((string)cmd["folder"]).TrimEnd('/');
+        AddressableBaker.EnsureFolder(folder);
+        var baseMat = AssetDatabase.LoadAssetAtPath<Material>((string)cmd["baseMaterial"]);
+        var tex = AssetDatabase.LoadAssetAtPath<Texture2D>((string)cmd["texture"]);
+        if (baseMat == null || tex == null) throw new Exception("Base material or texture not found: " + cmd["texture"]);
+        var matPath = $"{folder}/{(string)cmd["name"]}.mat";
+        var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+        if (mat == null) { mat = new Material(baseMat); AssetDatabase.CreateAsset(mat, matPath); }
+        foreach (var prop in ((string)cmd["texProp"] ?? "_MainTex,_BaseColorMap").Split(','))
+            if (mat.HasProperty(prop)) mat.SetTexture(prop, tex);
+        EditorUtility.SetDirty(mat);
+        AssetDatabase.SaveAssets();
+        return matPath;
+    }
+
+    // { op:"clone", source:"Tachi/.../PDC_Barrel.003", parent, name, euler:[x,y,z], center, floorY }
+    // Copies one baked part that lives in the ship (e.g. a single PDC component) as a plain, unlinked
+    // object. Its StructurePart/blueprint asset references are GUID-resolved at load through an
+    // AddressableComponentLoader, so the source's ACL entries are duplicated onto an ACL on `parent`.
+    static JToken Clone(JObject cmd)
+    {
+        var src = Find((string)cmd["source"]);
+        if (src == null) throw new Exception("Source not found: " + cmd["source"]);
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+
+        var go = UnityEngine.Object.Instantiate(src.gameObject, parent);
+        go.name = UniqueName(parent, (string)cmd["name"] ?? src.name);
+        go.SetActive(true);
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+
+        BBI.Unity.Game.AddressableComponentLoader srcAcl = null;
+        for (var t = src; t != null && srcAcl == null; t = t.parent) srcAcl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+        int registered = 0;
+        if (srcAcl != null)
+        {
+            var acl = parent.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+            if (acl == null) acl = parent.gameObject.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
+            var srcAll = src.GetComponentsInChildren<Component>(true);
+            var dstAll = go.GetComponentsInChildren<Component>(true);
+            foreach (var cv in srcAcl.componentValues)
+            {
+                if (cv == null || cv.component == null) continue;
+                int idx = Array.IndexOf(srcAll, cv.component);
+                if (idx < 0 || idx >= dstAll.Length || dstAll[idx] == null || dstAll[idx].GetType() != cv.component.GetType()) continue;
+                acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = dstAll[idx], field = cv.field, address = cv.address });
+                registered++;
+            }
+            EditorUtility.SetDirty(acl);
+        }
+        ApplyPose(go.transform, cmd);
+        Ledger(go);
+        Dirty(go);
+        var d = Describe(go);
+        d["aclEntries"] = registered;
+        return d;
+    }
+
     // { op:"deletemany", paths:[...] } — like delete, but one prefab load/save for all saved objects.
     static JToken DeleteMany(JObject cmd)
     {
@@ -616,7 +913,7 @@ public static class ClaudeBridge
             var path = (string)p;
             var t = Find(path);
             if (t == null) { notFound.Add(path); continue; }
-            if (!InLedger(path)) throw new Exception("Refusing to delete an object the bridge did not create: " + path);
+            if (!InLedger(path) && !((bool?)cmd["force"] ?? false)) throw new Exception("Refusing to delete an object the bridge did not create (pass force:true if the user asked for it): " + path);
             var instRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(t.gameObject);
             // Saved into the outer ship prefab (this also covers nested prefab instances such as wall panels).
             if (instRoot != null && instRoot != t.gameObject && !PrefabUtility.IsAddedGameObjectOverride(t.gameObject))
@@ -633,9 +930,15 @@ public static class ClaudeBridge
                 direct++;
             }
         }
+        // Objects may be defined in a nested prefab asset (e.g. Interior Vessel.prefab inside Tachi.prefab);
+        // Unity refuses to destroy those from the outer asset, so they are queued for the asset that owns them.
         int fromPrefab = 0;
-        foreach (var kv in byAsset)
+        var queue = new Queue<KeyValuePair<string, List<string>>>(byAsset);
+        int guard = 0;
+        while (queue.Count > 0 && guard++ < 8)
         {
+            var kv = queue.Dequeue();
+            var deferred = new Dictionary<string, List<string>>();
             var contents = PrefabUtility.LoadPrefabContents(kv.Key);
             try
             {
@@ -643,12 +946,22 @@ public static class ClaudeBridge
                 {
                     var target = contents.transform.Find(rel);
                     if (target == null) { notFound.Add(rel); continue; }
+                    var parentGo = target.parent != null ? target.parent.gameObject : null;
+                    var nested = parentGo != null ? PrefabUtility.GetNearestPrefabInstanceRoot(parentGo) : null;
+                    if (nested != null && !PrefabUtility.IsAddedGameObjectOverride(target.gameObject))
+                    {
+                        var nestedAsset = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(nested);
+                        if (!deferred.TryGetValue(nestedAsset, out var l)) deferred[nestedAsset] = l = new List<string>();
+                        l.Add(RelPath(target, nested.transform));
+                        continue;
+                    }
                     UnityEngine.Object.DestroyImmediate(target.gameObject);
                     fromPrefab++;
                 }
                 PrefabUtility.SaveAsPrefabAsset(contents, kv.Key);
             }
             finally { PrefabUtility.UnloadPrefabContents(contents); }
+            foreach (var d in deferred) queue.Enqueue(d);
         }
         return new JObject { ["deletedInScene"] = direct, ["deletedFromPrefab"] = fromPrefab, ["notFound"] = notFound };
     }

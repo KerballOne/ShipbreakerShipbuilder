@@ -1244,6 +1244,9 @@ These exceptions appear in the Unity console during normal editor use and do not
 | `capture` | Render a camera at a given pose to `.claude/bridge/shots/<name>.png` |
 | `catalog` | Render game parts to thumbnails in `.claude/bridge/catalog/` |
 | `group`, `place`, `move`, `delete` | Create a container, place an `AddressableLoader` part by its bounds (`center` + `floorY`), reposition, or remove |
+| `wall` | Place a baked board (or any baked prefab via `asset`) resized with Lock In Rescale; `glass`, or `material` for a text sign, and `oi` for a display name |
+| `clone`, `setoi` | Copy one baked part already in the ship (e.g. a spare PDC barrel); `setoi` gives its StructureParts the same display-name asset as the originals (omit `oi` to list) |
+| `bake`, `postervariant`, `signmat`, `placeprefab` | Bake a game part to a local prefab, make a poster prefab or sign material from a texture, place a local prefab |
 | `manifest` | Write `placement_manifest.json` (see 10.2) |
 | `save`, `refresh`, `menu` | Save open scenes, recompile/reimport, run a menu item |
 
