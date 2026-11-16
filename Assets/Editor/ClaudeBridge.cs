@@ -117,6 +117,11 @@ public static class ClaudeBridge
                 case "wall":      result = Wall(cmd); break;
                 case "clone":     result = Clone(cmd); break;
                 case "rescale":   result = Rescale(cmd); break;
+                case "room":      result = Room(cmd); break;
+                case "rooms":     result = Rooms(cmd); break;
+                case "roomvolume": result = RoomVolume(cmd); break;
+                case "bakeparts": result = BakeParts(cmd); break;
+                case "disablechild": result = DisableChild(cmd); break;
                 case "bake":      result = Bake(cmd); break;
                 case "meshuv":    result = MeshUv(cmd); break;
                 case "postervariant": result = PosterVariant(cmd); break;
@@ -886,6 +891,262 @@ public static class ClaudeBridge
         ApplyPose(t, cmd);
         Dirty(t.gameObject);
         return Describe(t.gameObject);
+    }
+
+
+    // { op:"disablechild", path, children:["PRF_CargoWall06", ...], enable:false } — adds (or with enable:true removes)
+    // entries in an AddressableLoader's disabledChildren list (child paths relative to the loaded prefab root), the
+    // same list the loader's inspector tree toggles, then refreshes the editor preview.
+    static JToken DisableChild(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var loader = t.GetComponent<BBI.Unity.Game.AddressableLoader>();
+        if (loader == null) throw new Exception("No AddressableLoader on " + cmd["path"]);
+        bool enable = (bool?)cmd["enable"] ?? false;
+        if (loader.disabledChildren == null) loader.disabledChildren = new List<string>();
+        foreach (var c in cmd["children"])
+        {
+            var child = (string)c;
+            if (enable) loader.disabledChildren.Remove(child);
+            else if (!loader.disabledChildren.Contains(child)) loader.disabledChildren.Add(child);
+        }
+        EditorUtility.SetDirty(loader);
+        Dirty(t.gameObject);
+        AddressableRendering.UpdateViewList();
+        return new JArray(loader.disabledChildren);
+    }
+
+
+    // { op:"bakeparts", guid, name, folder, sp, bp, smallSp, smallBp, smallMax:0.6, skip:[substr], oi }
+    // Bakes a game addressable that has NO salvage data (Hab set dressing: no StructurePart, no colliders) into a local
+    // prefab where every mesh is a real part: convex MeshCollider + StructurePart + EntityBlueprintComponent, with the
+    // SP_Mat / blueprint resolved by GUID at load through an AddressableComponentLoader on the root. Meshes whose
+    // largest dimension is under smallMax get smallSp / smallBp. Nodes matching `skip` are dropped.
+    static JToken BakeParts(JObject cmd)
+    {
+        var guid = (string)cmd["guid"];
+        var folder = ((string)cmd["folder"]).TrimEnd('/');
+        var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+        if (src == null) throw new Exception("Could not load addressable " + guid);
+        var name = (string)cmd["name"] ?? (src.name + "_Baked");
+        string sp = (string)cmd["sp"], bp = (string)cmd["bp"];
+        string ssp = (string)cmd["smallSp"] ?? sp, sbp = (string)cmd["smallBp"] ?? bp;
+        float smallMax = (float?)cmd["smallMax"] ?? 0.6f;
+        var skip = cmd["skip"] != null ? cmd["skip"].Select(t => (string)t).ToList() : new List<string>();
+        var assetFolder = $"{folder}/{name}_Assets";
+        var prefabPath = $"{folder}/{name}.prefab";
+        AddressableBaker.ClearCaches();
+        AddressableBaker.EnsureFolder(folder);
+        AddressableBaker.EnsureFolder(assetFolder);
+        var root = new GameObject(name);
+        var report = new JArray();
+        try
+        {
+            var refs = new List<(Component component, string field, string guid)>();
+            AddressableBaker.BakeTree(src, root.transform, assetFolder, refs);
+            foreach (var t in root.GetComponentsInChildren<Transform>(true).ToList())
+                if (t != null && t != root.transform && skip.Any(k => t.name.Contains(k))) UnityEngine.Object.DestroyImmediate(t.gameObject);
+            // decor:{ "<name substr>": "<host node name>" } — matching meshes stay render-only and ride along as children
+            // of the host part (things sealed inside another part's hull, e.g. the snacks inside a vending machine).
+            var decor = cmd["decor"] as JObject;
+            var isDecor = new HashSet<GameObject>();
+            if (decor != null)
+                foreach (var kv in decor)
+                {
+                    var host = root.GetComponentsInChildren<MeshFilter>(true).FirstOrDefault(m => m.name == (string)kv.Value);
+                    if (host == null) continue;
+                    foreach (var m in root.GetComponentsInChildren<MeshFilter>(true).Where(m => m != host && m.name.Contains(kv.Key)).ToList())
+                    {
+                        m.transform.SetParent(host.transform, true);
+                        foreach (var c in m.GetComponents<Collider>()) UnityEngine.Object.DestroyImmediate(c);
+                        isDecor.Add(m.gameObject);
+                    }
+                }
+            var clip = cmd["clipBelow"] as JObject;     // { "<name substr>": height } — collider only from that height (above the prefab base) up
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
+            {
+                var go = mf.gameObject;
+                if (isDecor.Contains(go)) continue;
+                if (mf.sharedMesh == null || go.GetComponent<BBI.Unity.Game.StructurePart>() != null) continue;
+                var size = Vector3.Scale(mf.sharedMesh.bounds.size, mf.transform.lossyScale);
+                bool small = Mathf.Max(size.x, Mathf.Max(size.y, size.z)) < smallMax;
+                if (go.GetComponent<Collider>() == null)
+                {
+                    var mc = go.AddComponent<MeshCollider>();
+                    Mesh colMesh = mf.sharedMesh;
+                    var ck = clip?.Properties().FirstOrDefault(pr => go.name.Contains(pr.Name));
+                    if (ck != null)
+                    {
+                        float minY = (float)ck.Value;
+                        var keep = mf.sharedMesh.vertices.Where(v => root.transform.InverseTransformPoint(mf.transform.TransformPoint(v)).y >= minY).Distinct().ToList();
+                        if (keep.Count >= 4)
+                        {
+                            var tris = new List<int>();
+                            for (int i = 0; i + 2 < keep.Count; i++) { tris.Add(i); tris.Add(i + 1); tris.Add(i + 2); }
+                            colMesh = new Mesh { name = go.name + "_Collider" };
+                            colMesh.SetVertices(keep); colMesh.SetTriangles(tris, 0); colMesh.RecalculateBounds();
+                            AssetDatabase.CreateAsset(colMesh, $"{assetFolder}/{go.name}_Collider.asset");
+                        }
+                    }
+                    mc.sharedMesh = colMesh; mc.convex = true;
+                }
+                var newSp = go.AddComponent<BBI.Unity.Game.StructurePart>();
+                var newEbc = go.AddComponent<BBI.Unity.Game.EntityBlueprintComponent>();
+                var so = new SerializedObject(newEbc);
+                var ai = so.FindProperty("m_AutoInitialize");
+                if (ai != null) { ai.boolValue = true; so.ApplyModifiedPropertiesWithoutUndo(); }
+                // liftSmall: small loose items hover this far above what they rest on instead of touching it
+                if (small && cmd["liftSmall"] != null)
+                {
+                    var rend = go.GetComponent<MeshRenderer>();
+                    float before = rend != null ? rend.bounds.min.y : go.transform.position.y;
+                    if (cmd["tumble"] != null && rend != null)
+                    {
+                        float deg = (float)cmd["tumble"];
+                        var rng = new System.Random((go.name + go.transform.GetSiblingIndex() + go.transform.parent.GetSiblingIndex()).GetHashCode());
+                        Func<float> r1 = () => (float)(rng.NextDouble() * 2.0 - 1.0);
+                        var pivot = rend.bounds.center;
+                        var q = Quaternion.Euler(r1() * deg, r1() * 180f, r1() * deg);
+                        go.transform.rotation = q * go.transform.rotation;
+                        go.transform.position += pivot - rend.bounds.center;
+                    }
+                    float after = rend != null ? rend.bounds.min.y : go.transform.position.y;
+                    go.transform.position += Vector3.up * ((before - after) + (float)cmd["liftSmall"]);
+                }
+                refs.Add((newSp, "m_StructurePartAsset", small ? ssp : sp));
+                refs.Add((newEbc, "m_BlueprintAsset", small ? sbp : bp));
+                report.Add(new JObject { ["node"] = go.name, ["size"] = V(size), ["small"] = small, ["readable"] = mf.sharedMesh.isReadable,
+                                         ["localPos"] = V(root.transform.InverseTransformPoint(mf.transform.TransformPoint(mf.sharedMesh.bounds.center))) });
+            }
+            if (refs.Count > 0)
+            {
+                var acl = root.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
+                acl.componentValues = refs.Select(r => new BBI.Unity.Game.AddressableComponentValue { component = r.component, field = r.field, address = r.guid }).ToList();
+            }
+            if (cmd["oi"] != null) ApplyOi(root, (string)cmd["oi"]);
+            // parts must be unit scale in game: bake any scaled node into its mesh
+            // (uniform scales only: scale each mesh by its accumulated factor, then push the factor down into child offsets)
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(true))
+            {
+                float f = mf.transform.lossyScale.x / root.transform.lossyScale.x;
+                if (mf.sharedMesh == null || Mathf.Abs(f - 1f) < 1e-4f) continue;
+                var m2 = UnityEngine.Object.Instantiate(mf.sharedMesh);
+                m2.name = mf.sharedMesh.name + "_x" + f.ToString("F3");
+                m2.vertices = mf.sharedMesh.vertices.Select(v => v * f).ToArray();
+                m2.RecalculateBounds();
+                AssetDatabase.CreateAsset(m2, AssetDatabase.GenerateUniqueAssetPath($"{assetFolder}/{m2.name}.asset"));
+                var mcs = mf.GetComponent<MeshCollider>();
+                if (mcs != null && mcs.sharedMesh == mf.sharedMesh) mcs.sharedMesh = m2;
+                else if (mcs != null && mcs.sharedMesh != null)
+                {
+                    var c2 = UnityEngine.Object.Instantiate(mcs.sharedMesh);
+                    c2.name = mcs.sharedMesh.name + "_x" + f.ToString("F3");
+                    c2.vertices = mcs.sharedMesh.vertices.Select(v => v * f).ToArray(); c2.RecalculateBounds();
+                    AssetDatabase.CreateAsset(c2, AssetDatabase.GenerateUniqueAssetPath($"{assetFolder}/{c2.name}.asset"));
+                    mcs.sharedMesh = c2;
+                }
+                mf.sharedMesh = m2;
+            }
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))        // parents come before their children
+            {
+                if (t == root.transform || !RescaleLocker.IsNonUnitScale(t)) continue;
+                float f = t.localScale.x;
+                foreach (Transform c in t) { c.localPosition *= f; c.localScale *= f; }
+                t.localScale = Vector3.one;
+            }
+            PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+        }
+        finally { UnityEngine.Object.DestroyImmediate(root); }
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        return new JObject { ["prefab"] = prefabPath, ["parts"] = report };
+    }
+
+
+    // { op:"room", parent, name, center:[x,y,z], size:[x,y,z], roomAsset:"<DynamicRoomContainerAsset guid>", airlock:false }
+    // Adds one box room the way the ship's existing rooms are authored: '[ ] <name>' (ModuleDefinition) > 'Volumes'
+    // (RoomContainerDefinition + AddressableSOLoader resolving the room asset by GUID) > 'Volume' (RoomSubVolumeDefinition,
+    // Include). World-axis aligned; center/size are world values. Remove by deleting the '[ ] <name>' object.
+    static JToken Room(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var center = ToV(cmd["center"], Vector3.zero); var size = ToV(cmd["size"], Vector3.one);
+        var room = new GameObject(UniqueName(parent, "[ ] " + (string)cmd["name"]));
+        room.transform.SetParent(parent, false);
+        room.transform.position = center; room.transform.rotation = Quaternion.identity;
+        room.AddComponent<BBI.Unity.Game.ModuleDefinition>();
+        var vols = new GameObject("Volumes"); vols.transform.SetParent(room.transform, false);
+        var rcd = vols.AddComponent<BBI.Unity.Game.RoomContainerDefinition>();
+        var so = new SerializedObject(rcd);
+        so.FindProperty("m_IsAirlock").boolValue = (bool?)cmd["airlock"] ?? false;
+        var pt = so.FindProperty("m_PressurizationTime"); if (pt != null) pt.floatValue = 2f;
+        var dt = so.FindProperty("m_DecompressionTime"); if (dt != null) dt.floatValue = 2f;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        var loader = vols.AddComponent<BBI.Unity.Game.AddressableSOLoader>();
+        loader.comp = new List<string> { "BBI.Unity.Game.RoomContainerDefinition" };
+        loader.field = new List<string> { "m_DynamicRoomContainerAsset" };
+        loader.refs = new List<string> { (string)cmd["roomAsset"] };
+        var vol = new GameObject("Volume"); vol.transform.SetParent(vols.transform, false);
+        var sub = vol.AddComponent<BBI.Unity.Game.RoomSubVolumeDefinition>();
+        var so2 = new SerializedObject(sub);
+        so2.FindProperty("m_Center").vector3Value = Vector3.zero;
+        so2.FindProperty("m_Size").vector3Value = size;
+        so2.FindProperty("m_Mode").intValue = 0;
+        so2.ApplyModifiedPropertiesWithoutUndo();
+        Ledger(room);
+        Dirty(room);
+        return new JObject { ["path"] = PathOf(room), ["center"] = V(center), ["size"] = V(size) };
+    }
+
+
+    // { op:"rooms" } — every RoomContainerDefinition in the scene with its airlock flag and the world-space box of each
+    // sub-volume (corners of the local box transformed to world, reported as an axis-aligned min/max).
+    static JToken Rooms(JObject cmd)
+    {
+        var arr = new JArray();
+        foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+            foreach (var rcd in root.GetComponentsInChildren<BBI.Unity.Game.RoomContainerDefinition>(true))
+            {
+                var so = new SerializedObject(rcd);
+                var o = new JObject { ["path"] = PathOf(rcd.gameObject), ["active"] = rcd.gameObject.activeInHierarchy,
+                                      ["airlock"] = so.FindProperty("m_IsAirlock").boolValue };
+                var vols = new JArray();
+                foreach (var sv in rcd.GetComponentsInChildren<BBI.Unity.Game.RoomSubVolumeDefinition>(true))
+                {
+                    var s2 = new SerializedObject(sv);
+                    var c = s2.FindProperty("m_Center").vector3Value; var sz = s2.FindProperty("m_Size").vector3Value;
+                    var b = new Bounds(sv.transform.TransformPoint(c), Vector3.zero);
+                    for (int x = -1; x <= 1; x += 2) for (int y = -1; y <= 1; y += 2) for (int z = -1; z <= 1; z += 2)
+                        b.Encapsulate(sv.transform.TransformPoint(c + Vector3.Scale(sz * 0.5f, new Vector3(x, y, z))));
+                    vols.Add(new JObject { ["name"] = sv.name, ["mode"] = s2.FindProperty("m_Mode").intValue, ["min"] = V(b.min), ["max"] = V(b.max) });
+                }
+                o["volumes"] = vols;
+                arr.Add(o);
+            }
+        return arr;
+    }
+
+    // { op:"roomvolume", room:"<path of a '[ ] name' room made by op room>", name, center:[..], size:[..] }
+    // Adds another world-aligned Include box to an existing room, so one room can cover an L- or U-shaped space.
+    static JToken RoomVolume(JObject cmd)
+    {
+        var room = Find((string)cmd["room"]);
+        if (room == null) throw new Exception("Room not found: " + cmd["room"]);
+        var rcd = room.GetComponentInChildren<BBI.Unity.Game.RoomContainerDefinition>(true);
+        if (rcd == null) throw new Exception("No RoomContainerDefinition under " + cmd["room"]);
+        var vol = new GameObject(UniqueName(rcd.transform, (string)cmd["name"] ?? "Volume"));
+        vol.transform.SetParent(rcd.transform, false);
+        vol.transform.position = ToV(cmd["center"], Vector3.zero); vol.transform.rotation = Quaternion.identity;
+        var sub = vol.AddComponent<BBI.Unity.Game.RoomSubVolumeDefinition>();
+        var so = new SerializedObject(sub);
+        so.FindProperty("m_Center").vector3Value = Vector3.zero;
+        so.FindProperty("m_Size").vector3Value = ToV(cmd["size"], Vector3.one);
+        so.FindProperty("m_Mode").intValue = 0;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        Dirty(vol);
+        return PathOf(vol);
     }
 
     // { op:"clone", source:"Tachi/.../PDC_Barrel.003", parent, name, euler:[x,y,z], center, floorY }
