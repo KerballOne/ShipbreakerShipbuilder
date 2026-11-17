@@ -138,6 +138,7 @@ public static class ClaudeBridge
                 case "aclpurge": result = AclPurge(cmd); break;
                 case "aclrepair": result = AclRepair(cmd); break;
                 case "addmjc": result = AddMjc(cmd); break;
+                case "aclcopy": result = AclCopy(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
@@ -1829,6 +1830,36 @@ public static class ClaudeBridge
         bool added = c == null;
         if (added) { t.gameObject.AddComponent<BBI.Unity.Game.MandatoryJointContainer>(); Dirty(t.gameObject); }
         return new JObject { ["path"] = PathOf(t.gameObject), ["added"] = added, ["parts"] = t.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Length };
+    }
+
+    // { op:"aclcopy", path:"Tachi/.../Part", from:"Tachi/.../OtherPart", field:"m_StructurePartAsset", dry:true }
+    // Gives `path` the same addressable asset as `from` for one loader field (default: the StructurePartAsset, which
+    // carries the joint type). Both must be registered in an AddressableComponentLoader. Omit `from` to just report.
+    static JToken AclCopy(JObject cmd)
+    {
+        string field = (string)cmd["field"] ?? "m_StructurePartAsset"; bool dry = (bool?)cmd["dry"] ?? false;
+        Func<string, List<KeyValuePair<BBI.Unity.Game.AddressableComponentLoader, int>>> find = pth =>
+        {
+            var t = Find(pth); if (t == null) throw new Exception("Not found: " + pth);
+            var res = new List<KeyValuePair<BBI.Unity.Game.AddressableComponentLoader, int>>();
+            foreach (var acl in t.GetComponentsInParent<BBI.Unity.Game.AddressableComponentLoader>(true))
+                for (int i = 0; i < acl.componentValues.Count; i++)
+                {
+                    var cv = acl.componentValues[i];
+                    if (cv != null && cv.component != null && cv.component.transform == t && cv.field == field) res.Add(new KeyValuePair<BBI.Unity.Game.AddressableComponentLoader, int>(acl, i));
+                }
+            return res;
+        };
+        var dst = find((string)cmd["path"]);
+        var o = new JObject { ["path"] = (string)cmd["path"], ["field"] = field, ["entries"] = dst.Count,
+            ["was"] = new JArray(dst.Select(kv => kv.Key.componentValues[kv.Value].address)) };
+        if (cmd["from"] == null) return o;
+        var src = find((string)cmd["from"]);
+        if (src.Count == 0) throw new Exception("No loader entry for " + field + " on " + cmd["from"]);
+        if (dst.Count == 0) throw new Exception("No loader entry for " + field + " on " + cmd["path"]);
+        string addr = src[0].Key.componentValues[src[0].Value].address; o["now"] = addr;
+        if (!dry) foreach (var kv in dst) { kv.Key.componentValues[kv.Value].address = addr; EditorUtility.SetDirty(kv.Key); PrefabUtility.RecordPrefabInstancePropertyModifications(kv.Key); Dirty(kv.Key.gameObject); }
+        return o;
     }
 
     // { op:"aclpurge", path:"Tachi", dry:true } — drops entries whose component no longer exists from every
