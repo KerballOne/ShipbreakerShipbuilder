@@ -137,6 +137,7 @@ public static class ClaudeBridge
                 case "prefabdelete": result = PrefabDelete(cmd); break;
                 case "aclpurge": result = AclPurge(cmd); break;
                 case "aclrepair": result = AclRepair(cmd); break;
+                case "addmjc": result = AddMjc(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
@@ -1815,6 +1816,19 @@ public static class ClaudeBridge
         }
         return new JObject { ["path"] = PathOf(t.gameObject), ["dry"] = dry, ["removed"] = removed, ["aclEntriesRemoved"] = acl,
             ["left"] = new JArray(t.GetComponents<Component>().Where(c => c != null).Select(c => c.GetType().Name)) };
+    }
+
+    // { op:"addmjc", path:"Tachi/.../Group" } - adds a MandatoryJointContainer to the object: every StructurePart below it
+    // is joined to the others regardless of joint type (needed for copied pieces of one prop, which share JOINT_Prop
+    // and so cannot joint to each other).
+    static JToken AddMjc(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var c = t.GetComponent<BBI.Unity.Game.MandatoryJointContainer>();
+        bool added = c == null;
+        if (added) { t.gameObject.AddComponent<BBI.Unity.Game.MandatoryJointContainer>(); Dirty(t.gameObject); }
+        return new JObject { ["path"] = PathOf(t.gameObject), ["added"] = added, ["parts"] = t.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Length };
     }
 
     // { op:"aclpurge", path:"Tachi", dry:true } — drops entries whose component no longer exists from every
