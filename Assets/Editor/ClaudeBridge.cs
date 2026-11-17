@@ -119,6 +119,13 @@ public static class ClaudeBridge
                 case "rescale":   result = Rescale(cmd); break;
                 case "room":      result = Room(cmd); break;
                 case "rooms":     result = Rooms(cmd); break;
+                case "partcount": result = PartCount(cmd); break;
+                case "setactive": result = SetActiveOp(cmd); break;
+                case "mats": result = Mats(cmd); break;
+                case "reparent": result = Reparent(cmd); break;
+                case "remesh": result = Remesh(cmd); break;
+                case "bigmeshes": result = BigMeshes(cmd); break;
+                case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
                 case "bakeparts": result = BakeParts(cmd); break;
                 case "disablechild": result = DisableChild(cmd); break;
@@ -1147,6 +1154,325 @@ public static class ClaudeBridge
         so.ApplyModifiedPropertiesWithoutUndo();
         Dirty(vol);
         return PathOf(vol);
+    }
+
+    // { op:"splitpart", source:"Tachi/.../PDC_tubes_2", model:"Assets/.../Fore_Section_Split.fbx", prefix:"PDC_tubes_2_p", disableSource:true }
+    // Replaces one custom part by several pieces of it: for every mesh in `model` whose name starts with `prefix`, the
+    // source object is duplicated beside itself (same transform, StructurePart, blueprint, collider settings), given
+    // that mesh on its MeshFilter and MeshCollider and the materials the model import assigned to it, and its
+    // GUID-resolved asset references are registered on the same AddressableComponentLoader as the source's.
+    // The source is then switched off (not deleted).
+    static JToken SplitPart(JObject cmd)
+    {
+        var src = Find((string)cmd["source"]);
+        if (src == null) throw new Exception("Source not found: " + cmd["source"]);
+        var model = (string)cmd["model"]; var prefix = (string)cmd["prefix"];
+        var meshes = AssetDatabase.LoadAllAssetsAtPath(model).OfType<Mesh>().Where(m => m.name.StartsWith(prefix)).OrderBy(m => m.name).ToList();
+        if (meshes.Count == 0) throw new Exception("No meshes starting with '" + prefix + "' in " + model);
+        var modelRoot = AssetDatabase.LoadAssetAtPath<GameObject>(model);
+        BBI.Unity.Game.AddressableComponentLoader acl = null;
+        for (var t = src; t != null && acl == null; t = t.parent) acl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+        var srcAll = src.GetComponentsInChildren<Component>(true);
+        var srcEntries = acl != null ? acl.componentValues.Where(cv => cv != null && cv.component != null && Array.IndexOf(srcAll, cv.component) >= 0).ToList() : null;
+        var srcR = src.GetComponent<MeshRenderer>();
+        var made = new JArray();
+        Bounds? union = null;
+        foreach (var mesh in meshes)
+        {
+            var go = UnityEngine.Object.Instantiate(src.gameObject, src.parent);
+            go.name = mesh.name;
+            go.transform.localPosition = src.localPosition; go.transform.localRotation = src.localRotation; go.transform.localScale = src.localScale;
+            go.SetActive(true);
+            var mf = go.GetComponent<MeshFilter>(); if (mf != null) mf.sharedMesh = mesh;
+            var mc = go.GetComponent<MeshCollider>(); if (mc != null) mc.sharedMesh = mesh;
+            var mr = go.GetComponent<MeshRenderer>();
+            string modelPose = "";
+            if (modelRoot != null)
+            {
+                var node = modelRoot.GetComponentsInChildren<MeshFilter>(true).FirstOrDefault(f => f.sharedMesh == mesh);
+                if (node != null)
+                {
+                    var nr = node.GetComponent<MeshRenderer>();
+                    if (nr != null && mr != null) mr.sharedMaterials = nr.sharedMaterials;
+                    modelPose = "model node pos " + V(node.transform.localPosition) + " euler " + V(node.transform.localEulerAngles);
+                }
+            }
+            int reg = 0;
+            if (srcEntries != null)
+            {
+                var dstAll = go.GetComponentsInChildren<Component>(true);
+                foreach (var cv in srcEntries)
+                {
+                    int idx = Array.IndexOf(srcAll, cv.component);
+                    if (idx < 0 || idx >= dstAll.Length || dstAll[idx] == null || dstAll[idx].GetType() != cv.component.GetType()) continue;
+                    acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = dstAll[idx], field = cv.field, address = cv.address });
+                    reg++;
+                }
+            }
+            Ledger(go); Dirty(go);
+            if (mr != null) { if (union == null) union = mr.bounds; else { var b = union.Value; b.Encapsulate(mr.bounds); union = b; } }
+            made.Add(new JObject { ["name"] = go.name, ["verts"] = mesh.vertexCount, ["subMeshes"] = mesh.subMeshCount,
+                ["materials"] = mr != null ? new JArray(mr.sharedMaterials.Select(m => m != null ? m.name : "null")) : null,
+                ["aclEntries"] = reg, ["convex"] = mc != null ? (JToken)mc.convex : null, ["modelPose"] = modelPose });
+        }
+        if (acl != null) EditorUtility.SetDirty(acl);
+        var o = new JObject { ["made"] = made, ["srcVerts"] = src.GetComponent<MeshFilter>() != null ? src.GetComponent<MeshFilter>().sharedMesh.vertexCount : 0,
+            ["srcLocalPos"] = V(src.localPosition), ["srcLocalEuler"] = V(src.localEulerAngles), ["aclOn"] = acl != null ? PathOf(acl.gameObject) : null,
+            ["srcAclEntries"] = srcEntries != null ? srcEntries.Count : 0 };
+        if (srcR != null) { o["srcBoundsMin"] = V(srcR.bounds.min); o["srcBoundsMax"] = V(srcR.bounds.max); }
+        if (union != null) { o["newBoundsMin"] = V(union.Value.min); o["newBoundsMax"] = V(union.Value.max); }
+        if ((bool?)cmd["disableSource"] ?? true) { src.gameObject.SetActive(false); Dirty(src.gameObject); }
+        return o;
+    }
+
+    // { op:"bigmeshes", path:"Tachi", min:16000 } — every mesh with at least `min` vertices under the ship, ACTIVE OR NOT:
+    // scene MeshFilters and the meshes inside each AddressableLoader's prefab, with whether the object is active in
+    // the hierarchy and whether it carries a StructurePart (only active StructureParts count for the jointing limit).
+    static JToken BigMeshes(JObject cmd)
+    {
+        var root = Find((string)cmd["path"] ?? "Tachi");
+        if (root == null) throw new Exception("Not found: " + cmd["path"]);
+        int min = (int?)cmd["min"] ?? 16000;
+        var rows = new JArray();
+        var cache = new Dictionary<string, List<KeyValuePair<string, int[]>>>();
+        foreach (var t in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (IsUnderPreview(t) && t.GetComponent<BBI.Unity.Game.AddressableLoader>() == null) continue;
+            var mf = t.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null && mf.sharedMesh.vertexCount >= min)
+            {
+                var sp = t.GetComponent<BBI.Unity.Game.StructurePart>();
+                rows.Add(new JObject { ["verts"] = mf.sharedMesh.vertexCount, ["mesh"] = mf.sharedMesh.name, ["path"] = PathOf(t.gameObject),
+                    ["active"] = t.gameObject.activeInHierarchy, ["structurePart"] = sp != null && sp.enabled, ["kind"] = "scene" });
+            }
+            var loader = t.GetComponent<BBI.Unity.Game.AddressableLoader>();
+            if (loader == null || string.IsNullOrEmpty(loader.assetGUID)) continue;
+            var key = loader.assetGUID + "|" + (loader.childPath ?? "");
+            List<KeyValuePair<string, int[]>> list;
+            if (!cache.TryGetValue(key, out list))
+            {
+                list = new List<KeyValuePair<string, int[]>>();
+                GameObject src = null;
+                for (int attempt = 0; attempt < 4 && src == null; attempt++) src = AddressableBaker.LoadAddressableAsync(loader.assetGUID, loader.childPath ?? "").Result;
+                if (src != null)
+                    foreach (var f in src.GetComponentsInChildren<MeshFilter>(true))
+                        if (f.sharedMesh != null && f.sharedMesh.vertexCount >= min)
+                        {
+                            var sp = f.GetComponent<BBI.Unity.Game.StructurePart>();
+                            list.Add(new KeyValuePair<string, int[]>(src.name + "/" + RelPath(f.transform, src.transform) + " [" + f.sharedMesh.name + "]", new[] { f.sharedMesh.vertexCount, sp != null && sp.enabled ? 1 : 0 }));
+                        }
+                cache[key] = list;
+            }
+            foreach (var kv in list)
+                rows.Add(new JObject { ["verts"] = kv.Value[0], ["mesh"] = kv.Key, ["path"] = PathOf(t.gameObject), ["active"] = t.gameObject.activeInHierarchy && loader.enabled,
+                    ["structurePart"] = kv.Value[1] == 1, ["kind"] = "addressable" });
+        }
+        return new JArray(rows.OrderByDescending(r => (int)r["verts"]));
+    }
+
+    // { op:"remesh", model:"Assets/.../PDC_Mounts.fbx", items:[{path, mesh, rename}], dry:true }
+    // Points an existing part's MeshFilter + MeshCollider at the mesh called `mesh` in `model` (materials taken from
+    // the model's node), and renames the object. Reports old/new vertex counts and world bounds so a swap that is
+    // meant to be like-for-like can be checked first with dry:true.
+    static JToken Remesh(JObject cmd)
+    {
+        var model = (string)cmd["model"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var meshes = AssetDatabase.LoadAllAssetsAtPath(model).OfType<Mesh>().GroupBy(m => m.name).ToDictionary(g => g.Key, g => g.First());
+        var modelRoot = AssetDatabase.LoadAssetAtPath<GameObject>(model);
+        var nodes = modelRoot != null ? modelRoot.GetComponentsInChildren<MeshFilter>(true) : new MeshFilter[0];
+        var outp = new JArray();
+        foreach (var it in cmd["items"])
+        {
+            var path = (string)it["path"]; var meshName = (string)it["mesh"]; var rename = (string)it["rename"];
+            var t = Find(path);
+            var o = new JObject { ["path"] = path, ["mesh"] = meshName };
+            outp.Add(o);
+            if (t == null) { o["error"] = "object not found"; continue; }
+            Mesh mesh; if (!meshes.TryGetValue(meshName, out mesh)) { o["error"] = "mesh not in model"; continue; }
+            var mf = t.GetComponent<MeshFilter>(); var mc = t.GetComponent<MeshCollider>(); var mr = t.GetComponent<MeshRenderer>();
+            if (mf == null) { o["error"] = "no MeshFilter"; continue; }
+            var node = nodes.FirstOrDefault(f => f.sharedMesh == mesh);
+            o["oldVerts"] = mf.sharedMesh != null ? mf.sharedMesh.vertexCount : 0; o["newVerts"] = mesh.vertexCount;
+            o["oldMesh"] = mf.sharedMesh != null ? mf.sharedMesh.name : null;
+            if (mf.sharedMesh != null) { o["oldLocalMin"] = V(mf.sharedMesh.bounds.min); o["oldLocalMax"] = V(mf.sharedMesh.bounds.max); }
+            o["newLocalMin"] = V(mesh.bounds.min); o["newLocalMax"] = V(mesh.bounds.max);
+            if (node != null)
+            {
+                o["poseMatches"] = (node.transform.localPosition - t.localPosition).magnitude < 0.002f && Quaternion.Angle(node.transform.localRotation, t.localRotation) < 0.05f;
+                o["nodeMaterials"] = new JArray(node.GetComponent<MeshRenderer>().sharedMaterials.Select(m => m != null ? m.name : "null"));
+            }
+            if (mr != null) o["oldMaterials"] = new JArray(mr.sharedMaterials.Select(m => m != null ? m.name : "null"));
+            o["active"] = t.gameObject.activeInHierarchy;
+            if (dry) continue;
+            mf.sharedMesh = mesh; if (mc != null) mc.sharedMesh = mesh;
+            if (node != null && mr != null) mr.sharedMaterials = node.GetComponent<MeshRenderer>().sharedMaterials;
+            if (!string.IsNullOrEmpty(rename)) t.gameObject.name = rename;
+            Dirty(t.gameObject);
+            o["newPath"] = PathOf(t.gameObject);
+        }
+        return outp;
+    }
+
+    // { op:"reparent", parent:"Tachi/.../Fore_Section", group:"PDC_Fore_Port", paths:[...] }
+    // Moves existing objects under an (identity-transform) group object inside `parent`, creating the group if needed.
+    // World position / rotation / scale of every moved object stay exactly as they were; nothing else is touched.
+    static JToken Reparent(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var gname = (string)cmd["group"];
+        var grp = parent.Find(gname);
+        if (grp == null)
+        {
+            var go = new GameObject(gname);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = Vector3.zero; go.transform.localRotation = Quaternion.identity; go.transform.localScale = Vector3.one;
+            grp = go.transform; Dirty(go);
+        }
+        var moved = new JArray(); float worst = 0f;
+        foreach (var p in cmd["paths"])
+        {
+            var t = Find((string)p);
+            if (t == null) throw new Exception("Not found: " + p);
+            var wp = t.position; var wr = t.rotation;
+            t.SetParent(grp, true);
+            worst = Mathf.Max(worst, (t.position - wp).magnitude, Quaternion.Angle(t.rotation, wr) * 0.01f);
+            Dirty(t.gameObject); moved.Add(PathOf(t.gameObject));
+        }
+        return new JObject { ["group"] = PathOf(grp.gameObject), ["moved"] = moved.Count, ["worstShift"] = worst };
+    }
+
+    // { op:"mats", paths:[...], set:{ "<material asset path to replace>": "<material asset path to use>" } }
+    // Lists each object's renderer materials with their asset paths; with `set`, swaps materials by asset path.
+    static JToken Mats(JObject cmd)
+    {
+        var outp = new JArray();
+        var set = cmd["set"] as JObject;
+        foreach (var p in cmd["paths"])
+        {
+            var t = Find((string)p);
+            if (t == null) { outp.Add(new JObject { ["path"] = (string)p, ["error"] = "not found" }); continue; }
+            var mr = t.GetComponent<MeshRenderer>();
+            if (mr == null) { outp.Add(new JObject { ["path"] = (string)p, ["error"] = "no renderer" }); continue; }
+            var ms = mr.sharedMaterials; bool changed = false;
+            if (set != null)
+                for (int i = 0; i < ms.Length; i++)
+                {
+                    var ap = ms[i] != null ? AssetDatabase.GetAssetPath(ms[i]) : "";
+                    var to = (string)set[ap];
+                    if (to == null) continue;
+                    var nm = AssetDatabase.LoadAssetAtPath<Material>(to);
+                    if (nm != null) { ms[i] = nm; changed = true; }
+                }
+            if (changed) { mr.sharedMaterials = ms; Dirty(t.gameObject); }
+            outp.Add(new JObject { ["path"] = (string)p, ["changed"] = changed,
+                ["materials"] = new JArray(ms.Select(m => m != null ? AssetDatabase.GetAssetPath(m) + (AssetDatabase.IsSubAsset(m) ? " [embedded:" + m.name + "]" : "") : "null")) });
+        }
+        return outp;
+    }
+
+    // { op:"setactive", paths:[...], active:false }  — enable / disable scene objects (inactive parts are not jointed).
+    static JToken SetActiveOp(JObject cmd)
+    {
+        bool on = (bool?)cmd["active"] ?? false; var done = new JArray();
+        foreach (var p in cmd["paths"])
+        {
+            var t = Find((string)p);
+            if (t == null) throw new Exception("Not found: " + p);
+            t.gameObject.SetActive(on); Dirty(t.gameObject); done.Add(PathOf(t.gameObject));
+        }
+        return done;
+    }
+
+    // { op:"partcount", path:"Tachi" }
+    // Estimates what the game's jointing step will see: every active StructurePart under the ship, i.e. the ones on
+    // scene objects plus the ones inside each active AddressableLoader's prefab (minus its disabledChildren), and the
+    // largest mesh vertex count among them. The game crashes on load when parts * largestVerts exceeds 2^27 (NativeList rounds capacity up to a power of two)
+    // (JointHelper.JointingWorkerData allocates NativeList<float2>(largestVertexCount * numParts)).
+    static JToken PartCount(JObject cmd)
+    {
+        var root = Find((string)cmd["path"] ?? "Tachi");
+        if (root == null) throw new Exception("Not found: " + cmd["path"]);
+        int sceneParts = 0, addrParts = 0, loaders = 0, failed = 0;
+        var perGuid = new Dictionary<string, int[]>();           // key -> [partsPerInstance, instances]
+        var names = new Dictionary<string, string>();
+        var meshes = new List<KeyValuePair<int, string>>();
+        var byGroup = new Dictionary<string, int>();
+        Func<Transform, string> groupOf = t =>
+        {
+            var chain = new List<string>();
+            for (var c = t; c != null && c != root; c = c.parent) chain.Add(c.name);
+            chain.Reverse();
+            return string.Join("/", chain.Take(3));
+        };
+        Action<string, int> addGroup = (g, n) => { int v; byGroup.TryGetValue(g, out v); byGroup[g] = v + n; };
+        foreach (var t in root.GetComponentsInChildren<Transform>(false))
+        {
+            if (t.name == "FakePrefabDisplay" || (t.parent != null && t.GetComponentInParent<BBI.Unity.Game.AddressableLoader>() != null
+                && t.GetComponent<BBI.Unity.Game.AddressableLoader>() == null && IsUnderPreview(t))) continue;
+            var sp = t.GetComponent<BBI.Unity.Game.StructurePart>();
+            if (sp != null && sp.enabled)
+            {
+                sceneParts++; addGroup(groupOf(t), 1);
+                var mf = t.GetComponent<MeshFilter>();
+                if (mf != null && mf.sharedMesh != null) meshes.Add(new KeyValuePair<int, string>(mf.sharedMesh.vertexCount, PathOf(t.gameObject)));
+            }
+            var loader = t.GetComponent<BBI.Unity.Game.AddressableLoader>();
+            if (loader == null || !loader.enabled || string.IsNullOrEmpty(loader.assetGUID)) continue;
+            loaders++;
+            var dis = loader.disabledChildren ?? new List<string>();
+            var key = loader.assetGUID + "|" + (loader.childPath ?? "") + "|" + string.Join(",", dis.OrderBy(x => x));
+            int[] rec;
+            if (!perGuid.TryGetValue(key, out rec))
+            {
+                GameObject src = null;
+                for (int attempt = 0; attempt < 4 && src == null; attempt++)
+                    src = AddressableBaker.LoadAddressableAsync(loader.assetGUID, loader.childPath ?? "").Result;
+                int n = 0;
+                if (src == null) { failed++; n = -1; }
+                else
+                {
+                    names[key] = src.name;
+                    foreach (var p in src.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+                    {
+                        if (!p.enabled || !ActiveInPrefab(p.transform, src.transform)) continue;
+                        var rel = RelPath(p.transform, src.transform);
+                        if (dis.Any(d => rel == d || rel.StartsWith(d + "/"))) continue;
+                        n++;
+                        var mf = p.GetComponent<MeshFilter>();
+                        if (mf != null && mf.sharedMesh != null) meshes.Add(new KeyValuePair<int, string>(mf.sharedMesh.vertexCount, "[addressable " + src.name + "/" + rel + "] first seen at " + PathOf(t.gameObject)));
+                    }
+                }
+                rec = new[] { n, 0 }; perGuid[key] = rec;
+            }
+            rec[1]++;
+            if (rec[0] > 0) { addrParts += rec[0]; addGroup(groupOf(t), rec[0]); }
+        }
+        var top = new JArray(perGuid.Where(k => k.Value[0] > 0).OrderByDescending(k => k.Value[0] * k.Value[1]).Take(25)
+            .Select(k => new JObject { ["name"] = names.ContainsKey(k.Key) ? names[k.Key] : k.Key, ["partsEach"] = k.Value[0], ["instances"] = k.Value[1], ["total"] = k.Value[0] * k.Value[1] }));
+        int meshMin = (int?)cmd["meshMin"] ?? 0;
+        var big = new JArray(meshes.Where(m => m.Key >= meshMin).OrderByDescending(m => m.Key).Take(meshMin > 0 ? 400 : 12)
+            .Select(m => new JObject { ["verts"] = m.Key, ["where"] = m.Value }));
+        var groups = new JArray(byGroup.OrderByDescending(k => k.Value).Take(40).Select(k => new JObject { ["group"] = k.Key, ["parts"] = k.Value }));
+        int largest = meshes.Count > 0 ? meshes.Max(m => m.Key) : 0;
+        int total = sceneParts + addrParts;
+        return new JObject
+        {
+            ["total"] = total, ["sceneParts"] = sceneParts, ["addressableParts"] = addrParts, ["loaders"] = loaders, ["failedLoads"] = failed,
+            ["largestVerts"] = largest, ["product"] = (long)total * largest, ["limit"] = 134217728L,
+            ["maxParts"] = largest > 0 ? 134217728L / largest : 0,
+            ["topAddressables"] = top, ["largestMeshes"] = big, ["groups"] = groups
+        };
+    }
+
+    static bool IsUnderPreview(Transform t)
+    {
+        for (var c = t; c != null; c = c.parent)
+        {
+            if (c.name == "FakePrefabDisplay") return true;
+            if (c.GetComponent<BBI.Unity.Game.AddressableLoader>() != null) return false;
+        }
+        return false;
     }
 
     // { op:"clone", source:"Tachi/.../PDC_Barrel.003", parent, name, euler:[x,y,z], center, floorY }
