@@ -134,6 +134,10 @@ public static class ClaudeBridge
                 case "jointpads": result = JointPads(cmd); break;
                 case "setsoloader": result = SetSoLoader(cmd); break;
                 case "colormat": result = ColorMat(cmd); break;
+                case "prefabdelete": result = PrefabDelete(cmd); break;
+                case "aclpurge": result = AclPurge(cmd); break;
+                case "aclrepair": result = AclRepair(cmd); break;
+                case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
                 case "bakeparts": result = BakeParts(cmd); break;
@@ -1705,6 +1709,129 @@ public static class ClaudeBridge
         if (m.HasProperty("_EmissiveIntensity")) m.SetFloat("_EmissiveIntensity", e != null ? 1f : 0f);
         EditorUtility.SetDirty(m); AssetDatabase.SaveAssets();
         return new JObject { ["path"] = path, ["shader"] = m.shader != null ? m.shader.name : null };
+    }
+
+    // { op:"prefabdelete", asset:"Assets/.../Fore_Section.prefab", names:["PDC_tubes_2", ...], dry:true }
+    // Removes child objects from a prefab ASSET (needed for children of a nested prefab, which cannot be deleted on the
+    // instance). Their entries on any AddressableComponentLoader inside that prefab are removed first. With dry:true it
+    // only reports what it would remove.
+    static JToken PrefabDelete(JObject cmd)
+    {
+        var asset = (string)cmd["asset"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var names = new HashSet<string>(cmd["names"].Select(t => (string)t));
+        var root = PrefabUtility.LoadPrefabContents(asset);
+        var res = new JArray();
+        try
+        {
+            var targets = root.GetComponentsInChildren<Transform>(true).Where(t => t != root.transform && names.Contains(t.name)).ToList();
+            var comps = new HashSet<Component>(targets.SelectMany(t => t.GetComponentsInChildren<Component>(true)));
+            int aclRemoved = 0;
+            foreach (var acl in root.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
+            {
+                int n = acl.componentValues.Count(cv => cv != null && cv.component != null && comps.Contains(cv.component));
+                aclRemoved += n;
+                if (!dry && n > 0) acl.componentValues.RemoveAll(cv => cv != null && cv.component != null && comps.Contains(cv.component));
+            }
+            foreach (var t in targets)
+            {
+                var mf = t.GetComponent<MeshFilter>();
+                res.Add(new JObject { ["name"] = t.name, ["active"] = t.gameObject.activeSelf, ["children"] = t.childCount,
+                    ["verts"] = mf != null && mf.sharedMesh != null ? mf.sharedMesh.vertexCount : 0 });
+            }
+            if (!dry)
+            {
+                foreach (var t in targets) UnityEngine.Object.DestroyImmediate(t.gameObject);
+                PrefabUtility.SaveAsPrefabAsset(root, asset);
+            }
+            return new JObject { ["asset"] = asset, ["dry"] = dry, ["objects"] = res, ["aclEntriesRemoved"] = aclRemoved,
+                ["notFound"] = new JArray(names.Where(n => !targets.Any(t => t.name == n))) };
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+    }
+
+    // { op:"aclrepair", path:"Tachi", dry:true, addresses:{ "StructurePart":"<guid>", "EntityBlueprintComponent":"<guid>" } }
+    // Finds AddressableComponentLoader entries that have a component but a blank field or address (the game fails the
+    // whole ship load on a blank address), and components listed twice for one field with different addresses.
+    // alignDupes:true gives the earlier of two conflicting entries the later one's address.
+    // Repair: the field is set from the component's type; a blank address is filled from `addresses` by type name.
+    static JToken AclRepair(JObject cmd)
+    {
+        var t = Find((string)cmd["path"] ?? "Tachi"); bool dry = (bool?)cmd["dry"] ?? true;
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var addr = cmd["addresses"] as JObject;
+        var blank = new JArray(); var dupes = new JArray(); int fixedN = 0;
+        foreach (var acl in t.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
+        {
+            bool changed = false;
+            var seen = new Dictionary<string, int>(); bool align = (bool?)cmd["alignDupes"] ?? false;
+            for (int i = 0; i < acl.componentValues.Count; i++)
+            {
+                var cv = acl.componentValues[i];
+                if (cv == null || cv.component == null) continue;
+                string type = cv.component.GetType().Name;
+                if (string.IsNullOrEmpty(cv.field) || string.IsNullOrEmpty(cv.address))
+                {
+                    var row = new JObject { ["acl"] = PathOf(acl.gameObject), ["index"] = i, ["object"] = PathOf(cv.component.gameObject), ["type"] = type,
+                        ["field"] = cv.field ?? "", ["address"] = cv.address ?? "" };
+                    string f = type == "StructurePart" ? "m_StructurePartAsset" : type == "EntityBlueprintComponent" ? "m_BlueprintAsset" : null;
+                    string a = string.IsNullOrEmpty(cv.address) ? (addr != null ? (string)addr[type] : null) : cv.address;
+                    row["newField"] = f; row["newAddress"] = a;
+                    if (!dry && f != null && !string.IsNullOrEmpty(a)) { cv.field = f; cv.address = a; changed = true; fixedN++; row["fixed"] = true; }
+                    blank.Add(row);
+                }
+                string key = cv.component.GetInstanceID() + "|" + cv.field;
+                if (seen.TryGetValue(key, out var pi)) { var prev = acl.componentValues[pi]; if (prev.address != cv.address) { dupes.Add(new JObject { ["acl"] = PathOf(acl.gameObject), ["index"] = i, ["object"] = PathOf(cv.component.gameObject), ["type"] = type, ["field"] = cv.field, ["address"] = cv.address, ["other"] = prev.address, ["otherIndex"] = pi }); if (!dry && align) { prev.address = cv.address; changed = true; fixedN++; } } }
+                else seen[key] = i;
+            }
+            if (changed) { EditorUtility.SetDirty(acl); PrefabUtility.RecordPrefabInstancePropertyModifications(acl); Dirty(acl.gameObject); }
+        }
+        return new JObject { ["dry"] = dry, ["blank"] = blank, ["dupes"] = dupes, ["fixed"] = fixedN };
+    }
+
+    // { op:"stripcomponents", path:"Tachi/.../Floating Corpse", types:["AddressableSOLoader","StructurePart","EntityBlueprintComponent"], dry:true }
+    // Removes the named component types from ONE object (not its children), e.g. to turn a mesh-less part root into a
+    // plain container. Entries for those components on any AddressableComponentLoader above it are removed first.
+    static JToken StripComponents(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]); bool dry = (bool?)cmd["dry"] ?? false;
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var types = cmd["types"].Select(x => (string)x).ToList();
+        var comps = types.SelectMany(n => t.GetComponents<Component>().Where(c => c != null && c.GetType().Name == n)).ToList();
+        int acl = 0;
+        foreach (var l in t.GetComponentsInParent<BBI.Unity.Game.AddressableComponentLoader>(true))
+        {
+            int n = l.componentValues.Count(cv => cv != null && cv.component != null && comps.Contains(cv.component));
+            acl += n;
+            if (!dry && n > 0) { l.componentValues.RemoveAll(cv => cv != null && cv.component != null && comps.Contains(cv.component)); EditorUtility.SetDirty(l); Dirty(l.gameObject); }
+        }
+        var removed = new JArray(comps.Select(c => c.GetType().Name));
+        if (!dry)
+        {
+            // Two passes: a component another one requires cannot go until the dependant is gone.
+            for (int pass = 0; pass < 3; pass++)
+                foreach (var c in comps.Where(c => c != null).ToList())
+                    try { UnityEngine.Object.DestroyImmediate(c, true); } catch { }
+            Dirty(t.gameObject);
+        }
+        return new JObject { ["path"] = PathOf(t.gameObject), ["dry"] = dry, ["removed"] = removed, ["aclEntriesRemoved"] = acl,
+            ["left"] = new JArray(t.GetComponents<Component>().Where(c => c != null).Select(c => c.GetType().Name)) };
+    }
+
+    // { op:"aclpurge", path:"Tachi", dry:true } — drops entries whose component no longer exists from every
+    // AddressableComponentLoader under `path` (the ship validator treats such entries as errors).
+    static JToken AclPurge(JObject cmd)
+    {
+        var t = Find((string)cmd["path"] ?? "Tachi"); bool dry = (bool?)cmd["dry"] ?? false;
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var res = new JArray();
+        foreach (var acl in t.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
+        {
+            int n = acl.componentValues.Count(cv => cv == null || cv.component == null);
+            if (n == 0) continue;
+            if (!dry) { acl.componentValues.RemoveAll(cv => cv == null || cv.component == null); EditorUtility.SetDirty(acl); Dirty(acl.gameObject); }
+            res.Add(new JObject { ["acl"] = PathOf(acl.gameObject), ["nullEntries"] = n });
+        }
+        return res;
     }
 
     // { op:"bigmeshes", path:"Tachi", min:16000 } — every mesh with at least `min` vertices under the ship, ACTIVE OR NOT:

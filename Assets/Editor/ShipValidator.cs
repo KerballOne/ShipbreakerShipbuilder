@@ -10,7 +10,7 @@ using UnityEngine;
 /// </summary>
 public static class ShipValidator
 {
-    public enum ErrorKind { NullAclEntry, UnregisteredSP, UnregisteredEBC, NonUnitScale }
+    public enum ErrorKind { NullAclEntry, UnregisteredSP, UnregisteredEBC, NonUnitScale, BlankAclEntry }
 
     public class ValidationIssue
     {
@@ -102,6 +102,29 @@ public static class ShipValidator
                         IsError = true, Kind = ErrorKind.NullAclEntry,
                         PrefabPath = path, Prefab = prefab, Transform = t,
                         Message = $"{path} → '{GetPath(t)}': ACL has {nullCount} null/missing entry(s) — clean before building."
+                    });
+
+                // ── ACL entries with a component but a blank field or address ──
+                // The game aborts the whole ship load on a blank address (InvalidKeyException). This happens when
+                // entries are removed from a loader inside a NESTED prefab: the outer prefab stores its changes to
+                // that list by index, so the remaining entries lose their values. One issue per affected object.
+                var blankByObject = new Dictionary<Transform, List<string>>();
+                for (int i = 0; i < acl.componentValues.Count; i++)
+                {
+                    var cv = acl.componentValues[i];
+                    if (cv == null || cv.component == null) continue;
+                    bool noField = string.IsNullOrEmpty(cv.field), noAddr = string.IsNullOrEmpty(cv.address);
+                    if (!noField && !noAddr) continue;
+                    var owner = cv.component.transform;
+                    if (!blankByObject.TryGetValue(owner, out var l)) blankByObject[owner] = l = new List<string>();
+                    l.Add($"[{i}] {cv.component.GetType().Name}: blank {(noField && noAddr ? "field and address" : noField ? "field" : "address")}");
+                }
+                foreach (var kv in blankByObject)
+                    result.Issues.Add(new ValidationIssue
+                    {
+                        IsError = true, Kind = ErrorKind.BlankAclEntry,
+                        PrefabPath = path, Prefab = prefab, Transform = kv.Key,
+                        Message = $"{path} → '{GetPath(kv.Key)}': ACL on '{GetPath(t)}' has blank entry(s) for this object ({string.Join("; ", kv.Value)}) — the ship will not load. Re-register the object in the ACL."
                     });
             }
 

@@ -123,6 +123,7 @@ public class BuildValidationWindow : EditorWindow
         ShipValidator.ErrorKind.UnregisteredSP  => "StructurePart not registered in any ACL.",
         ShipValidator.ErrorKind.UnregisteredEBC => "EntityBlueprintComponent not registered in any ACL.",
         ShipValidator.ErrorKind.NonUnitScale     => "Non-unit scale — run Lock In Rescale.",
+        ShipValidator.ErrorKind.BlankAclEntry    => "ACL entry has a blank field or address — ship will not load. Re-register in the ACL.",
         _                                        => issue.Message,
     };
 
