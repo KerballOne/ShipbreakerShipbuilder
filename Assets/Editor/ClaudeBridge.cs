@@ -125,6 +125,11 @@ public static class ClaudeBridge
                 case "reparent": result = Reparent(cmd); break;
                 case "remesh": result = Remesh(cmd); break;
                 case "bigmeshes": result = BigMeshes(cmd); break;
+                case "meshweld":  result = MeshWeld(cmd); break;
+                case "meshdump":  result = MeshDump(cmd); break;
+                case "meshload":  result = MeshLoad(cmd); break;
+                case "meshparts": result = MeshParts(cmd); break;
+                case "meshassign": result = MeshAssign(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
                 case "bakeparts": result = BakeParts(cmd); break;
@@ -453,6 +458,7 @@ public static class ClaudeBridge
     static void ApplyPose(Transform t, JObject cmd)
     {
         if (cmd["euler"] != null) t.rotation = Quaternion.Euler(ToV(cmd["euler"], Vector3.zero));
+        if (cmd["localEuler"] != null) t.localRotation = Quaternion.Euler(ToV(cmd["localEuler"], Vector3.zero));
         if (cmd["pos"] != null)   t.position = ToV(cmd["pos"], Vector3.zero);
         if (cmd["delta"] != null) t.position += ToV(cmd["delta"], Vector3.zero);
         if ((cmd["center"] != null || cmd["floorY"] != null) && TryBounds(t, out var b))
@@ -1223,6 +1229,291 @@ public static class ClaudeBridge
         if (union != null) { o["newBoundsMin"] = V(union.Value.min); o["newBoundsMax"] = V(union.Value.max); }
         if ((bool?)cmd["disableSource"] ?? true) { src.gameObject.SetActive(false); Dirty(src.gameObject); }
         return o;
+    }
+
+    // { op:"meshweld", asset:"Assets/.../x.asset", key:"full"|"pnu"|"pu"|"p", dry:true }
+    // Merges vertices of a mesh asset IN PLACE (same asset, so every reference keeps working). key = what must match for
+    // two vertices to merge: full = every channel, pnu = position+normal+uv0, pu = position+uv0 (normals averaged),
+    // p = position only (normals averaged, first uv kept). Always reports the counts each key would give.
+    static JToken MeshWeld(JObject cmd)
+    {
+        var path = (string)cmd["asset"];
+        var m = AssetDatabase.LoadAllAssetsAtPath(path).OfType<Mesh>().FirstOrDefault();
+        if (m == null) throw new Exception("No mesh in " + path);
+        string keyMode = (string)cmd["key"] ?? "full"; bool dry = (bool?)cmd["dry"] ?? true;
+        int n = m.vertexCount;
+        var pos = m.vertices; var nrm = m.normals; var tan = m.tangents; var col = m.colors32;
+        var uvs = new List<Vector4>[8]; var dims = new int[8];
+        for (int ch = 0; ch < 8; ch++)
+        {
+            uvs[ch] = new List<Vector4>(); m.GetUVs(ch, uvs[ch]);
+            dims[ch] = uvs[ch].Count == n ? m.GetVertexAttributeDimension((UnityEngine.Rendering.VertexAttribute)((int)UnityEngine.Rendering.VertexAttribute.TexCoord0 + ch)) : 0;
+        }
+        Func<Vector3, float, string> q3 = (v, s) => Mathf.RoundToInt(v.x * s) + "," + Mathf.RoundToInt(v.y * s) + "," + Mathf.RoundToInt(v.z * s);
+        Func<int, string, string> keyOf = (i, mode) =>
+        {
+            var k = q3(pos[i], 100000f);
+            if (mode == "p") return k;
+            if (dims[0] > 0) k += "|" + q3(uvs[0][i], 100000f);
+            if (mode == "pu") return k;
+            if (nrm.Length == n) k += "|" + q3(nrm[i], 500f);
+            if (mode == "pnu") return k;
+            if (tan.Length == n) k += "|" + q3(tan[i], 500f) + "," + tan[i].w;
+            if (col.Length == n) k += "|" + col[i].r + "," + col[i].g + "," + col[i].b + "," + col[i].a;
+            for (int ch = 1; ch < 8; ch++) if (dims[ch] > 0) k += "|" + q3(uvs[ch][i], 100000f) + "," + Mathf.RoundToInt(uvs[ch][i].w * 100000f);
+            return k;
+        };
+        long tris = 0; for (int s = 0; s < m.subMeshCount; s++) tris += m.GetIndexCount(s) / 3;
+        var o = new JObject { ["mesh"] = m.name, ["verts"] = n, ["tris"] = tris, ["subMeshes"] = m.subMeshCount, ["readable"] = m.isReadable,
+            ["normals"] = nrm.Length == n, ["tangents"] = tan.Length == n, ["colors"] = col.Length == n, ["uvDims"] = new JArray(dims),
+            ["boneWeights"] = m.boneWeights.Length, ["blendShapes"] = m.blendShapeCount, ["indexFormat"] = m.indexFormat.ToString() };
+        var used = new HashSet<int>();
+        for (int s = 0; s < m.subMeshCount; s++) foreach (var i in m.GetIndices(s)) used.Add(i);
+        o["usedVerts"] = used.Count;
+        foreach (var mode in new[] { "full", "pnu", "pu", "p" })
+            o["unique_" + mode] = used.Select(i => keyOf(i, mode)).Distinct().Count();
+        if (dry) return o;
+
+        var map = new Dictionary<string, int>(); var remap = new int[n]; var first = new List<int>();
+        var nSum = new List<Vector3>(); var tSum = new List<Vector3>();
+        for (int i = 0; i < n; i++)
+        {
+            if (!used.Contains(i)) { remap[i] = -1; continue; }
+            var k = keyOf(i, keyMode); int id;
+            if (!map.TryGetValue(k, out id)) { id = first.Count; map[k] = id; first.Add(i); nSum.Add(Vector3.zero); tSum.Add(Vector3.zero); }
+            remap[i] = id;
+            if (nrm.Length == n) nSum[id] += nrm[i];
+            if (tan.Length == n) tSum[id] += new Vector3(tan[i].x, tan[i].y, tan[i].z);
+        }
+        int c = first.Count;
+        var subs = new List<int[]>(); var topo = new List<MeshTopology>();
+        for (int s = 0; s < m.subMeshCount; s++) { subs.Add(m.GetIndices(s).Select(i => remap[i]).ToArray()); topo.Add(m.GetTopology(s)); }
+        int dropped = 0;
+        for (int s = 0; s < subs.Count; s++)
+        {
+            if (topo[s] != MeshTopology.Triangles) continue;
+            var keep = new List<int>(); var a = subs[s];
+            for (int t = 0; t + 2 < a.Length; t += 3)
+            {
+                if (a[t] == a[t + 1] || a[t + 1] == a[t + 2] || a[t] == a[t + 2]) { dropped++; continue; }
+                keep.Add(a[t]); keep.Add(a[t + 1]); keep.Add(a[t + 2]);
+            }
+            subs[s] = keep.ToArray();
+        }
+        var bounds = m.bounds; var name = m.name;
+        var nPos = first.Select(i => pos[i]).ToArray();
+        Vector3[] nNrm = nrm.Length == n ? Enumerable.Range(0, c).Select(j => nSum[j].sqrMagnitude > 1e-12f ? nSum[j].normalized : nrm[first[j]]).ToArray() : null;
+        Vector4[] nTan = tan.Length == n ? Enumerable.Range(0, c).Select(j => { var t = tSum[j].sqrMagnitude > 1e-12f ? tSum[j].normalized : (Vector3)tan[first[j]]; return new Vector4(t.x, t.y, t.z, tan[first[j]].w); }).ToArray() : null;
+        Color32[] nCol = col.Length == n ? first.Select(i => col[i]).ToArray() : null;
+        m.Clear();
+        m.indexFormat = c > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+        m.vertices = nPos;
+        if (nNrm != null) m.normals = nNrm;
+        if (nTan != null) m.tangents = nTan;
+        if (nCol != null) m.colors32 = nCol;
+        for (int ch = 0; ch < 8; ch++)
+        {
+            if (dims[ch] == 0) continue;
+            var src = uvs[ch];
+            if (dims[ch] == 2) m.SetUVs(ch, first.Select(i => (Vector2)src[i]).ToList());
+            else if (dims[ch] == 3) m.SetUVs(ch, first.Select(i => (Vector3)src[i]).ToList());
+            else m.SetUVs(ch, first.Select(i => src[i]).ToList());
+        }
+        m.subMeshCount = subs.Count;
+        for (int s = 0; s < subs.Count; s++) m.SetIndices(subs[s], topo[s], s, false);
+        m.bounds = bounds; m.name = name;
+        EditorUtility.SetDirty(m); AssetDatabase.SaveAssets();
+        o["key"] = keyMode; o["newVerts"] = m.vertexCount; o["droppedDegenerateTris"] = dropped;
+        long nt = 0; for (int s = 0; s < m.subMeshCount; s++) nt += m.GetIndexCount(s) / 3; o["newTris"] = nt;
+        return o;
+    }
+
+    // { op:"meshdump", asset:"Assets/.../x.asset", out:"C:/.../x.json" } — writes positions, normals, uv0, uv1 and triangles
+    // of a single-submesh mesh asset as flat JSON arrays (Unity coordinates).
+    static JToken MeshDump(JObject cmd)
+    {
+        var path = (string)cmd["asset"];
+        var m = AssetDatabase.LoadAllAssetsAtPath(path).OfType<Mesh>().FirstOrDefault();
+        if (m == null) throw new Exception("No mesh in " + path);
+        if (m.subMeshCount != 1 || m.GetTopology(0) != MeshTopology.Triangles) throw new Exception("meshdump handles one triangle submesh; this has " + m.subMeshCount);
+        var uv0 = new List<Vector2>(); var uv1 = new List<Vector2>(); m.GetUVs(0, uv0); m.GetUVs(1, uv1);
+        var o = new JObject
+        {
+            ["name"] = m.name,
+            ["pos"] = new JArray(m.vertices.SelectMany(v => new[] { v.x, v.y, v.z })),
+            ["nrm"] = new JArray(m.normals.SelectMany(v => new[] { v.x, v.y, v.z })),
+            ["uv0"] = new JArray(uv0.SelectMany(v => new[] { v.x, v.y })),
+            ["uv1"] = new JArray(uv1.SelectMany(v => new[] { v.x, v.y })),
+            ["tri"] = new JArray(m.triangles),
+        };
+        File.WriteAllText((string)cmd["out"], o.ToString(Newtonsoft.Json.Formatting.None));
+        return new JObject { ["verts"] = m.vertexCount, ["tris"] = m.triangles.Length / 3, ["out"] = (string)cmd["out"] };
+    }
+
+    // { op:"meshload", asset:"Assets/.../x.asset", in:"C:/.../x.json" } — replaces the geometry of the mesh asset IN PLACE
+    // (same asset and name, so every reference keeps working) from the JSON layout meshdump writes; tangents are recalculated.
+    static JToken MeshLoad(JObject cmd)
+    {
+        var path = (string)cmd["asset"];
+        var m = AssetDatabase.LoadAllAssetsAtPath(path).OfType<Mesh>().FirstOrDefault();
+        if (m == null) throw new Exception("No mesh in " + path);
+        var j = JObject.Parse(File.ReadAllText((string)cmd["in"]));
+        Func<string, float[]> F = k => j[k] == null ? new float[0] : j[k].Select(t => (float)t).ToArray();
+        var p = F("pos"); var nr = F("nrm"); var a0 = F("uv0"); var a1 = F("uv1"); var tri = j["tri"].Select(t => (int)t).ToArray();
+        int n = p.Length / 3;
+        if (n == 0 || n > 65535) throw new Exception("vertex count " + n + " not usable");
+        int before = m.vertexCount; var name = m.name; bool hadTan = m.tangents.Length == before;
+        m.Clear();
+        m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt16;
+        m.vertices = Enumerable.Range(0, n).Select(i => new Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2])).ToArray();
+        if (nr.Length == n * 3) m.normals = Enumerable.Range(0, n).Select(i => new Vector3(nr[i * 3], nr[i * 3 + 1], nr[i * 3 + 2])).ToArray();
+        if (a0.Length == n * 2) m.SetUVs(0, Enumerable.Range(0, n).Select(i => new Vector2(a0[i * 2], a0[i * 2 + 1])).ToList());
+        if (a1.Length == n * 2) m.SetUVs(1, Enumerable.Range(0, n).Select(i => new Vector2(a1[i * 2], a1[i * 2 + 1])).ToList());
+        m.subMeshCount = 1;
+        m.SetTriangles(tri, 0, true);
+        if (hadTan && a0.Length == n * 2) m.RecalculateTangents();
+        m.RecalculateBounds();
+        m.name = name;
+        EditorUtility.SetDirty(m); AssetDatabase.SaveAssets();
+        return new JObject { ["before"] = before, ["verts"] = m.vertexCount, ["tris"] = tri.Length / 3, ["bounds"] = V(m.bounds.size) };
+    }
+
+    // { op:"meshparts", source:"Tachi/.../SM_Bodysuit_Mesh_Bodysuit", folder:"Assets/.../CorpseParts", dir:"C:/.../corpse_parts",
+    //   items:[{ name, localPos:[x,y,z] }], disable:[paths] }
+    // For every item: builds (or overwrites) the mesh asset <folder>/<name>.asset from <dir>/<name>.json (meshdump layout),
+    // duplicates `source` beside itself with that mesh on its MeshFilter and MeshCollider, at localPos with no rotation,
+    // and registers the copy's GUID-resolved references on the same AddressableComponentLoader as the source's (if any).
+    // An existing sibling with the item's name is replaced. The paths in `disable` are then switched off.
+    static JToken MeshParts(JObject cmd)
+    {
+        var src = Find((string)cmd["source"]);
+        if (src == null) throw new Exception("Source not found: " + cmd["source"]);
+        var folder = (string)cmd["folder"]; var dir = (string)cmd["dir"];
+        if (!AssetDatabase.IsValidFolder(folder))
+        {
+            var parent = Path.GetDirectoryName(folder).Replace("\\", "/");
+            AssetDatabase.CreateFolder(parent, Path.GetFileName(folder));
+        }
+        BBI.Unity.Game.AddressableComponentLoader acl = null;
+        for (var t = src; t != null && acl == null; t = t.parent) acl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+        var srcAll = src.GetComponentsInChildren<Component>(true);
+        var srcEntries = acl != null ? acl.componentValues.Where(cv => cv != null && cv.component != null && Array.IndexOf(srcAll, cv.component) >= 0).ToList() : null;
+        var made = new JArray();
+        foreach (JObject it in cmd["items"])
+        {
+            var name = (string)it["name"];
+            var j = JObject.Parse(File.ReadAllText(Path.Combine(dir, name + ".json")));
+            Func<string, float[]> F = k => j[k] == null ? new float[0] : j[k].Select(t => (float)t).ToArray();
+            var p = F("pos"); var nr = F("nrm"); var a0 = F("uv0"); var a1 = F("uv1"); var tri = j["tri"].Select(t => (int)t).ToArray();
+            int n = p.Length / 3;
+            if (n == 0 || n > 65535) throw new Exception(name + ": vertex count " + n + " not usable");
+            var assetPath = folder + "/" + name + ".asset";
+            var m = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
+            bool isNew = m == null;
+            if (isNew) m = new Mesh(); else m.Clear();
+            m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt16;
+            m.vertices = Enumerable.Range(0, n).Select(i => new Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2])).ToArray();
+            if (nr.Length == n * 3) m.normals = Enumerable.Range(0, n).Select(i => new Vector3(nr[i * 3], nr[i * 3 + 1], nr[i * 3 + 2])).ToArray();
+            if (a0.Length == n * 2) m.SetUVs(0, Enumerable.Range(0, n).Select(i => new Vector2(a0[i * 2], a0[i * 2 + 1])).ToList());
+            if (a1.Length == n * 2) m.SetUVs(1, Enumerable.Range(0, n).Select(i => new Vector2(a1[i * 2], a1[i * 2 + 1])).ToList());
+            m.subMeshCount = 1;
+            m.SetTriangles(tri, 0, true);
+            if (a0.Length == n * 2) m.RecalculateTangents();
+            m.RecalculateBounds();
+            m.name = name;
+            if (isNew) AssetDatabase.CreateAsset(m, assetPath); else EditorUtility.SetDirty(m);
+
+            var old = src.parent.Find(name);
+            if (old != null && ((bool?)cmd["reuse"] ?? true))
+            {
+                // already placed (and possibly saved into the ship prefab): the mesh asset was rewritten in place, just move it
+                var lp0 = it["localPos"];
+                old.localPosition = new Vector3((float)lp0[0], (float)lp0[1], (float)lp0[2]);
+                Dirty(old.gameObject);
+                made.Add(new JObject { ["name"] = name, ["verts"] = m.vertexCount, ["reused"] = true });
+                continue;
+            }
+            if (old != null)
+            {
+                if (acl != null) { var oldAll = old.GetComponentsInChildren<Component>(true); acl.componentValues.RemoveAll(cv => cv != null && cv.component != null && Array.IndexOf(oldAll, cv.component) >= 0); }
+                UnityEngine.Object.DestroyImmediate(old.gameObject);
+            }
+            var go = UnityEngine.Object.Instantiate(src.gameObject, src.parent);
+            go.name = name;
+            var lp = it["localPos"];
+            go.transform.localPosition = new Vector3((float)lp[0], (float)lp[1], (float)lp[2]);
+            go.transform.localRotation = Quaternion.identity; go.transform.localScale = Vector3.one;
+            go.SetActive(true);
+            var mf = go.GetComponent<MeshFilter>(); if (mf != null) mf.sharedMesh = m;
+            var mc = go.GetComponent<MeshCollider>(); if (mc != null) mc.sharedMesh = m;
+            int reg = 0;
+            if (srcEntries != null)
+            {
+                var dstAll = go.GetComponentsInChildren<Component>(true);
+                foreach (var cv in srcEntries)
+                {
+                    int idx = Array.IndexOf(srcAll, cv.component);
+                    if (idx < 0 || idx >= dstAll.Length || dstAll[idx] == null || dstAll[idx].GetType() != cv.component.GetType()) continue;
+                    acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = dstAll[idx], field = cv.field, address = cv.address });
+                    reg++;
+                }
+            }
+            Ledger(go); Dirty(go);
+            var mr = go.GetComponent<MeshRenderer>();
+            made.Add(new JObject { ["name"] = name, ["verts"] = m.vertexCount, ["aclEntries"] = reg, ["convex"] = mc != null ? (JToken)mc.convex : null,
+                ["materials"] = mr != null ? new JArray(mr.sharedMaterials.Select(x => x != null ? x.name : "null")) : null,
+                ["worldMin"] = mr != null ? V(mr.bounds.min) : null, ["worldMax"] = mr != null ? V(mr.bounds.max) : null });
+        }
+        if (acl != null) EditorUtility.SetDirty(acl);
+        AssetDatabase.SaveAssets();
+        var off = new JArray();
+        if (cmd["disable"] != null)
+            foreach (var d in cmd["disable"]) { var t = Find((string)d); if (t != null) { t.gameObject.SetActive(false); Dirty(t.gameObject); off.Add((string)d); } }
+        return new JObject { ["made"] = made, ["disabled"] = off, ["acl"] = acl != null ? PathOf(acl.gameObject) : null, ["srcAclEntries"] = srcEntries != null ? srcEntries.Count : 0 };
+    }
+
+    // { op:"meshassign", paths:[...], folder:"Assets/.../X", dir:"C:/.../json dir", name:"Suit_Hanging" }
+    // Builds (or overwrites in place) the mesh asset <folder>/<name>.asset from <dir>/<name>.json (meshdump layout) and puts
+    // it on the MeshFilter and MeshCollider of every listed object.
+    static JToken MeshAssign(JObject cmd)
+    {
+        var folder = (string)cmd["folder"]; var name = (string)cmd["name"];
+        if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(Path.GetDirectoryName(folder).Replace("\\", "/"), Path.GetFileName(folder));
+        var j = JObject.Parse(File.ReadAllText(Path.Combine((string)cmd["dir"], name + ".json")));
+        Func<string, float[]> F = k => j[k] == null ? new float[0] : j[k].Select(t => (float)t).ToArray();
+        var p = F("pos"); var nr = F("nrm"); var a0 = F("uv0"); var a1 = F("uv1"); var tri = j["tri"].Select(t => (int)t).ToArray();
+        int n = p.Length / 3;
+        if (n == 0 || n > 65535) throw new Exception(name + ": vertex count " + n + " not usable");
+        var assetPath = folder + "/" + name + ".asset";
+        var m = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
+        bool isNew = m == null;
+        if (isNew) m = new Mesh(); else m.Clear();
+        m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt16;
+        m.vertices = Enumerable.Range(0, n).Select(i => new Vector3(p[i * 3], p[i * 3 + 1], p[i * 3 + 2])).ToArray();
+        if (nr.Length == n * 3) m.normals = Enumerable.Range(0, n).Select(i => new Vector3(nr[i * 3], nr[i * 3 + 1], nr[i * 3 + 2])).ToArray();
+        if (a0.Length == n * 2) m.SetUVs(0, Enumerable.Range(0, n).Select(i => new Vector2(a0[i * 2], a0[i * 2 + 1])).ToList());
+        if (a1.Length == n * 2) m.SetUVs(1, Enumerable.Range(0, n).Select(i => new Vector2(a1[i * 2], a1[i * 2 + 1])).ToList());
+        m.subMeshCount = 1;
+        m.SetTriangles(tri, 0, true);
+        if (a0.Length == n * 2) m.RecalculateTangents();
+        m.RecalculateBounds();
+        m.name = name;
+        if (isNew) AssetDatabase.CreateAsset(m, assetPath); else EditorUtility.SetDirty(m);
+        var done = new JArray();
+        if (cmd["paths"] != null)
+            foreach (var q in cmd["paths"])
+            {
+                var t = Find((string)q);
+                if (t == null) throw new Exception("Not found: " + q);
+                var mf = t.GetComponent<MeshFilter>(); if (mf != null) { mf.sharedMesh = m; EditorUtility.SetDirty(mf); }
+                var mc = t.GetComponent<MeshCollider>(); if (mc != null) { mc.sharedMesh = m; EditorUtility.SetDirty(mc); }
+                Dirty(t.gameObject);
+                var mr = t.GetComponent<MeshRenderer>();
+                done.Add(new JObject { ["path"] = (string)q, ["min"] = mr != null ? V(mr.bounds.min) : null, ["max"] = mr != null ? V(mr.bounds.max) : null,
+                    ["components"] = new JArray(t.GetComponents<Component>().Where(c => c != null).Select(c => c.GetType().Name)) });
+            }
+        AssetDatabase.SaveAssets();
+        return new JObject { ["asset"] = assetPath, ["verts"] = m.vertexCount, ["size"] = V(m.bounds.size), ["assigned"] = done };
     }
 
     // { op:"bigmeshes", path:"Tachi", min:16000 } — every mesh with at least `min` vertices under the ship, ACTIVE OR NOT:
