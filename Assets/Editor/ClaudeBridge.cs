@@ -133,6 +133,7 @@ public static class ClaudeBridge
                 case "worlddump": result = WorldDump(cmd); break;
                 case "jointpads": result = JointPads(cmd); break;
                 case "setsoloader": result = SetSoLoader(cmd); break;
+                case "colormat": result = ColorMat(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
                 case "bakeparts": result = BakeParts(cmd); break;
@@ -462,6 +463,7 @@ public static class ClaudeBridge
     {
         if (cmd["euler"] != null) t.rotation = Quaternion.Euler(ToV(cmd["euler"], Vector3.zero));
         if (cmd["localEuler"] != null) t.localRotation = Quaternion.Euler(ToV(cmd["localEuler"], Vector3.zero));
+        if (cmd["forward"] != null) t.rotation = Quaternion.LookRotation(ToV(cmd["forward"], Vector3.forward), ToV(cmd["up"], Vector3.up));   // local +Z along forward, +Y towards up
         if (cmd["pos"] != null)   t.position = ToV(cmd["pos"], Vector3.zero);
         if (cmd["delta"] != null) t.position += ToV(cmd["delta"], Vector3.zero);
         if ((cmd["center"] != null || cmd["floorY"] != null) && TryBounds(t, out var b))
@@ -1496,8 +1498,11 @@ public static class ClaudeBridge
         if (nr.Length == n * 3) m.normals = Enumerable.Range(0, n).Select(i => new Vector3(nr[i * 3], nr[i * 3 + 1], nr[i * 3 + 2])).ToArray();
         if (a0.Length == n * 2) m.SetUVs(0, Enumerable.Range(0, n).Select(i => new Vector2(a0[i * 2], a0[i * 2 + 1])).ToList());
         if (a1.Length == n * 2) m.SetUVs(1, Enumerable.Range(0, n).Select(i => new Vector2(a1[i * 2], a1[i * 2 + 1])).ToList());
-        m.subMeshCount = 1;
-        m.SetTriangles(tri, 0, true);
+        var subs = j["subs"] != null ? j["subs"].Select(t => (int)t).ToArray() : new[] { tri.Length / 3 };
+        m.subMeshCount = subs.Length;
+        for (int si = 0, off = 0; si < subs.Length; off += subs[si] * 3, si++) m.SetTriangles(tri.Skip(off).Take(subs[si] * 3).ToArray(), si, true);
+        Material[] newMats = cmd["materials"] != null ? cmd["materials"].Select(t => AssetDatabase.LoadAssetAtPath<Material>((string)t)).ToArray() : null;
+        if (newMats != null && newMats.Any(x => x == null)) throw new Exception("material not found in " + cmd["materials"]);
         if (a0.Length == n * 2) m.RecalculateTangents();
         m.RecalculateBounds();
         m.name = name;
@@ -1512,6 +1517,7 @@ public static class ClaudeBridge
                 var mc = t.GetComponent<MeshCollider>(); if (mc != null) { mc.sharedMesh = m; EditorUtility.SetDirty(mc); }
                 Dirty(t.gameObject);
                 var mr = t.GetComponent<MeshRenderer>();
+                if (mr != null && newMats != null) { mr.sharedMaterials = newMats; EditorUtility.SetDirty(mr); }
                 done.Add(new JObject { ["path"] = (string)q, ["min"] = mr != null ? V(mr.bounds.min) : null, ["max"] = mr != null ? V(mr.bounds.max) : null,
                     ["components"] = new JArray(t.GetComponents<Component>().Where(c => c != null).Select(c => c.GetType().Name)) });
             }
@@ -1536,6 +1542,15 @@ public static class ClaudeBridge
             for (int i = 0; i < v.Length; i++) { var p = m.MultiplyPoint3x4(v[i]); w[i * 3] = p.x; w[i * 3 + 1] = p.y; w[i * 3 + 2] = p.z; }
             var o = new JObject { ["name"] = t.name, ["path"] = (string)q, ["pos"] = new JArray(w.Select(f => (double)f)), ["tri"] = new JArray(mf.sharedMesh.triangles),
                 ["localPos"] = V(t.localPosition), ["worldPos"] = V(t.position), ["lossyScale"] = V(t.lossyScale) };
+            if ((bool?)cmd["full"] ?? false)
+            {
+                var sm = mf.sharedMesh; var uvl = new List<Vector2>(); sm.GetUVs(0, uvl);
+                o["localVerts"] = new JArray(sm.vertices.SelectMany(q => new[] { (double)q.x, q.y, q.z }));
+                o["nrm"] = new JArray(sm.normals.SelectMany(q => new[] { (double)q.x, q.y, q.z }));
+                o["uv0"] = new JArray(uvl.SelectMany(q => new[] { (double)q.x, q.y }));
+                o["euler"] = V(t.eulerAngles); o["subs"] = new JArray(Enumerable.Range(0, sm.subMeshCount).Select(k => (int)sm.GetIndexCount(k) / 3));
+                var mr0 = t.GetComponent<MeshRenderer>(); if (mr0 != null) o["materials"] = new JArray(mr0.sharedMaterials.Select(x => x != null ? AssetDatabase.GetAssetPath(x) : null));
+            }
             File.WriteAllText(Path.Combine(dir, t.name + ".json"), o.ToString(Newtonsoft.Json.Formatting.None));
             done.Add(new JObject { ["name"] = t.name, ["verts"] = v.Length, ["tris"] = mf.sharedMesh.triangles.Length / 3, ["active"] = t.gameObject.activeInHierarchy });
         }
@@ -1557,6 +1572,7 @@ public static class ClaudeBridge
         foreach (JObject pd in cmd["pads"])
             foreach (var side in new[] { "a", "b" })
             {
+                if (pd[side] == null) continue;
                 var t = Find((string)pd[side]);
                 if (t == null) throw new Exception("Not found: " + pd[side]);
                 if (!per.ContainsKey(t)) per[t] = new List<KeyValuePair<JObject, float>>();
@@ -1567,7 +1583,8 @@ public static class ClaudeBridge
         {
             var t = kv.Key; var mf = t.GetComponent<MeshFilter>();
             var src = modelMeshes.FirstOrDefault(x => x.name == mf.sharedMesh.name);
-            if (src == null) throw new Exception("No mesh named " + mf.sharedMesh.name + " in " + model);
+            bool own = src == null;                       // not a model mesh (a generated .asset): add the pads to it in place
+            if (own) src = mf.sharedMesh;
             int n0 = src.vertexCount;
             var pos = new List<Vector3>(src.vertices); var nrm = new List<Vector3>(src.normals); var tan = new List<Vector4>(src.tangents); var col = new List<Color32>(src.colors32);
             bool hasN = nrm.Count == n0, hasT = tan.Count == n0, hasC = col.Count == n0;
@@ -1610,7 +1627,8 @@ public static class ClaudeBridge
                         }
                     }
             }
-            var assetPath = folder + "/" + src.name + ".asset";
+            var assetPath = own && AssetDatabase.GetAssetPath(src).EndsWith(".asset") ? AssetDatabase.GetAssetPath(src) : folder + "/" + src.name + ".asset";
+            var srcName = src.name;
             var m = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
             bool isNew = m == null;
             if (isNew) m = new Mesh(); else m.Clear();
@@ -1629,7 +1647,7 @@ public static class ClaudeBridge
             m.subMeshCount = subs.Count;
             for (int s = 0; s < subs.Count; s++) m.SetTriangles(subs[s], s, false);
             m.RecalculateBounds();
-            m.name = src.name;
+            m.name = srcName;
             if (isNew) AssetDatabase.CreateAsset(m, assetPath); else EditorUtility.SetDirty(m);
             mf.sharedMesh = m; EditorUtility.SetDirty(mf);
             var mc = t.GetComponent<MeshCollider>(); if (mc != null) { mc.sharedMesh = m; EditorUtility.SetDirty(mc); }
@@ -1661,6 +1679,32 @@ public static class ClaudeBridge
             res.Add(new JObject { ["path"] = (string)q, ["field"] = new JArray(l.field), ["refs"] = new JArray(l.refs) });
         }
         return res;
+    }
+
+    // { op:"colormat", baseMaterial:"Assets/.../x.mat", folder, name, color:[r,g,b,a], metallic, smoothness, emission:[r,g,b] }
+    // A copy of the base material with every texture removed and a flat colour (created once, updated after).
+    static JToken ColorMat(JObject cmd)
+    {
+        var folder = (string)cmd["folder"]; var name = (string)cmd["name"];
+        if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(Path.GetDirectoryName(folder).Replace("\\", "/"), Path.GetFileName(folder));
+        var path = folder + "/" + name + ".mat";
+        var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (m == null)
+        {
+            if (!AssetDatabase.CopyAsset((string)cmd["baseMaterial"], path)) throw new Exception("could not copy " + cmd["baseMaterial"]);
+            m = AssetDatabase.LoadAssetAtPath<Material>(path);
+        }
+        foreach (var tp in m.GetTexturePropertyNames()) m.SetTexture(tp, null);
+        foreach (var kw in new[] { "_NORMALMAP", "_NORMALMAP_TANGENT_SPACE", "_MASKMAP", "_EMISSIVE_COLOR_MAP", "_DETAIL_MAP", "_HEIGHTMAP" }) m.DisableKeyword(kw);
+        var c = cmd["color"]; var col = new Color((float)c[0], (float)c[1], (float)c[2], c.Count() > 3 ? (float)c[3] : 1f);
+        foreach (var pn in new[] { "_BaseColor", "_Color" }) if (m.HasProperty(pn)) m.SetColor(pn, col);
+        if (cmd["metallic"] != null && m.HasProperty("_Metallic")) m.SetFloat("_Metallic", (float)cmd["metallic"]);
+        if (cmd["smoothness"] != null) foreach (var pn in new[] { "_Smoothness", "_Glossiness" }) if (m.HasProperty(pn)) m.SetFloat(pn, (float)cmd["smoothness"]);
+        var e = cmd["emission"]; var ec = e != null ? new Color((float)e[0], (float)e[1], (float)e[2], 1f) : Color.black;
+        foreach (var pn in new[] { "_EmissiveColor", "_EmissiveColorLDR", "_EmissionColor" }) if (m.HasProperty(pn)) m.SetColor(pn, ec);
+        if (m.HasProperty("_EmissiveIntensity")) m.SetFloat("_EmissiveIntensity", e != null ? 1f : 0f);
+        EditorUtility.SetDirty(m); AssetDatabase.SaveAssets();
+        return new JObject { ["path"] = path, ["shader"] = m.shader != null ? m.shader.name : null };
     }
 
     // { op:"bigmeshes", path:"Tachi", min:16000 } — every mesh with at least `min` vertices under the ship, ACTIVE OR NOT:
