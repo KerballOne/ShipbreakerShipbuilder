@@ -130,6 +130,9 @@ public static class ClaudeBridge
                 case "meshload":  result = MeshLoad(cmd); break;
                 case "meshparts": result = MeshParts(cmd); break;
                 case "meshassign": result = MeshAssign(cmd); break;
+                case "worlddump": result = WorldDump(cmd); break;
+                case "jointpads": result = JointPads(cmd); break;
+                case "setsoloader": result = SetSoLoader(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
                 case "bakeparts": result = BakeParts(cmd); break;
@@ -1514,6 +1517,150 @@ public static class ClaudeBridge
             }
         AssetDatabase.SaveAssets();
         return new JObject { ["asset"] = assetPath, ["verts"] = m.vertexCount, ["size"] = V(m.bounds.size), ["assigned"] = done };
+    }
+
+    // { op:"worlddump", paths:[...], dir:"C:/.../out" } — writes <dir>/<object name>.json for each object: its render-mesh
+    // vertices in WORLD space (float32, exactly what the jointing code sees) and triangle indices of all submeshes.
+    static JToken WorldDump(JObject cmd)
+    {
+        var dir = (string)cmd["dir"]; Directory.CreateDirectory(dir);
+        var done = new JArray();
+        foreach (var q in cmd["paths"])
+        {
+            var t = Find((string)q);
+            if (t == null) { done.Add(new JObject { ["path"] = (string)q, ["error"] = "not found" }); continue; }
+            var mf = t.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) { done.Add(new JObject { ["path"] = (string)q, ["error"] = "no mesh" }); continue; }
+            var m = t.localToWorldMatrix; var v = mf.sharedMesh.vertices;
+            var w = new float[v.Length * 3];
+            for (int i = 0; i < v.Length; i++) { var p = m.MultiplyPoint3x4(v[i]); w[i * 3] = p.x; w[i * 3 + 1] = p.y; w[i * 3 + 2] = p.z; }
+            var o = new JObject { ["name"] = t.name, ["path"] = (string)q, ["pos"] = new JArray(w.Select(f => (double)f)), ["tri"] = new JArray(mf.sharedMesh.triangles),
+                ["localPos"] = V(t.localPosition), ["worldPos"] = V(t.position), ["lossyScale"] = V(t.lossyScale) };
+            File.WriteAllText(Path.Combine(dir, t.name + ".json"), o.ToString(Newtonsoft.Json.Formatting.None));
+            done.Add(new JObject { ["name"] = t.name, ["verts"] = v.Length, ["tris"] = mf.sharedMesh.triangles.Length / 3, ["active"] = t.gameObject.activeInHierarchy });
+        }
+        return done;
+    }
+
+    // { op:"jointpads", model:"Assets/.../PDC_Parts.fbx", folder:"Assets/.../JointPads",
+    //   pads:[{ a:path, b:path, center:[world], normal:[world], tangent:[world], w:0.16, h:0.16, nu:8, nv:8 }] }
+    // The game joints two parts where it finds facing coplanar triangles, and with detailed meshes it can lock onto the
+    // wrong pair. A joint pad is a small flat grid of triangles added to BOTH meshes at the same world position (facing
+    // +normal in a, -normal in b), hidden inside solid material, appended LAST in the index buffer so the search ends on it.
+    // The new mesh of each object = its mesh from `model` (by name) + all its pads, saved as <folder>/<mesh name>.asset.
+    static JToken JointPads(JObject cmd)
+    {
+        var folder = (string)cmd["folder"]; var model = (string)cmd["model"];
+        if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(Path.GetDirectoryName(folder).Replace("\\", "/"), Path.GetFileName(folder));
+        var modelMeshes = AssetDatabase.LoadAllAssetsAtPath(model).OfType<Mesh>().ToList();
+        var per = new Dictionary<Transform, List<KeyValuePair<JObject, float>>>();
+        foreach (JObject pd in cmd["pads"])
+            foreach (var side in new[] { "a", "b" })
+            {
+                var t = Find((string)pd[side]);
+                if (t == null) throw new Exception("Not found: " + pd[side]);
+                if (!per.ContainsKey(t)) per[t] = new List<KeyValuePair<JObject, float>>();
+                per[t].Add(new KeyValuePair<JObject, float>(pd, side == "a" ? 1f : -1f));
+            }
+        var res = new JArray();
+        foreach (var kv in per)
+        {
+            var t = kv.Key; var mf = t.GetComponent<MeshFilter>();
+            var src = modelMeshes.FirstOrDefault(x => x.name == mf.sharedMesh.name);
+            if (src == null) throw new Exception("No mesh named " + mf.sharedMesh.name + " in " + model);
+            int n0 = src.vertexCount;
+            var pos = new List<Vector3>(src.vertices); var nrm = new List<Vector3>(src.normals); var tan = new List<Vector4>(src.tangents); var col = new List<Color32>(src.colors32);
+            bool hasN = nrm.Count == n0, hasT = tan.Count == n0, hasC = col.Count == n0;
+            var uvs = new List<Vector4>[4]; var dims = new int[4];
+            for (int ch = 0; ch < 4; ch++)
+            {
+                uvs[ch] = new List<Vector4>(); src.GetUVs(ch, uvs[ch]);
+                dims[ch] = uvs[ch].Count == n0 ? src.GetVertexAttributeDimension((UnityEngine.Rendering.VertexAttribute)((int)UnityEngine.Rendering.VertexAttribute.TexCoord0 + ch)) : 0;
+            }
+            var subs = new List<List<int>>();
+            for (int s = 0; s < src.subMeshCount; s++) subs.Add(new List<int>(src.GetTriangles(s)));
+            int padTris = 0;
+            foreach (var pk in kv.Value)
+            {
+                var pd = pk.Key; float sign = pk.Value;
+                Vector3 c = ToV(pd["center"], Vector3.zero), n = ToV(pd["normal"], Vector3.up).normalized, tu = ToV(pd["tangent"], Vector3.right);
+                tu = (tu - n * Vector3.Dot(tu, n)).normalized; var tv = Vector3.Cross(n, tu).normalized;
+                float w = (float?)pd["w"] ?? 0.16f, h = (float?)pd["h"] ?? 0.16f; int nu = (int?)pd["nu"] ?? 8, nv = (int?)pd["nv"] ?? 8;
+                int b0 = pos.Count; var ln = t.InverseTransformDirection(n * sign).normalized;
+                for (int j = 0; j <= nv; j++)
+                    for (int i = 0; i <= nu; i++)
+                    {
+                        var wp = c + tu * (w * ((float)i / nu - 0.5f)) + tv * (h * ((float)j / nv - 0.5f));
+                        pos.Add(t.InverseTransformPoint(wp));
+                        if (hasN) nrm.Add(ln);
+                        if (hasT) tan.Add(new Vector4(1, 0, 0, 1));
+                        if (hasC) col.Add(col[0]);
+                        for (int ch = 0; ch < 4; ch++) if (dims[ch] > 0) uvs[ch].Add(uvs[ch][0]);
+                    }
+                var last = subs[subs.Count - 1];
+                for (int j = 0; j < nv; j++)
+                    for (int i = 0; i < nu; i++)
+                    {
+                        int v00 = b0 + j * (nu + 1) + i, v10 = v00 + 1, v01 = v00 + nu + 1, v11 = v01 + 1;
+                        foreach (var tri in new[] { new[] { v00, v10, v11 }, new[] { v00, v11, v01 } })
+                        {
+                            var g = Vector3.Cross(pos[tri[1]] - pos[tri[0]], pos[tri[2]] - pos[tri[0]]);
+                            if (Vector3.Dot(g, ln) < 0) { int x = tri[1]; tri[1] = tri[2]; tri[2] = x; }
+                            last.AddRange(tri); padTris++;
+                        }
+                    }
+            }
+            var assetPath = folder + "/" + src.name + ".asset";
+            var m = AssetDatabase.LoadAssetAtPath<Mesh>(assetPath);
+            bool isNew = m == null;
+            if (isNew) m = new Mesh(); else m.Clear();
+            m.indexFormat = pos.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
+            m.SetVertices(pos);
+            if (hasN) m.SetNormals(nrm);
+            if (hasT) m.SetTangents(tan);
+            if (hasC) m.SetColors(col);
+            for (int ch = 0; ch < 4; ch++)
+            {
+                if (dims[ch] == 0) continue;
+                if (dims[ch] == 2) m.SetUVs(ch, uvs[ch].Select(u => (Vector2)u).ToList());
+                else if (dims[ch] == 3) m.SetUVs(ch, uvs[ch].Select(u => (Vector3)u).ToList());
+                else m.SetUVs(ch, uvs[ch]);
+            }
+            m.subMeshCount = subs.Count;
+            for (int s = 0; s < subs.Count; s++) m.SetTriangles(subs[s], s, false);
+            m.RecalculateBounds();
+            m.name = src.name;
+            if (isNew) AssetDatabase.CreateAsset(m, assetPath); else EditorUtility.SetDirty(m);
+            mf.sharedMesh = m; EditorUtility.SetDirty(mf);
+            var mc = t.GetComponent<MeshCollider>(); if (mc != null) { mc.sharedMesh = m; EditorUtility.SetDirty(mc); }
+            Dirty(t.gameObject);
+            res.Add(new JObject { ["object"] = t.name, ["asset"] = assetPath, ["verts"] = m.vertexCount, ["was"] = n0, ["padTris"] = padTris, ["subMeshes"] = subs.Count });
+        }
+        AssetDatabase.SaveAssets();
+        return res;
+    }
+
+    // { op:"setsoloader", paths:[...], sp:"<StructurePartAsset guid>", bp:"<EntityBlueprintAsset guid>" }
+    // Re-points the AddressableSOLoader of each object (the old per-object loader the corpse parts use) at another
+    // StructurePartAsset / EntityBlueprintAsset. Omit sp/bp to just report.
+    static JToken SetSoLoader(JObject cmd)
+    {
+        var res = new JArray();
+        foreach (var q in cmd["paths"])
+        {
+            var t = Find((string)q);
+            if (t == null) throw new Exception("Not found: " + q);
+            var l = t.GetComponent<BBI.Unity.Game.AddressableSOLoader>();
+            if (l == null) { res.Add(new JObject { ["path"] = (string)q, ["error"] = "no AddressableSOLoader" }); continue; }
+            for (int i = 0; i < l.field.Count && i < l.refs.Count; i++)
+            {
+                if (l.field[i] == "m_StructurePartAsset" && cmd["sp"] != null) l.refs[i] = (string)cmd["sp"];
+                if (l.field[i] == "m_BlueprintAsset" && cmd["bp"] != null) l.refs[i] = (string)cmd["bp"];
+            }
+            EditorUtility.SetDirty(l); Dirty(t.gameObject);
+            res.Add(new JObject { ["path"] = (string)q, ["field"] = new JArray(l.field), ["refs"] = new JArray(l.refs) });
+        }
+        return res;
     }
 
     // { op:"bigmeshes", path:"Tachi", min:16000 } — every mesh with at least `min` vertices under the ship, ACTIVE OR NOT:
