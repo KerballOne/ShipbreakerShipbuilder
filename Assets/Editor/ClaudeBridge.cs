@@ -1857,11 +1857,17 @@ public static class ClaudeBridge
         var dst = find((string)cmd["path"]);
         var o = new JObject { ["path"] = (string)cmd["path"], ["field"] = field, ["entries"] = dst.Count,
             ["was"] = new JArray(dst.Select(kv => kv.Key.componentValues[kv.Value].address)) };
-        if (cmd["from"] == null) return o;
-        var src = find((string)cmd["from"]);
-        if (src.Count == 0) throw new Exception("No loader entry for " + field + " on " + cmd["from"]);
+        if (cmd["from"] == null && cmd["address"] == null) return o;
         if (dst.Count == 0) throw new Exception("No loader entry for " + field + " on " + cmd["path"]);
-        string addr = src[0].Key.componentValues[src[0].Value].address; o["now"] = addr;
+        string addr;
+        if (cmd["address"] != null) addr = (string)cmd["address"];   // { ..., address:"<guid>" } sets it directly
+        else
+        {
+            var src = find((string)cmd["from"]);
+            if (src.Count == 0) throw new Exception("No loader entry for " + field + " on " + cmd["from"]);
+            addr = src[0].Key.componentValues[src[0].Value].address;
+        }
+        o["now"] = addr;
         if (!dry) foreach (var kv in dst) { kv.Key.componentValues[kv.Value].address = addr; EditorUtility.SetDirty(kv.Key); PrefabUtility.RecordPrefabInstancePropertyModifications(kv.Key); Dirty(kv.Key.gameObject); }
         return o;
     }
