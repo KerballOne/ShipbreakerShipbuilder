@@ -138,6 +138,9 @@ public static class ClaudeBridge
                 case "aclpurge": result = AclPurge(cmd); break;
                 case "aclrepair": result = AclRepair(cmd); break;
                 case "addmjc": result = AddMjc(cmd); break;
+                case "mjcgroups": result = MjcGroups(cmd); break;
+                case "mjcregroup": result = MjcRegroup(cmd); break;
+                case "reorderkids": result = ReorderKids(cmd); break;
                 case "aclcopy": result = AclCopy(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
@@ -1826,6 +1829,169 @@ public static class ClaudeBridge
     // { op:"addmjc", path:"Tachi/.../Group" } - adds a MandatoryJointContainer to the object: every StructurePart below it
     // is joined to the others regardless of joint type (needed for copied pieces of one prop, which share JOINT_Prop
     // and so cannot joint to each other).
+    // { op:"mjcgroups", prefab:"Assets/.../Tachi.prefab", unpack:["FwdSectionExt/Fore_Section"], under:"FwdSectionExt/Fore_Section",
+    //   groups:{ "<group name>": ["FwdSectionExt/Fore_Section/Part", "FwdSectionExt/TubeFrames/Part#1", ...] },
+    //   removeMjc:["FwdSectionExt"], dry:true }
+    // Edits the prefab ASSET (paths relative to its root): unpacks the listed nested prefab instances one level, creates one
+    // empty GameObject per group under `under` with a MandatoryJointContainer, moves the parts into it keeping their world
+    // transforms, and removes the MJC from the listed objects. All paths are resolved before anything is changed.
+    static JToken MjcGroups(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var root = PrefabUtility.LoadPrefabContents(ap); var res = new JObject(); var log = new JArray();
+        try
+        {
+            Func<string, Transform> rel = pth =>
+            {
+                var t = root.transform;
+                foreach (var seg in pth.Split('/'))
+                {
+                    string want = seg; int skip = 0; int hash = want.LastIndexOf('#');
+                    if (hash > 0 && int.TryParse(want.Substring(hash + 1), out int idx)) { want = want.Substring(0, hash); skip = idx; }
+                    Transform next = null; foreach (Transform c in t) if (c.name == want && skip-- == 0) { next = c; break; }
+                    if (next == null) return null; t = next;
+                }
+                return t;
+            };
+            foreach (var u in cmd["unpack"] ?? new JArray())
+            {
+                var t = rel((string)u); if (t == null) throw new Exception("unpack: not found " + u);
+                bool isRoot = PrefabUtility.IsAnyPrefabInstanceRoot(t.gameObject);
+                if (isRoot && !dry) PrefabUtility.UnpackPrefabInstance(t.gameObject, PrefabUnpackMode.OutermostRoot, InteractionMode.AutomatedAction);
+                log.Add((string)u + (isRoot ? (dry ? ": would unpack" : ": unpacked") : ": not a prefab instance root"));
+            }
+            var under = rel((string)cmd["under"]); if (under == null) throw new Exception("under: not found " + cmd["under"]);
+            var plan = new List<KeyValuePair<string, List<Transform>>>(); var missing = new JArray(); var seen = new HashSet<Transform>();
+            foreach (var g in (JObject)cmd["groups"])
+            {
+                var lst = new List<Transform>();
+                foreach (var p in g.Value)
+                {
+                    var t = rel((string)p);
+                    if (t == null) { missing.Add((string)p); continue; }
+                    if (!seen.Add(t)) throw new Exception("part listed twice: " + p);
+                    lst.Add(t);
+                }
+                plan.Add(new KeyValuePair<string, List<Transform>>(g.Key, lst));
+            }
+            if (missing.Count > 0) { res["missing"] = missing; throw new Exception("parts not found: " + missing.Count + " (first: " + missing[0] + ")"); }
+            var made = new JArray();
+            foreach (var kv in plan)
+            {
+                made.Add(new JObject { ["group"] = kv.Key, ["parts"] = kv.Value.Count });
+                if (dry) continue;
+                var go = new GameObject("MJC " + kv.Key); go.transform.SetParent(under, false);
+                go.transform.localPosition = Vector3.zero; go.transform.localRotation = Quaternion.identity; go.transform.localScale = Vector3.one;
+                go.AddComponent<BBI.Unity.Game.MandatoryJointContainer>();
+                foreach (var t in kv.Value) t.SetParent(go.transform, true);
+            }
+            foreach (var r in cmd["removeMjc"] ?? new JArray())
+            {
+                var t = rel((string)r); if (t == null) throw new Exception("removeMjc: not found " + r);
+                var c = t.GetComponent<BBI.Unity.Game.MandatoryJointContainer>(); bool had = c != null;
+                if (had && !dry) UnityEngine.Object.DestroyImmediate(c, true);
+                log.Add((string)r + (had ? (dry ? ": would remove MJC" : ": MJC removed") : ": had no MJC"));
+            }
+            if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
+            res["log"] = log; res["groups"] = made; res["saved"] = !dry;
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return res;
+    }
+
+    // { op:"mjcregroup", prefab:"Assets/.../Tachi.prefab", search:"FwdSectionExt", under:"FwdSectionExt/Fore_Section",
+    //   assign:{ "<part name>": "<group>" | "" }, dry:true }
+    // Edits the prefab ASSET: finds each part by name under `search` (names must be unique there), moves it into the
+    // "MJC <group>" parent under `under` (created with a MandatoryJointContainer if missing), or straight under `under`
+    // for "" (no MJC). World transforms are kept. "MJC *" parents left empty are deleted.
+    static JToken MjcRegroup(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var root = PrefabUtility.LoadPrefabContents(ap); var res = new JObject();
+        try
+        {
+            Func<string, Transform> rel = pth => { var t = root.transform; foreach (var seg in pth.Split('/')) { Transform n = null; foreach (Transform c in t) if (c.name == seg) { n = c; break; } if (n == null) return null; t = n; } return t; };
+            var unpacked = new JArray();
+            foreach (var u in cmd["unpack"] ?? new JArray())                 // nested prefab instances to unpack one level first
+            {
+                var ut = rel((string)u); if (ut == null) throw new Exception("unpack: not found " + u);
+                bool isRoot = PrefabUtility.IsAnyPrefabInstanceRoot(ut.gameObject);
+                if (isRoot && !dry) PrefabUtility.UnpackPrefabInstance(ut.gameObject, PrefabUnpackMode.OutermostRoot, InteractionMode.AutomatedAction);
+                unpacked.Add((string)u + (isRoot ? (dry ? ": would unpack" : ": unpacked") : ": not a prefab instance root"));
+            }
+            res["unpacked"] = unpacked;
+            var search = rel((string)cmd["search"]); var under = rel((string)cmd["under"]);
+            if (search == null || under == null) throw new Exception("search/under not found");
+            var byName = new Dictionary<string, List<Transform>>();
+            foreach (var sp in search.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true))
+            { if (!byName.TryGetValue(sp.name, out var l)) byName[sp.name] = l = new List<Transform>(); if (!l.Contains(sp.transform)) l.Add(sp.transform); }
+            var moves = new List<KeyValuePair<Transform, string>>(); var bad = new JArray();
+            foreach (var kv in (JObject)cmd["assign"])
+            {
+                if (!byName.TryGetValue(kv.Key, out var l)) { bad.Add("missing: " + kv.Key); continue; }
+                if (l.Count > 1) { bad.Add("not unique: " + kv.Key); continue; }
+                moves.Add(new KeyValuePair<Transform, string>(l[0], (string)kv.Value));
+            }
+            if (bad.Count > 0) { res["errors"] = bad; throw new Exception(bad.Count + " parts not resolved (first: " + bad[0] + ")"); }
+            var changed = new JArray(); var created = new JArray();
+            foreach (var kv in moves)
+            {
+                Transform dest = under;
+                if (!string.IsNullOrEmpty(kv.Value))
+                {
+                    dest = null; foreach (Transform c in under) if (c.name == "MJC " + kv.Value) { dest = c; break; }
+                    if (dest == null)
+                    {
+                        created.Add(kv.Value);
+                        if (dry) { changed.Add(kv.Key.name + " -> MJC " + kv.Value + " (new)"); continue; }
+                        var go = new GameObject("MJC " + kv.Value); go.transform.SetParent(under, false); go.AddComponent<BBI.Unity.Game.MandatoryJointContainer>(); dest = go.transform;
+                    }
+                }
+                if (kv.Key.parent == dest) continue;
+                changed.Add(kv.Key.name + ": " + kv.Key.parent.name + " -> " + dest.name);
+                if (!dry) kv.Key.SetParent(dest, true);
+            }
+            var removed = new JArray();
+            foreach (Transform c in under.Cast<Transform>().ToList())
+                if (c.name.StartsWith("MJC ") && c.childCount == 0) { removed.Add(c.name); if (!dry) UnityEngine.Object.DestroyImmediate(c.gameObject); }
+            if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
+            res["moved"] = changed; res["created"] = created; res["removedEmpty"] = removed; res["saved"] = !dry;
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return res;
+    }
+
+    // { op:"reorderkids", prefab:"Assets/.../Tachi.prefab", parents:{ "FwdSectionExt/Fore_Section/MJC x": ["childA","childB",...] }, dry:true }
+    // Sets the sibling order of the named children (prefab ASSET). The game tests a joint pair as (A,B) with A = the part
+    // earlier in the hierarchy, so order decides seams that only pass one way. Children not listed keep their relative
+    // order after the listed ones. Nothing moves in space.
+    static JToken ReorderKids(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var root = PrefabUtility.LoadPrefabContents(ap); var res = new JArray();
+        try
+        {
+            foreach (var kv in (JObject)cmd["parents"])
+            {
+                var t = root.transform; bool ok = true;
+                foreach (var seg in kv.Key.Split('/')) { Transform n = null; foreach (Transform c in t) if (c.name == seg) { n = c; break; } if (n == null) { ok = false; break; } t = n; }
+                if (!ok) throw new Exception("parent not found: " + kv.Key);
+                var want = kv.Value.Select(x => (string)x).ToList(); var kids = t.Cast<Transform>().ToList(); var missing = want.Where(n => !kids.Any(k => k.name == n)).ToList();
+                if (missing.Count > 0) throw new Exception(kv.Key + ": children not found: " + string.Join(", ", missing.Take(5)));
+                int changed = 0;
+                for (int i = 0; i < want.Count; i++)
+                {
+                    var k = kids.First(x => x.name == want[i]);
+                    if (k.GetSiblingIndex() != i) { changed++; if (!dry) k.SetSiblingIndex(i); }
+                }
+                res.Add(new JObject { ["parent"] = kv.Key, ["children"] = kids.Count, ["listed"] = want.Count, ["moved"] = changed });
+            }
+            if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return new JObject { ["parents"] = res, ["saved"] = !dry };
+    }
+
     static JToken AddMjc(JObject cmd)
     {
         var t = Find((string)cmd["path"]);
