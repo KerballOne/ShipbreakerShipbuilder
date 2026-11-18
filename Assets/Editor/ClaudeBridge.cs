@@ -1549,6 +1549,23 @@ public static class ClaudeBridge
             var t = Find((string)q);
             if (t == null) { done.Add(new JObject { ["path"] = (string)q, ["error"] = "not found" }); continue; }
             var mf = t.GetComponent<MeshFilter>();
+            if ((mf == null || mf.sharedMesh == null) && ((bool?)cmd["preview"] ?? false))
+            {
+                // addressable part: dump every mesh of its editor preview (children, incl. FakePrefabDisplay) as <name>__<k>.json
+                int pk = 0;
+                foreach (var cf in t.GetComponentsInChildren<MeshFilter>(true))
+                {
+                    if (cf.sharedMesh == null) continue;
+                    var cm = cf.transform.localToWorldMatrix; var cv = cf.sharedMesh.vertices; var cw = new float[cv.Length * 3];
+                    for (int i = 0; i < cv.Length; i++) { var p = cm.MultiplyPoint3x4(cv[i]); cw[i * 3] = p.x; cw[i * 3 + 1] = p.y; cw[i * 3 + 2] = p.z; }
+                    var co = new JObject { ["name"] = t.name + "__" + pk, ["child"] = cf.name, ["mesh"] = cf.sharedMesh.name, ["pos"] = new JArray(cw.Select(f => (double)f)), ["tri"] = new JArray(cf.sharedMesh.triangles),
+                        ["hasCollider"] = cf.GetComponent<Collider>() != null, ["rendered"] = cf.GetComponent<MeshRenderer>() != null && cf.GetComponent<MeshRenderer>().enabled, ["activeSelf"] = cf.gameObject.activeSelf };
+                    File.WriteAllText(Path.Combine(dir, t.name + "__" + pk + ".json"), co.ToString(Newtonsoft.Json.Formatting.None));
+                    done.Add(new JObject { ["name"] = t.name + "__" + pk, ["child"] = cf.name, ["mesh"] = cf.sharedMesh.name, ["verts"] = cv.Length, ["tris"] = cf.sharedMesh.triangles.Length / 3 }); pk++;
+                }
+                if (pk == 0) done.Add(new JObject { ["path"] = (string)q, ["error"] = "no preview mesh" });
+                continue;
+            }
             if (mf == null || mf.sharedMesh == null) { done.Add(new JObject { ["path"] = (string)q, ["error"] = "no mesh" }); continue; }
             var m = t.localToWorldMatrix; var v = mf.sharedMesh.vertices;
             var w = new float[v.Length * 3];

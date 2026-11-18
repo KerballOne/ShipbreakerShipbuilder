@@ -18,6 +18,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
    - [Group to Collection](#17-group-to-collection)
    - [Fix Normals](#18-fix-normals)
    - [Material & Texture Pipeline](#19-material--texture-pipeline)
+   - [Cut Point Seat](#110-cut-point-seat)
 2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
    - [Build & Run](#21-build--run)
    - [Actions Submenu](#22-actions-submenu)
@@ -260,6 +261,43 @@ Assets/_CustomShips/<Ship>/
   Materials/       — auto-created .mat files (named after texture set)
   Textures/        — PNG textures (flat, shared across all parts)
 ```
+
+### 1.10 Cut Point Seat
+
+**Sidebar > ShipBreaker > Cut Point Seat** (`Blender/blender_scripts/startup/cutpoint_seat.py`)
+
+Builds a flat attachment pad ("seat") so a box-shaped stock cut point has a clean face to sit on where two parts meet. It only shapes geometry: whether the cut point actually joints is checked later in Unity / in game.
+
+**Use**
+
+1. Select the two parts. The **active** one is part A, the other is part B.
+2. Put the 3D cursor near the spot on the seam where the cut point should go.
+3. Look at the side the seat should be on (inside or outside of the hull).
+4. Set the options, press **Preview** (orange = cut point, blue = pad on A, red = pad on B), then **Build Seat**. Build Seat is one undo step.
+
+**Options**
+
+| Option | What it does |
+|---|---|
+| Cut point | Preset sizes (Generic 1xBxB, ShipKit Ax1CxB, Javelin 2xAxC, Bayonet Straight, Ring Bracket) or Custom. Length runs along the seam. |
+| Seat type: Co-planar | One plane across both parts; the cut point lies flat on it, straddling the seam. |
+| Seat type: Orthogonal | Two planes at 90 degrees; the bottom sits on one part and a long side butts against the other. **Bottom rests on** picks which part; **Side pad height** sets how much of the side is backed. |
+| Pads on: Both parts | The seat is lifted clear of both parts and each gets a pad. The seat angle is searched for the lowest pads (or set by hand with **Find the lowest seat angle** off). |
+| Pads on: Active / Other part only | The other part is left untouched: its own flat face near the cursor becomes its seat, and only the chosen part gets a pad. |
+| Where / Search along seam | Seat at the seam point nearest the cursor (or the middle of the seam). With a search range it also tries spots either way along the seam and keeps the lowest; the report says if it moved. |
+| Slide along / across seam | Nudge the result by hand. |
+| Side / Flip to the far side | Build on the side facing the viewport, the far side, or whichever needs the lowest pads. |
+| Clear of: Whole part | Lifts the seat above every vertex of the part, which keeps the cut point outside the part's convex collider. **Nearby surface only** gives lower pads but can leave the cut point inside a concave part's collider. |
+| Minimum pad height, Pad margin, Pad length, Maximum pad height, Gap under cut point | Pad size. Seats needing a taller pad than the maximum are rejected with the reason. |
+| Pad faces first in the mesh | Puts the new faces at the start of the face list. |
+| Add cut point placeholder box | Adds a wire box of the cut point's size in the seat, in the **Cut Point Seats** collection, so its position and rotation can be read off for placing the stock part in Unity. Do not export it. |
+
+**Notes**
+
+- Geometry is read from the mesh data; unapplied modifiers are ignored.
+- The pad takes the material and one UV sample of the face it stands on.
+- If no seat fits, the message says why (for example the pad's footprint runs off the part, or the untouched part has no flat face there). Try the other seat type, a smaller cut point, a larger search range or maximum pad height.
+- Deep inside ridges need tall pads when **Clear of: Whole part** is on; that height comes from the part's shape, not the cut point size.
 
 ---
 
