@@ -264,40 +264,116 @@ Assets/_CustomShips/<Ship>/
 
 ### 1.10 Cut Point Seat
 
-**Sidebar > ShipBreaker > Cut Point Seat** (`Blender/blender_scripts/startup/cutpoint_seat.py`)
+**Trigger:** N-panel sidebar → **ShipBreaker** tab → **Cut Point Seat** (script: `Blender/blender_scripts/startup/cutpoint_seat.py`).
 
-Builds a flat attachment pad ("seat") so a box-shaped stock cut point has a clean face to sit on where two parts meet. It only shapes geometry: whether the cut point actually joints is checked later in Unity / in game.
+**What it is for.** A stock cut point is a plain block. It only joints to a part when one of its flat faces lies flat against a flat face of that part. Where two hull parts meet at a ridge, a lap or an odd angle there is usually no such face. This tool builds one: a small flat **seat** (attachment pad) on one or both parts, shaped so the block sits cleanly across the two parts. You then place the real stock cut point in Unity where the tool shows it.
 
-**Use**
+The tool only shapes geometry. It does not check jointing or collisions; do that in Unity and in game (section 5).
 
-1. Select the two parts. The **active** one is part A, the other is part B.
-2. Put the 3D cursor near the spot on the seam where the cut point should go.
-3. Look at the side the seat should be on (inside or outside of the hull).
-4. Set the options, press **Preview** (orange = cut point, blue = pad on A, red = pad on B), then **Build Seat**. Build Seat is one undo step.
+#### Before you start
 
-**Options**
+- Both parts must be separate mesh objects, and they must touch or nearly touch (within the **Seam tolerance**, 2 cm by default).
+- Apply scale on both objects (`Ctrl+A → Scale`), the same as for export (1.1).
+- Modifiers are ignored. Apply any modifier that changes the shape first.
+- Save the file. **Build Seat** edits the meshes (it is one undo step, `Ctrl+Z`).
 
-| Option | What it does |
+#### Step by step
+
+1. **Select the two parts.** Click one, Shift-click the other. The last one clicked (lighter outline) is the **active** part and is called **A** in the panel; the other is **B**. The top of the panel shows which is which.
+2. **Put the 3D cursor on the seam** near where the cut point should go: `Shift + right-click` on the spot. It does not have to be exact; the tool snaps to the nearest point where the parts touch.
+3. **Look at the side the seat should be on.** Orbit the viewport so you are looking at the faces that should carry the cut point (for a hull, usually the inside). The seat is built on the side facing you.
+4. **Pick the cut point size** under **Cut point** (see the table below), or choose **Custom size** and type length, width and thickness.
+5. **Pick the seat type and where the pads go** (see "Choosing the options").
+6. Press **Preview**. Orange lines show the cut point, blue lines the pad on A, red lines the pad on B. The status bar at the bottom of the window reports the pad heights. Nothing is changed yet.
+7. Adjust and press **Preview** again until it looks right. The **X** button clears the preview.
+8. Press **Build Seat**. The pads are added to the meshes and a wire box the size of the cut point appears in a collection called **Cut Point Seats**.
+
+#### Cut point sizes
+
+| Preset | Stock part to place in Unity | Length × width × thickness (m) |
+|---|---|---|
+| Generic 1xBxB | `PRF_Cutpoint_Generic_1xBxB` | 1.0 × 0.5 × 0.5 |
+| ShipKit Ax1CxB | `PRF_ShipKit_Cutpoint_Ax1CxB_Grade0` | 1.75 × 0.5 × 0.25 |
+| Javelin 2xAxC | `PRF_Javelin_Cockpit_Cutpoint_2xAxC` | 0.375 × 0.25 × 0.125 |
+| Bayonet Straight | `PRF_Shipkit_Exterior_Bayonet_2x4x26_Straight_Z_CutpointGrade2` | 1.65 × 0.375 × 1.03 |
+| Ring Bracket AxAxB | `PRF_ShipKit_Internal_ChassisRing_Cutpoint_Bracket_AxAxB` | 0.5 × 0.25 × 0.25 |
+
+**Length** always runs along the seam. **Thickness** is how far the block stands off the seat. Stock cut points must be used at their real size (never scaled), so match these numbers; to turn a block on its side, swap width and thickness. The ring bracket is a triangular corner piece, not a full block: use it with an Orthogonal seat.
+
+#### Choosing the options
+
+**Seat type**
+
+| Choose | When | Result |
+|---|---|---|
+| **Co-planar** | The two parts form a ridge, a shallow valley or lie roughly in one plane | One flat plane across both parts. The block lies flat on it, half on each part. |
+| **Orthogonal** | The two parts meet at about a right angle (a wall standing on a floor) | Two planes at 90°. The block's bottom sits on one part and one long side butts against the other. **Bottom rests on** chooses which part is the floor. **Side pad height** sets how much of the block's side is backed (1 = all of it; lower gives a smaller pad). |
+
+**Pads on**
+
+| Choose | When | Result |
+|---|---|---|
+| **Both parts** | Neither part has a usable flat face at the spot | The seat is lifted clear of both parts and each part gets a pad. With **Find the lowest seat angle** on, the tool turns the seat about the seam and keeps the angle with the lowest pads. Turn it off to set **Seat angle** by hand. |
+| **Active part only** | Part B already has a good flat face there and must not be changed | B is left untouched; its own face is used as its seat. Only A gets a pad. |
+| **Other part only** | The same, the other way round | A is left untouched; only B gets a pad. |
+
+**Position**
+
+| Option | Effect |
 |---|---|
-| Cut point | Preset sizes (Generic 1xBxB, ShipKit Ax1CxB, Javelin 2xAxC, Bayonet Straight, Ring Bracket) or Custom. Length runs along the seam. |
-| Seat type: Co-planar | One plane across both parts; the cut point lies flat on it, straddling the seam. |
-| Seat type: Orthogonal | Two planes at 90 degrees; the bottom sits on one part and a long side butts against the other. **Bottom rests on** picks which part; **Side pad height** sets how much of the side is backed. |
-| Pads on: Both parts | The seat is lifted clear of both parts and each gets a pad. The seat angle is searched for the lowest pads (or set by hand with **Find the lowest seat angle** off). |
-| Pads on: Active / Other part only | The other part is left untouched: its own flat face near the cursor becomes its seat, and only the chosen part gets a pad. |
-| Where / Search along seam | Seat at the seam point nearest the cursor (or the middle of the seam). With a search range it also tries spots either way along the seam and keeps the lowest; the report says if it moved. |
-| Slide along / across seam | Nudge the result by hand. |
-| Side / Flip to the far side | Build on the side facing the viewport, the far side, or whichever needs the lowest pads. |
-| Clear of: Whole part | Lifts the seat above every vertex of the part, which keeps the cut point outside the part's convex collider. **Nearby surface only** gives lower pads but can leave the cut point inside a concave part's collider. |
-| Minimum pad height, Pad margin, Pad length, Maximum pad height, Gap under cut point | Pad size. Seats needing a taller pad than the maximum are rejected with the reason. |
-| Pad faces first in the mesh | Puts the new faces at the start of the face list. |
-| Add cut point placeholder box | Adds a wire box of the cut point's size in the seat, in the **Cut Point Seats** collection, so its position and rotation can be read off for placing the stock part in Unity. Do not export it. |
+| Where | **Nearest the 3D cursor** (normal use) or **Middle of the seam**. |
+| Search along seam | The tool also tries spots up to this distance either way along the seam and keeps the one with the lowest pads. The report says "moved … m along the seam" when it did. Set to 0 to force the exact spot. |
+| Slide along seam / Slide across seam | Nudge the result by hand. |
+| Side | **Side I am looking at** builds on the faces toward the viewport. Tick **Flip to the far side** for the opposite. **Whichever is lowest** ignores the view. |
 
-**Notes**
+**Pad size**
 
-- Geometry is read from the mesh data; unapplied modifiers are ignored.
-- The pad takes the material and one UV sample of the face it stands on.
-- If no seat fits, the message says why (for example the pad's footprint runs off the part, or the untouched part has no flat face there). Try the other seat type, a smaller cut point, a larger search range or maximum pad height.
-- Deep inside ridges need tall pads when **Clear of: Whole part** is on; that height comes from the part's shape, not the cut point size.
+| Option | Effect |
+|---|---|
+| Clear of | **Whole part** lifts the seat above every point of the part. Use this by default: the game gives each part a convex collider, and a cut point sitting in a hollow of a part ends up inside that collider. **Nearby surface only** gives lower pads and is safe only on parts with no hollows. |
+| Minimum pad height | How far the seat is lifted above the highest point (2 cm default). |
+| Pad margin | How far the pad extends past the block's footprint. |
+| Pad length | Pad length as a fraction of the block's length. |
+| Maximum pad height | Seats needing a taller pad are refused. Raise it if you accept a tall pad. |
+| Gap under cut point | Clearance between pad and block (1 mm default). |
+
+**Advanced**
+
+| Option | Effect |
+|---|---|
+| Skirt detail | Spacing of the points where the pad's walls follow the part's surface. Smaller follows a curved surface more closely and adds faces. |
+| Seam tolerance | How close the parts must be to count as touching. |
+| Pad faces first in the mesh | Puts the new faces at the start of the face list. Leave on. |
+| Add cut point placeholder box | Adds the wire box. Leave on unless you only want the pads. |
+| Show contact points | Draws the points where the tool found the parts touching. Use it when the seat lands somewhere unexpected. |
+
+#### Typical recipes
+
+- **Small cut point across a ridge between two hull panels:** Javelin 2xAxC, Co-planar, Pads on Both parts.
+- **Block in the corner where a wall panel stands on a deck plate you must not change:** Generic 1xBxB, Orthogonal, select the wall last so it is A, **Bottom rests on: Other part**, **Pads on: Active part only**.
+- **Pad comes out very tall:** try the other seat type, a smaller preset, a larger **Search along seam**, or look from the other side. On a deep inside ridge the height comes from the shape of the parts and will not go down with a smaller block.
+
+#### When it refuses
+
+The reason is shown in the status bar and written to `blender_debug.log`.
+
+| Message | Meaning and fix |
+|---|---|
+| Select exactly two mesh objects | Select two meshes; the active one is A. |
+| The two parts do not come within … of each other | They do not touch. Check you picked neighbours, or raise **Seam tolerance**. |
+| The pad's footprint runs off … | The pad would hang over the edge of that part. Move the cursor along the seam, raise **Search along seam**, lower **Pad margin**, or use a smaller block. |
+| Pad on … would be … m tall | Taller than **Maximum pad height**. Try another spot or seat type, or raise the limit. |
+| … has no flat face near that spot / under its half | With pads on one part only, the untouched part needs its own flat face there. Use **Both parts**, or another spot. |
+| Seat would be on the far side | Nothing fits on the side you are looking at. Orbit to the other side or tick **Flip**. |
+
+#### Taking the result to Unity
+
+1. **Export the changed parts** with **Export to Unity FBX** (1.1) as usual. Do **not** export the **Cut Point Seats** collection; the boxes are markers only.
+2. In Unity, open **Shipbuilder / Import Game Part Wizard** (3.1), find the stock part from the table above and choose **Import Addressable**. Leave its scale at 1.
+3. **Move it into the seat.** Select the placeholder box in Blender and read its Location in the N-panel **Item** tab. Convert to a Unity position with: Unity X = −Blender X, Unity Y = Blender Z, Unity Z = −Blender Y. Rotate the cut point so its long side runs along the seam and its faces lie flat on the pads; the box's edges show the orientation. The part should end up touching both pads with no visible gap and without sinking into them.
+4. **Check the joints** with the tools in section 5, then confirm in game that the cut point holds both parts and that they separate when it is cut.
+
+Keep in mind that a cut point only joints parts whose joint types allow it (section 5.1), and that the pad takes the material and one colour sample of the face it stands on, so it blends in but has no detail of its own.
 
 ---
 

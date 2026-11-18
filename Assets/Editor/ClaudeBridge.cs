@@ -141,6 +141,7 @@ public static class ClaudeBridge
                 case "mjcgroups": result = MjcGroups(cmd); break;
                 case "mjcregroup": result = MjcRegroup(cmd); break;
                 case "reorderkids": result = ReorderKids(cmd); break;
+                case "restructure": result = Restructure(cmd); break;
                 case "aclcopy": result = AclCopy(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
@@ -1973,6 +1974,125 @@ public static class ClaudeBridge
                 if (c.name.StartsWith("MJC ") && c.childCount == 0) { removed.Add(c.name); if (!dry) UnityEngine.Object.DestroyImmediate(c.gameObject); }
             if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
             res["moved"] = changed; res["created"] = created; res["removedEmpty"] = removed; res["saved"] = !dry;
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return res;
+    }
+
+    // { op:"restructure", prefab:"Assets/.../Tachi.prefab", dry:true,
+    //   delete:["A/B", ...], create:[{parent:"", name:"B_Section", index:2}], rename:[{path:"A/B", name:"New"}],
+    //   renamePrefix:[{under:"A", from:"Fore_Section.", to:"A_"}], move:[{path:"X", parent:"B_Section", index:0}] }
+    // Edits the prefab ASSET. All paths are resolved against the names as they are BEFORE the call; the parent of a move
+    // may be a path that exists before the call or the name of an object made by `create` (looked up under the root).
+    // Moves keep world transforms. Reports, for every StructurePart: whether the depth-first order (= joint test order),
+    // world transform, nearest MandatoryJointContainer and active state are unchanged, and that nested prefab instances
+    // are still instances of the same asset. With dry:true everything is done in memory and not saved.
+    static JToken Restructure(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? false;
+        var root = PrefabUtility.LoadPrefabContents(ap); var res = new JObject();
+        try
+        {
+            Func<string, Transform> rel = pth => { if (string.IsNullOrEmpty(pth)) return root.transform; var t = root.transform; foreach (var seg in pth.Split('/')) { Transform n = null; foreach (Transform c in t) if (c.name == seg) { n = c; break; } if (n == null) return null; t = n; } return t; };
+            Func<Transform, string> pathOf = t => { if (t == root.transform) return ""; var s = t.name; for (var p = t.parent; p != null && p != root.transform; p = p.parent) s = p.name + "/" + s; return s; };
+            Func<Transform, BBI.Unity.Game.MandatoryJointContainer> mjcOf = t => { for (var p = t; p != null; p = p.parent) { var m = p.GetComponent<BBI.Unity.Game.MandatoryJointContainer>(); if (m != null) return m; } return null; };
+            Func<Transform, string> tag = c => c.name + (PrefabUtility.IsAnyPrefabInstanceRoot(c.gameObject) ? " [prefab instance]" : "") + (c.gameObject.activeSelf ? "" : " [off]");
+            // ---- before
+            var sps = root.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Select(s => s.transform).Distinct().ToList();
+            var j0 = sps.ToDictionary(t => t, t => mjcOf(t)); var a0 = sps.ToDictionary(t => t, t => t.gameObject.activeInHierarchy);
+            var allT = root.GetComponentsInChildren<Transform>(true); var w0 = allT.ToDictionary(t => t, t => t.localToWorldMatrix);
+            var inst0 = allT.Where(t => t != root.transform && PrefabUtility.IsAnyPrefabInstanceRoot(t.gameObject)).ToDictionary(t => t, t => PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(t.gameObject));
+            res["before"] = new JObject { ["objects"] = allT.Length, ["structureParts"] = sps.Count, ["mjc"] = root.GetComponentsInChildren<BBI.Unity.Game.MandatoryJointContainer>(true).Length,
+                ["nestedPrefabInstances"] = inst0.Count, ["top"] = new JArray(root.transform.Cast<Transform>().Select(tag)) };
+            // ---- resolve everything against the old names
+            var bad = new JArray();
+            var dels = new List<Transform>(); foreach (var d in cmd["delete"] ?? new JArray()) { var t = rel((string)d); if (t == null) bad.Add("delete: not found " + d); else dels.Add(t); }
+            var rens = new List<KeyValuePair<Transform, string>>(); foreach (var r in cmd["rename"] ?? new JArray()) { var t = rel((string)r["path"]); if (t == null) bad.Add("rename: not found " + r["path"]); else rens.Add(new KeyValuePair<Transform, string>(t, (string)r["name"])); }
+            var pres = new List<Tuple<Transform, string, string>>(); foreach (var r in cmd["renamePrefix"] ?? new JArray()) { var t = rel((string)r["under"]); if (t == null) bad.Add("renamePrefix: not found " + r["under"]); else pres.Add(Tuple.Create(t, (string)r["from"], (string)r["to"])); }
+            var movs = new List<Tuple<Transform, string, Transform, int>>(); foreach (var r in cmd["move"] ?? new JArray()) { var t = rel((string)r["path"]); if (t == null) { bad.Add("move: not found " + r["path"]); continue; } movs.Add(Tuple.Create(t, (string)r["parent"], rel((string)r["parent"]), (int?)r["index"] ?? -1)); }
+            if (bad.Count > 0) { res["errors"] = bad; return res; }
+            // ---- moveLoader:[{from, to}]: hand a loader's entries to another object's loader BEFORE its object is deleted
+            // (a loader on an emptied folder can still hold the registrations of parts that were moved out of it)
+            var ml = new JArray();
+            foreach (var r in cmd["moveLoader"] ?? new JArray())
+            {
+                var st = rel((string)r["from"]); var dt = rel((string)r["to"]);
+                if (st == null || dt == null) { bad.Add("moveLoader: not found " + r["from"] + " / " + r["to"]); continue; }
+                var src = st.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); if (src == null) { ml.Add((string)r["from"] + ": no loader"); continue; }
+                var dst = dt.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); bool isNew = dst == null; if (isNew) dst = dt.gameObject.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
+                int n = src.componentValues.Count; int live = src.componentValues.Count(cv => cv != null && cv.component != null);
+                dst.componentValues.AddRange(src.componentValues.Where(cv => cv != null && cv.component != null)); src.componentValues = new List<BBI.Unity.Game.AddressableComponentValue>();
+                EditorUtility.SetDirty(dst); ml.Add((string)r["from"] + " -> " + (string)r["to"] + ": " + live + " of " + n + " entries moved" + (isNew ? " (new loader)" : " (appended, now " + dst.componentValues.Count + ")"));
+            }
+            res["movedLoaders"] = ml;
+            if (bad.Count > 0) { res["errors"] = bad; return res; }
+            // any loader on an object about to be deleted that still registers a component living elsewhere blocks the delete
+            var orphan = new JArray();
+            foreach (var d in dels) foreach (var l in d.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true)) foreach (var cv in l.componentValues)
+                if (cv != null && cv.component != null && !dels.Any(x => cv.component.transform.IsChildOf(x))) orphan.Add(pathOf(d) + " still registers " + pathOf(cv.component.transform));
+            if (orphan.Count > 0) { res["errors"] = new JArray("delete would drop " + orphan.Count + " loader registrations (use moveLoader)"); res["wouldOrphan"] = new JArray(orphan.Take(10)); return res; }
+            // ---- delete (leaf objects only; report what they carried and anything that still points at them)
+            var delInfo = new JArray(); var delSet = new HashSet<GameObject>(dels.Select(t => t.gameObject)); var refs = new JArray();
+            if (dels.Count > 0)
+                foreach (var c in root.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null || delSet.Contains(c.gameObject) || c is Transform) continue;
+                    var so = new SerializedObject(c); var it = so.GetIterator();
+                    while (it.Next(true))
+                    {
+                        if (it.propertyType != SerializedPropertyType.ObjectReference || it.objectReferenceValue == null) continue;
+                        var v = it.objectReferenceValue; var g = v as GameObject ?? (v as Component)?.gameObject;
+                        if (g != null && delSet.Contains(g)) refs.Add(pathOf(c.transform) + " [" + c.GetType().Name + "." + it.propertyPath + "] -> " + g.name);
+                    }
+                }
+            foreach (var t in dels)
+            {
+                var o = new JObject { ["path"] = pathOf(t), ["children"] = t.childCount, ["active"] = t.gameObject.activeSelf, ["components"] = new JArray(t.GetComponents<Component>().Where(c => !(c is Transform)).Select(c => c == null ? "(missing script)" : c.GetType().Name)) };
+                bool ok = t.childCount == 0 && refs.Count == 0; o["deleted"] = ok; delInfo.Add(o);
+                if (ok) UnityEngine.Object.DestroyImmediate(t.gameObject);
+            }
+            res["delete"] = delInfo; res["referencesToDeleted"] = refs;
+            // ---- create
+            var made = new Dictionary<string, Transform>(); var createdArr = new JArray();
+            foreach (var r in cmd["create"] ?? new JArray())
+            {
+                var par = rel((string)r["parent"]); if (par == null) { bad.Add("create: parent not found " + r["parent"]); continue; }
+                var go = new GameObject((string)r["name"]); go.transform.SetParent(par, false); if (r["index"] != null) go.transform.SetSiblingIndex((int)r["index"]);
+                made[(string)r["name"]] = go.transform; createdArr.Add((string)r["name"]);
+            }
+            res["created"] = createdArr;
+            // ---- move (world transform kept)
+            var moved = new JArray();
+            foreach (var mv in movs)
+            {
+                Transform mt; var dest = mv.Item3 ?? (made.TryGetValue(mv.Item2, out mt) ? mt : null);
+                if (dest == null) { bad.Add("move: parent not found " + mv.Item2); continue; }
+                moved.Add(mv.Item1.name + " -> " + dest.name); mv.Item1.SetParent(dest, true); if (mv.Item4 >= 0) mv.Item1.SetSiblingIndex(mv.Item4); else mv.Item1.SetAsLastSibling();
+            }
+            res["moved"] = moved;
+            // ---- rename
+            int np = 0;
+            foreach (var pr in pres)
+                foreach (var t in pr.Item1.GetComponentsInChildren<Transform>(true))
+                    if (t.name.StartsWith(pr.Item2)) { t.name = pr.Item3 + t.name.Substring(pr.Item2.Length); np++; }
+            var renamed = new JArray(); foreach (var kv in rens) { renamed.Add(kv.Key.name + " -> " + kv.Value); kv.Key.name = kv.Value; }
+            res["renamed"] = renamed; res["renamedByPrefix"] = np;
+            if (bad.Count > 0) { res["errors"] = bad; return res; }
+            // ---- after: what must not have changed
+            var sps1 = root.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Select(s => s.transform).Distinct().ToList();
+            bool sameOrder = sps1.SequenceEqual(sps); int firstDiff = -1; if (!sameOrder) for (int i = 0; i < Math.Min(sps.Count, sps1.Count); i++) if (sps[i] != sps1[i]) { firstDiff = i; break; }
+            float maxMove = 0f; foreach (var kv in w0) { if (kv.Key == null) continue; var a = kv.Value; var b = kv.Key.localToWorldMatrix; for (int i = 0; i < 16; i++) maxMove = Mathf.Max(maxMove, Mathf.Abs(a[i] - b[i])); }
+            int mjcChanged = sps.Count(t => t != null && mjcOf(t) != j0[t]); int activeChanged = sps.Count(t => t != null && t.gameObject.activeInHierarchy != a0[t]);
+            int instBroken = inst0.Count(kv => kv.Key == null || !PrefabUtility.IsAnyPrefabInstanceRoot(kv.Key.gameObject) || PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(kv.Key.gameObject) != kv.Value);
+            var dup = new JArray(); foreach (var t in root.GetComponentsInChildren<Transform>(true)) { var names = new HashSet<string>(); foreach (Transform c in t) if (c.GetComponent<BBI.Unity.Game.StructurePart>() != null && !names.Add(c.name)) dup.Add(pathOf(c)); }
+            var after = new JObject { ["objects"] = root.GetComponentsInChildren<Transform>(true).Length, ["structureParts"] = sps1.Count, ["mjc"] = root.GetComponentsInChildren<BBI.Unity.Game.MandatoryJointContainer>(true).Length,
+                ["partOrderUnchanged"] = sameOrder, ["firstOrderDifference"] = firstDiff >= 0 ? (pathOf(sps[firstDiff]) + " | now " + pathOf(sps1[firstDiff])) : null,
+                ["maxWorldTransformChange"] = maxMove, ["partsWithDifferentMjc"] = mjcChanged, ["partsWithDifferentActiveState"] = activeChanged, ["nestedPrefabInstancesBroken"] = instBroken,
+                ["sameNamedSiblingParts"] = dup.Count, ["top"] = new JArray(root.transform.Cast<Transform>().Select(tag)) };
+            foreach (var kv in made) after[kv.Key] = new JArray(kv.Value.Cast<Transform>().Select(c => tag(c) + " (" + c.childCount + " children)"));
+            res["after"] = after;
+            if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
+            res["saved"] = !dry;
         }
         finally { PrefabUtility.UnloadPrefabContents(root); }
         return res;
