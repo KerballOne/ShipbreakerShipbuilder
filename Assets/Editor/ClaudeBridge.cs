@@ -241,7 +241,10 @@ public static class ClaudeBridge
             for (int i = 1; i < parts.Length && ok; i++)
             {
                 Transform next = null;
-                foreach (Transform c in t) if (c.name == parts[i]) { next = c; break; }
+                // "Name#2" = the third child called Name (0-based), for same-named siblings
+                string want = parts[i]; int skip = 0; int hash = want.LastIndexOf('#');
+                if (hash > 0 && int.TryParse(want.Substring(hash + 1), out int idx)) { want = want.Substring(0, hash); skip = idx; }
+                foreach (Transform c in t) if (c.name == want && skip-- == 0) { next = c; break; }
                 if (next == null) ok = false; else t = next;
             }
             if (ok) return t;
@@ -777,6 +780,7 @@ public static class ClaudeBridge
 
     static JToken MeshCast(JObject cmd)
     {
+        if ((bool?)cmd["fresh"] ?? false) meshCache.Clear();   // meshes edited in place (meshload / jointpads) keep their old cached geometry otherwise
         float max = (float?)cmd["max"] ?? 5f;
         var ignore = cmd["ignore"] != null ? cmd["ignore"].Select(t => (string)t).ToList() : new List<string>();
         // inactive:true also tests disabled objects (e.g. hull walls switched off for access); only:[..] restricts by path.
@@ -1866,7 +1870,26 @@ public static class ClaudeBridge
     // AddressableComponentLoader under `path` (the ship validator treats such entries as errors).
     static JToken AclPurge(JObject cmd)
     {
-        var t = Find((string)cmd["path"] ?? "Tachi"); bool dry = (bool?)cmd["dry"] ?? false;
+        bool dry = (bool?)cmd["dry"] ?? false;
+        if (cmd["asset"] != null)
+        {
+            // { op:"aclpurge", asset:"Assets/.../X.prefab", dry:true } — same, inside a prefab ASSET (e.g. a nested prefab
+            // whose children were deleted). Run aclrepair afterwards: the outer prefab's index-based overrides can shift.
+            var ap = (string)cmd["asset"]; var root = PrefabUtility.LoadPrefabContents(ap); var ra = new JArray();
+            try
+            {
+                foreach (var acl in root.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
+                {
+                    int n = acl.componentValues.Count(cv => cv == null || cv.component == null);
+                    ra.Add(new JObject { ["acl"] = acl.gameObject.name, ["entries"] = acl.componentValues.Count, ["nullEntries"] = n });
+                    if (n > 0 && !dry) acl.componentValues.RemoveAll(cv => cv == null || cv.component == null);
+                }
+                if (!dry) PrefabUtility.SaveAsPrefabAsset(root, ap);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(root); }
+            return ra;
+        }
+        var t = Find((string)cmd["path"] ?? "Tachi");
         if (t == null) throw new Exception("Not found: " + cmd["path"]);
         var res = new JArray();
         foreach (var acl in t.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
