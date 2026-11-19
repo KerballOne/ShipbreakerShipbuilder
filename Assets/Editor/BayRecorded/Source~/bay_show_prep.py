@@ -1,8 +1,11 @@
-"""Turn the bay recorded in game (mesh_work/bay/bay_geometry.*) into a few combined meshes in Unity scene coordinates
-for the bridge op `bayshow`. Groups: jacks, barge, Master Jack, bay structure, other. Unreadable meshes become boxes.
--> mesh_work/bay/show/*.bin + show.json     usage: python .claude/bay_show_prep.py"""
+"""Turn the bay recorded in game (bay_geometry.csv / _meshes.json / _meshes.bin, in this folder) into a few combined
+meshes in Unity scene coordinates for the ClaudeBridge op `bayshow`. Groups: jacks, barge, Master Jack, bay structure.
+Meshes the game would not release (not readable) are left out. See README.md in this folder.
+-> .claude/mesh_work/bay/show/*.bin + show.json
+usage (from the repository root): python Assets/Editor/BayRecorded/Source~/bay_show_prep.py
+"""
 import csv, json, struct, os, collections, shutil
-D = os.path.abspath(".claude/mesh_work/bay"); S = os.path.join(D, "show"); shutil.rmtree(S, ignore_errors=True); os.makedirs(S)
+D = os.path.dirname(os.path.abspath(__file__)); S = os.path.abspath(os.path.join(D, "..", "..", "..", "..", ".claude", "mesh_work", "bay", "show")); shutil.rmtree(S, ignore_errors=True); os.makedirs(S)
 OFF = (28.6, 3.5, 8.9)                                     # scene = game + OFF (old Hardpoint vs the root position fitted from a census)
 rows = list(csv.DictReader(open(os.path.join(D, "bay_geometry.csv"), encoding="utf-8", errors="replace")))
 MI = json.load(open(os.path.join(D, "bay_geometry_meshes.json")))["meshes"]; BIN = open(os.path.join(D, "bay_geometry_meshes.bin"), "rb").read()

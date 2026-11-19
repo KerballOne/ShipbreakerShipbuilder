@@ -831,6 +831,8 @@ Pastes the previously copied world position and rotation onto the selected GO.
 6. Exit the prefab editor (click the back arrow)
 7. Reset your ship prefab's position to `(0, 0, 0)` in the scene
 
+**Seeing the jack lights and the barge while you place the ship:** the editor's bay preview does not include the five floating jack lights or the barge. `Assets/Editor/BayRecorded/BayRecorded.prefab` is a record of them taken from the running game; drag it into the scene while positioning. The same folder has a script that renders a four-view picture of the ship at the Hardpoint pose (`Docs/Tachi_Bay_Placement.png`). Step-by-step instructions are in `Assets/Editor/BayRecorded/Source~/README.md`.
+
 ---
 
 ### 2.2 GameObject Hierarchy (right-click)
