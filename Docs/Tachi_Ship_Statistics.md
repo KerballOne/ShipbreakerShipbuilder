@@ -1,8 +1,8 @@
-# Tachi: Ship Statistics
+# Tachi v0.95: Ship Statistics
 
 A custom salvage ship for Hardspace: Shipbreaker, modelled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
 
-Figures are from the build of 18 November 2026. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
+Figures are from the v0.95 build of 18 November 2026. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
 
 ## At a glance
 
@@ -11,10 +11,11 @@ Figures are from the build of 18 November 2026. "Measured" means taken from the 
 | Length (engine bell to antenna tip) | 133.7 m |
 | Beam (port to starboard, over the gun mounts) | 54.6 m |
 | Height (dorsal to ventral) | 46.3 m |
-| Parts at spawn | 5,576 |
-| Cut points | 231 |
+| Live parts at spawn | 5,311 |
+| Cut points | 237 |
+| Loose items at spawn | 176 (props, pickups and one floating corpse) |
 | Estimated mass | at least 268 t (see Mass) |
-| Download size | 177 MB (zip) |
+| Download size | 178 MB (zip) |
 | Load time on the test PC | 45 to 138 s |
 
 ---
@@ -25,14 +26,19 @@ Figures are from the build of 18 November 2026. "Measured" means taken from the 
 
 Measured on the test PC, from choosing the ship to being able to move:
 
+![Load time on the test PC](Tachi_Load_Time.png)
+
 | Run | Total | Loading assets | Jointing to playable |
 |---|---|---|---|
-| 17 Nov, full ship | 44.7 s | 28.0 s | 16.7 s |
-| 18 Nov, full ship | 137.7 s | 119.8 s | 17.9 s |
+| 17 Nov | 44.7 s | 28.0 s | 16.7 s |
+| 18 Nov, after a fresh build | 137.7 s | 119.8 s | 17.9 s |
+| 18 Nov, v0.95 | 126.8 s | 97.1 s | 29.7 s |
+
+The v0.95 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
 
 Test PC: AMD Ryzen 7 5800X (8 cores), 64 GB RAM, NVMe SSD, RTX 4070 Ti.
 
-The last stage is steady at about 15 to 20 s. The asset-loading stage varied threefold between two runs on the same machine, so expect a wide spread; the longer run followed a fresh build of the ship.
+The last stage takes about 15 to 30 s. The asset-loading stage varied more than threefold between runs on the same machine, so expect a wide spread; the two longer runs each followed a fresh build of the ship.
 
 **Expected load time on other hardware.** These are estimates scaled from the two runs above, not measurements. No other machine has been timed.
 
@@ -47,15 +53,27 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 
 ### Parts
 
+![Part budget](Tachi_Part_Budget.png)
+
 | | |
 |---|---|
-| Parts at spawn (every piece the game tracks) | 5,576 |
-| Parts counted by the game's joint pass | 5,294 |
+| Live parts at spawn (every piece the game simulates) | 5,311 |
+| Parts counted by the game's joint pass | 5,309 |
+| Objects in the ship that never become parts | 277 (see below) |
 | Largest mesh | `PDC_Mid_Port_Nest_02`, 18,291 vertices |
 | Part ceiling at that mesh size | 7,337 |
-| Headroom | 2,043 parts |
+| Headroom | 2,028 parts |
 
 **The part ceiling.** While the ship loads, the game multiplies the number of parts by the vertex count of the largest single mesh. If that product passes 134,217,728 the game crashes on load. With the current largest mesh that allows 7,337 parts. Adding parts, or adding one mesh larger than 18,291 vertices, both use up the headroom.
+
+**Objects that never become parts.** 277 objects in the ship are switched off by the game's own prefabs and are not simulated:
+
+| Object | Count |
+|---|---|
+| Ladder rungs | 248 |
+| Door frame caps | 6 |
+| Room cage bars | 4 |
+| Other (airlock coupler joints, railings, spare suit meshes, one pickup) | 19 |
 
 ### Parts by category
 
@@ -63,39 +81,67 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 
 | Category | Parts | Share |
 |---|---|---|
-| Furniture and props | 1,756 | 31.5 % |
-| Decks, walls, stairs and doors | 1,185 | 21.3 % |
-| Pipes and cables | 858 | 15.4 % |
-| Machinery, power and weapons | 502 | 9.0 % |
-| Structural frame | 452 | 8.1 % |
-| Hull panels | 346 | 6.2 % |
-| Lights | 246 | 4.4 % |
-| Cut points | 231 | 4.1 % |
+| Furniture and props | 1,777 | 33.5 % |
+| Decks, walls, stairs and doors | 1,013 | 19.1 % |
+| Pipes and cables | 882 | 16.6 % |
+| Machinery, power and weapons | 744 | 14.0 % |
+| Lights | 246 | 4.6 % |
+| Cut points | 237 | 4.5 % |
+| Hull panels | 208 | 3.9 % |
+| Structural frame | 204 | 3.8 % |
 
-Categories are assigned from each part's joint type and name.
+Categories are assigned from each part's joint type and name. The rules were rewritten for v0.95, so these shares are not comparable with earlier versions of this document.
 
-### Free-floating parts
+### Parts by section
+
+![What each section is made of](Tachi_Parts_By_Section.png)
+
+| Section | Parts | Largest categories |
+|---|---|---|
+| Interior | 4,230 | Furniture and props 39 %, decks and walls 21 %, pipes and cables 16 % |
+| Aft interior | 552 | Pipes and cables 34 %, decks and walls 19 %, machinery 19 % |
+| Forward hull | 272 | Hull panels 56 %, machinery and weapons 28 % |
+| Aft hull and engine | 257 | Structural frame 34 %, machinery 23 %, hull panels 22 % |
+
+### Loose parts
+
+Every structural part of the ship is attached. At spawn the main structure is one body of 5,135 parts, and nothing structural is separate from it.
 
 | | |
 |---|---|
-| Parts with no joint to anything at spawn | 424 |
-| Parts not connected to the main structure | 823, in 546 separate bodies |
-| Main structure | 4,753 parts in one body |
+| Main structure | 5,135 parts in one body |
+| Loose parts | 176, in 151 separate bodies |
+| Loose single items | 142 |
+| Loose bodies of more than one part | 9 |
 
-Most of the 424 are meant to be loose or are not real objects to the game:
+All 176 loose parts are items meant to float or be picked up:
 
-- 248 ladder rungs, which the game does not treat as separate objects.
-- Loose items: bottles, snack packs, data drives, crates, cups, suit pieces.
+![Loose parts by type](Tachi_Loose_Parts.png)
 
-The larger separate bodies are:
+| Type | Parts | Share |
+|---|---|---|
+| Galley items (bowls, food, coffee maker, vending parts) | 38 | 21.6 % |
+| Bottles | 32 | 18.2 % |
+| Data and credit drives | 27 | 15.3 % |
+| Suit pieces and helmets | 20 | 11.4 % |
+| Snack packs | 19 | 10.8 % |
+| Floating corpse and its suit | 15 | 8.5 % |
+| Other (wall chestplates, a repair kit, a toy, ceiling terminal mounts, two salvage bay objects) | 11 | 6.2 % |
+| Supply pickups (oxygen, thruster fuel, med kit) | 7 | 4.0 % |
+| Crates and pouches | 5 | 2.8 % |
+| Desk items | 2 | 1.1 % |
+
+The loose bodies of more than one part:
 
 | Body | Parts |
 |---|---|
-| Engine nozzle with the fuel injection system | 144 |
-| Crawlspace coolant pipe network | 46 |
-| Fusion reactor core | 21 |
 | Floating corpse | 13 |
-| 17 short pipe runs | 3 or 4 each |
+| Bowl, spoon and food set | 5 |
+| Coffee maker, pot and vending part | 3 |
+| Three gloves | 3 |
+| Five pairs (two bottles, a bowl set, a keyboard and stand, a coolant can and valve, a boot and backpack) | 2 each |
+
+Earlier versions of this document listed the engine nozzle, the reactor and a coolant pipe network as separate bodies. That was a counting error in the analysis, not a fault in the ship; the census now records exact joints.
 
 ---
 
@@ -123,21 +169,22 @@ The game works out a part's mass from its material density and the volume of its
 
 | | |
 |---|---|
-| Cut points | 231 |
-| Forced joint groups (MJC) | 94 |
+| Cut points | 237 |
+| Forced joint groups (MJC) | 94 (counted on an earlier build) |
+| Reactor mount | 4 slanted beams, each tied to a reactor panel and the cryo room floor by a cut point |
 | Forward hull groups | 8, each under 20 t, tied by 11 internal cut points |
 | Forward section to Engineering | 4 internal cut points |
 
 ### By section
 
-| Section | What it is | Parts at spawn | Size, length × beam × height (m) | Est. mass (t) | Cut points |
+| Section | What it is | Live parts | Size, length × beam × height (m) | Est. mass (t) | Cut points |
 |---|---|---|---|---|---|
 | A_Section | Forward outer hull, gun mounts, torpedo tubes, RCS | 272 | 81.1 × 54.6 × 31.3 | 113.0 | 15 |
-| Interior Vessel | Decks, tunnel walls, crawlspace, furnishings | 4,448 | 90.9 × 26.2 × 28.0 | 49.1 | 177 |
-| B_External | Engineering hull, support ring, engine | 260 | 54.4 × 28.0 × 46.3 | 70.9 | 32 |
-| B_Internal | Aft airlock, cryogenics, fusion reactor | 596 | 28.8 × 23.1 × 21.0 | 34.6 | 7 |
+| Interior Vessel | Decks, tunnel walls, crawlspace, furnishings | 4,230 | 90.9 × 26.2 × 28.0 | 49.1 | 176 |
+| B_External | Engineering hull, support ring, engine | 257 | 54.4 × 28.0 × 46.3 | 70.9 | 32 |
+| B_Internal | Aft airlock, cryogenics, fusion reactor | 552 | 28.8 × 23.1 × 21.0 | 34.6 | 14 |
 
-Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
+Sizes and masses were measured on an earlier 18 November build and not re-measured for v0.95; the changes since then (a reactor mount of 12 parts, about 1 t) do not move them noticeably. Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
 
 ---
 
@@ -223,7 +270,7 @@ The lore gives performance figures for the Epstein drive in general, not for thi
 | Figure | Source |
 |---|---|
 | Load times, joint-pass part count, largest mesh, part ceiling | Logged by the PartInfoLogger mod during loading |
-| Parts at spawn, categories, free-floating parts, cut points per section | The mod's spawn census from the full-ship run of 18 Nov 2026 |
+| Live parts, categories, loose parts, cut points per section | The mod's spawn census from the v0.95 run of 18 Nov 2026, with exact joints between parts |
 | Dimensions, per-section sizes | Part bounds in the Unity editor |
 | Volume | Calculated from part bounds, as described above |
 | Mass | Calculated with the game's own formula from mesh volume and material density, plus game-reported masses for stock parts |
