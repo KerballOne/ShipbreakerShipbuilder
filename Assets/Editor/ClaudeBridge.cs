@@ -161,6 +161,7 @@ public static class ClaudeBridge
                 }
                 case "deletemany": result = DeleteMany(cmd); break;
                 case "inspect":   result = Inspect(cmd); break;
+                case "sodump":    result = SoDump(cmd); break;
                 case "setoi":     result = SetOi(cmd); break;
                 case "meshcast":  result = MeshCast(cmd); break;
                 case "signmat":   result = SignMat(cmd); break;
@@ -337,8 +338,28 @@ public static class ClaudeBridge
         var go = new GameObject("__ClaudeBridgeCam") { hideFlags = HideFlags.HideAndDontSave };
         var rt = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32);
         Texture2D tex = null;
+        // texOverrides:[{mat:"Assets/..mat", prop:"_BaseColorMap", file:"C:/..png", linear:false}] — preview-only:
+        // textures are swapped on the in-memory material for this one render and restored afterwards.
+        var texRestore = new List<(Material m, string p, Texture t)>();
+        var texTemp = new List<Texture2D>();
+        var hiddenRoots = new List<GameObject>();
         try
         {
+            if (cmd["texOverrides"] is JArray ovs)
+                foreach (JObject ov in ovs)
+                {
+                    var om = AssetDatabase.LoadAssetAtPath<Material>((string)ov["mat"]);
+                    var op = (string)ov["prop"];
+                    var of = (string)ov["file"];
+                    if (om == null || !om.HasProperty(op) || !File.Exists(of))
+                        throw new Exception("texOverride not found: " + ov);
+                    var ot = new Texture2D(2, 2, TextureFormat.RGBA32, true, (bool?)ov["linear"] ?? false)
+                        { hideFlags = HideFlags.HideAndDontSave };
+                    ot.LoadImage(File.ReadAllBytes(of));
+                    texTemp.Add(ot);
+                    texRestore.Add((om, op, om.GetTexture(op)));
+                    om.SetTexture(op, ot);
+                }
             var cam = go.AddComponent<Camera>();
             if (sv != null && sv.camera != null) cam.CopyFrom(sv.camera);
             cam.enabled = false;
@@ -364,6 +385,27 @@ public static class ClaudeBridge
             cam.farClipPlane  = (float?)cmd["far"] ?? 500f;
             cam.aspect        = (float)w / h;
             cam.targetTexture = rt;
+            // bg:[r,g,b] — clear to a flat colour instead of the sky (two captures on different colours give an alpha matte).
+            if (cmd["bg"] != null)
+            {
+                var c3 = ToV(cmd["bg"], Vector3.zero);
+                var col = new Color(c3.x, c3.y, c3.z, 1f);
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = col;
+                var hdType = Type.GetType("UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData, Unity.RenderPipelines.HighDefinition.Runtime");
+                if (hdType != null)
+                {
+                    var hd = go.GetComponent(hdType) ?? go.AddComponent(hdType);
+                    var fMode = hdType.GetField("clearColorMode");
+                    fMode.SetValue(hd, Enum.Parse(fMode.FieldType, "Color"));
+                    hdType.GetField("backgroundColorHDR").SetValue(hd, col);
+                }
+            }
+            // only:"Tachi" — hide every other scene root for this one render (restored below; scene is not marked dirty).
+            if (cmd["only"] != null)
+                foreach (var r in SceneManager.GetActiveScene().GetRootGameObjects())
+                    if (r.activeSelf && r.name != (string)cmd["only"] && r.GetComponentInChildren<Renderer>() != null && r.GetComponentInChildren<Light>() == null)
+                    { r.SetActive(false); hiddenRoots.Add(r); }
             cam.Render();
 
             var prev = RenderTexture.active;
@@ -384,6 +426,9 @@ public static class ClaudeBridge
         }
         finally
         {
+            foreach (var r in hiddenRoots) if (r != null) r.SetActive(true);
+            foreach (var r in texRestore) r.m.SetTexture(r.p, r.t);
+            foreach (var t in texTemp) UnityEngine.Object.DestroyImmediate(t);
             if (tex != null) UnityEngine.Object.DestroyImmediate(tex);
             rt.Release();
             UnityEngine.Object.DestroyImmediate(rt);
@@ -559,6 +604,91 @@ public static class ClaudeBridge
 
     // ── inspect / placeprefab ────────────────────────────────────────────────
     // { op:"inspect", path, depth:1 } → prefab source, local scale, components and mesh names per node.
+    // sodump {guids:[...], depth:4} — load game/mod ScriptableObjects by addressable GUID and dump their
+    // serialized fields (object references as names, AssetReferences as GUIDs). Read-only.
+    static JToken SoDump(JObject cmd)
+    {
+        int depth = (int?)cmd["depth"] ?? 4;
+        s_SoExpand = (bool?)cmd["expand"] ?? false;   // expand referenced ScriptableObjects in place
+        var outp = new JObject();
+        foreach (var g in (JArray)cmd["guids"])
+        {
+            var guid = (string)g;
+            try
+            {
+                // project assets (by asset GUID) first, so non-addressable local assets can be dumped too
+                var localPath = AssetDatabase.GUIDToAssetPath(guid);
+                var obj = string.IsNullOrEmpty(localPath) ? null : AssetDatabase.LoadMainAssetAtPath(localPath);
+                var op = default(UnityEngine.ResourceManagement.AsyncOperations.AsyncOperationHandle<UnityEngine.Object>);
+                if (obj == null)
+                {
+                    op = UnityEngine.AddressableAssets.Addressables.LoadAssetAsync<UnityEngine.Object>(guid);
+                    obj = op.WaitForCompletion();
+                }
+                if (obj == null) { outp[guid] = "null (" + op.Status + ")"; continue; }
+                if (obj is Texture tx)
+                {
+                    var tj = new JObject { ["name"] = tx.name, ["type"] = tx.GetType().Name, ["width"] = tx.width, ["height"] = tx.height, ["format"] = (tx as Texture2D)?.format.ToString() };
+                    if ((bool?)cmd["png"] ?? false)   // also write a PNG copy (with alpha) into .claude/bridge/shots
+                    {
+                        var rt = RenderTexture.GetTemporary(tx.width, tx.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                        var prev = RenderTexture.active;
+                        Graphics.Blit(tx, rt);
+                        RenderTexture.active = rt;
+                        var copy = new Texture2D(tx.width, tx.height, TextureFormat.RGBA32, false);
+                        copy.ReadPixels(new Rect(0, 0, tx.width, tx.height), 0, 0);
+                        copy.Apply();
+                        RenderTexture.active = prev;
+                        RenderTexture.ReleaseTemporary(rt);
+                        var png = Path.Combine(ShotDir, "tex_" + tx.name + ".png");
+                        File.WriteAllBytes(png, copy.EncodeToPNG());
+                        UnityEngine.Object.DestroyImmediate(copy);
+                        tj["png"] = png;
+                    }
+                    outp[guid] = tj;
+                    continue;
+                }
+                outp[guid] = new JObject { ["name"] = obj.name, ["type"] = obj.GetType().Name, ["fields"] = SoDumpValue(obj, depth, true) };
+            }
+            catch (Exception ex) { outp[guid] = "error: " + ex.Message; }
+        }
+        return outp;
+    }
+
+    static bool s_SoExpand;
+
+    static JToken SoDumpValue(object v, int depth, bool root = false)
+    {
+        if (v == null) return JValue.CreateNull();
+        var t = v.GetType();
+        if (t.IsPrimitive || v is string || v is decimal) return JToken.FromObject(v);
+        if (t.IsEnum) return v.ToString();
+        if (v is UnityEngine.Object uo && !root)
+        {
+            if (uo == null) return JValue.CreateNull();
+            if (!(s_SoExpand && uo is ScriptableObject && depth > 0)) return uo.name + " (" + t.Name + ")";
+            return new JObject { ["name"] = uo.name, ["fields"] = SoDumpValue(uo, depth - 1, true) };
+        }
+        if (v is UnityEngine.AddressableAssets.AssetReference ar) return "ref:" + ar.AssetGUID;
+        if (depth <= 0) return "…";
+        if (v is System.Collections.IDictionary) return "dict";
+        if (v is System.Collections.IEnumerable en)
+        {
+            var arr = new JArray();
+            foreach (var e in en) { if (arr.Count >= 200) { arr.Add("…"); break; } arr.Add(SoDumpValue(e, depth - 1)); }
+            return arr;
+        }
+        var o = new JObject();
+        for (var bt = t; bt != null && bt != typeof(ScriptableObject) && bt != typeof(UnityEngine.Object) && bt != typeof(object) && bt != typeof(ValueType); bt = bt.BaseType)
+            foreach (var f in bt.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (f.IsNotSerialized) continue;
+                if (!f.IsPublic && f.GetCustomAttribute<SerializeField>() == null) continue;
+                try { o[f.Name] = SoDumpValue(f.GetValue(v), depth - 1); } catch (Exception ex) { o[f.Name] = "error: " + ex.Message; }
+            }
+        return o;
+    }
+
     static JToken Inspect(JObject cmd)
     {
         var t = Find((string)cmd["path"]);

@@ -250,7 +250,9 @@ public static class AddressableBaker
     {
         var so = new SerializedObject(sp);
         var prop = so.FindProperty("m_StructurePartAsset");
-        return prop != null ? prop.objectReferenceValue as StructurePartAsset : null;
+        var asset = prop != null ? prop.objectReferenceValue as StructurePartAsset : null;
+        // SPA_Placeholder only stands in until the loader fills the real asset (see USER_GUIDE 11); it is not a material.
+        return asset != null && asset.name == "SPA_Placeholder" ? null : asset;
     }
 
     static Object ReadObjectField(Component c, string fieldName)
