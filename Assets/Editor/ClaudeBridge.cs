@@ -141,6 +141,7 @@ public static class ClaudeBridge
                 case "mjcgroups": result = MjcGroups(cmd); break;
                 case "mjcregroup": result = MjcRegroup(cmd); break;
                 case "reorderkids": result = ReorderKids(cmd); break;
+                case "bayshow": result = BayShow(cmd); break;
                 case "restructure": result = Restructure(cmd); break;
                 case "aclcopy": result = AclCopy(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
@@ -2070,6 +2071,17 @@ public static class ClaudeBridge
                 moved.Add(mv.Item1.name + " -> " + dest.name); mv.Item1.SetParent(dest, true); if (mv.Item4 >= 0) mv.Item1.SetSiblingIndex(mv.Item4); else mv.Item1.SetAsLastSibling();
             }
             res["moved"] = moved;
+            // ---- setTransform:[{path | made-name, pos:[x,y,z], euler:[x,y,z]}]: local pose of one object (its children follow)
+            var posed = new JArray();
+            foreach (var r in cmd["setTransform"] ?? new JArray())
+            {
+                Transform mt2; var tt = rel((string)r["path"]) ?? (made.TryGetValue((string)r["path"], out mt2) ? mt2 : null);
+                if (tt == null) { bad.Add("setTransform: not found " + r["path"]); continue; }
+                if (r["pos"] != null) tt.localPosition = ToV(r["pos"], Vector3.zero);
+                if (r["euler"] != null) tt.localRotation = Quaternion.Euler(ToV(r["euler"], Vector3.zero));
+                posed.Add(tt.name + " pos " + tt.localPosition.ToString("F3") + " euler " + tt.localEulerAngles.ToString("F3"));
+            }
+            res["posed"] = posed;
             // ---- rename
             int np = 0;
             foreach (var pr in pres)
@@ -2096,6 +2108,65 @@ public static class ClaudeBridge
         }
         finally { PrefabUtility.UnloadPrefabContents(root); }
         return res;
+    }
+
+    // { op:"bayshow", json:"C:/.../show.json" }            - shows the bay recorded in game (PartInfoLogger bay_geometry.*,
+    //                                                        prepared by .claude/bay_show_prep.py) as plain meshes under a
+    //                                                        scene object "BayRecorded" (DontSave: never written to the scene).
+    // { op:"bayshow", json:..., save:"Assets/Editor/BayRecorded" } - also writes it as real assets: one mesh and one material
+    //                                                        per group plus BayRecorded.prefab, so it can be brought back later.
+    // { op:"bayshow", prefab:"Assets/Editor/BayRecorded/BayRecorded.prefab" } - shows the saved prefab again.
+    // { op:"bayshow", clear:true }                          - removes it from the scene.
+    static JToken BayShow(JObject cmd)
+    {
+        var old = GameObject.Find("BayRecorded"); if (old != null) UnityEngine.Object.DestroyImmediate(old);
+        if ((bool?)cmd["clear"] ?? false) return new JObject { ["cleared"] = old != null };
+        if (cmd["prefab"] != null)
+        {
+            var pf = AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["prefab"]); if (pf == null) throw new Exception("Prefab not found: " + cmd["prefab"]);
+            var inst = (GameObject)PrefabUtility.InstantiatePrefab(pf); inst.name = "BayRecorded";
+            foreach (var t in inst.GetComponentsInChildren<Transform>(true)) t.gameObject.hideFlags = HideFlags.DontSave;
+            SceneView.RepaintAll();
+            return new JObject { ["shown"] = (string)cmd["prefab"], ["children"] = new JArray(inst.transform.Cast<Transform>().Select(c => c.name)) };
+        }
+        var j = JObject.Parse(File.ReadAllText((string)cmd["json"]));
+        string save = cmd["save"] != null ? ((string)cmd["save"]).TrimEnd('/') : null;
+        if (save != null) AddressableBaker.EnsureFolder(save);
+        var flags = save != null ? HideFlags.None : HideFlags.DontSave;
+        var root = new GameObject("BayRecorded"); root.hideFlags = flags;
+        var shader = Shader.Find("HDRP/Lit") ?? Shader.Find("Standard");
+        var res = new JArray();
+        foreach (var g in j["groups"])
+        {
+            int nv = (int)g["verts"], nt = (int)g["tris"]; var bytes = File.ReadAllBytes((string)g["file"]); string gn = (string)g["name"];
+            var fl = new float[nv * 3]; var tr = new int[nt * 3];
+            Buffer.BlockCopy(bytes, 0, fl, 0, nv * 12); Buffer.BlockCopy(bytes, nv * 12, tr, 0, nt * 12);
+            var vs = new Vector3[nv]; for (int i = 0; i < nv; i++) vs[i] = new Vector3(fl[i * 3], fl[i * 3 + 1], fl[i * 3 + 2]);
+            var m = new Mesh { name = gn, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32, hideFlags = flags };
+            m.vertices = vs; m.triangles = tr; m.RecalculateNormals(); m.RecalculateBounds();
+            var c = g["color"]; var col = new Color((float)c[0], (float)c[1], (float)c[2], 1f);
+            var mat = new Material(shader) { hideFlags = flags, name = "BayRecorded_" + gn };
+            mat.color = col; if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", col);
+            if (save != null)
+            {
+                AssetDatabase.DeleteAsset(save + "/" + gn + ".asset"); AssetDatabase.CreateAsset(m, save + "/" + gn + ".asset");
+                AssetDatabase.DeleteAsset(save + "/BayRecorded_" + gn + ".mat"); AssetDatabase.CreateAsset(mat, save + "/BayRecorded_" + gn + ".mat");
+            }
+            var go = new GameObject(gn); go.hideFlags = flags; go.transform.SetParent(root.transform, false);
+            go.AddComponent<MeshFilter>().sharedMesh = m; go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            res.Add(new JObject { ["name"] = gn, ["verts"] = nv, ["tris"] = nt, ["center"] = V(m.bounds.center), ["size"] = V(m.bounds.size) });
+        }
+        var outp = new JObject { ["groups"] = res };
+        if (save != null)
+        {
+            string pp = save + "/BayRecorded.prefab"; PrefabUtility.SaveAsPrefabAsset(root, pp); AssetDatabase.SaveAssets();
+            UnityEngine.Object.DestroyImmediate(root);                     // the saved copy is shown as a DontSave instance instead
+            var inst = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>(pp)); inst.name = "BayRecorded";
+            foreach (var t in inst.GetComponentsInChildren<Transform>(true)) t.gameObject.hideFlags = HideFlags.DontSave;
+            outp["prefab"] = pp;
+        }
+        SceneView.RepaintAll();
+        return outp;
     }
 
     // { op:"reorderkids", prefab:"Assets/.../Tachi.prefab", parents:{ "FwdSectionExt/Fore_Section/MJC x": ["childA","childB",...] }, dry:true }
