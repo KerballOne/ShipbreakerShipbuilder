@@ -1,8 +1,8 @@
-# Tachi v0.95: Ship Statistics
+# Tachi v0.9.5: Ship Statistics
 
 A custom salvage ship for Hardspace: Shipbreaker, modelled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
 
-Figures are from the v0.95 build of 18 November 2026. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
+Figures are from the v0.9.5 build of 18 November 2026. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
 
 ## At a glance
 
@@ -32,9 +32,9 @@ Measured on the test PC, from choosing the ship to being able to move:
 |---|---|---|---|
 | 17 Nov | 44.7 s | 28.0 s | 16.7 s |
 | 18 Nov, after a fresh build | 137.7 s | 119.8 s | 17.9 s |
-| 18 Nov, v0.95 | 126.8 s | 97.1 s | 29.7 s |
+| 18 Nov, v0.9.5 | 126.8 s | 97.1 s | 29.7 s |
 
-The v0.95 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
+The v0.9.5 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
 
 Test PC: AMD Ryzen 7 5800X (8 cores), 64 GB RAM, NVMe SSD, RTX 4070 Ti.
 
@@ -90,7 +90,7 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 | Hull panels | 208 | 3.9 % |
 | Structural frame | 204 | 3.8 % |
 
-Categories are assigned from each part's joint type and name. The rules were rewritten for v0.95, so these shares are not comparable with earlier versions of this document.
+Categories are assigned from each part's joint type and name. The rules were rewritten for v0.9.5, so these shares are not comparable with earlier versions of this document.
 
 ### Parts by section
 
@@ -184,7 +184,7 @@ The game works out a part's mass from its material density and the volume of its
 | B_External | Engineering hull, support ring, engine | 257 | 54.4 × 28.0 × 46.3 | 70.9 | 32 |
 | B_Internal | Aft airlock, cryogenics, fusion reactor | 552 | 28.8 × 23.1 × 21.0 | 34.6 | 14 |
 
-Sizes and masses were measured on an earlier 18 November build and not re-measured for v0.95; the changes since then (a reactor mount of 12 parts, about 1 t) do not move them noticeably. Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
+Sizes and masses were measured on an earlier 18 November build and not re-measured for v0.9.5; the changes since then (a reactor mount of 12 parts, about 1 t) do not move them noticeably. Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
 
 ---
 
@@ -270,7 +270,7 @@ The lore gives performance figures for the Epstein drive in general, not for thi
 | Figure | Source |
 |---|---|
 | Load times, joint-pass part count, largest mesh, part ceiling | Logged by the PartInfoLogger mod during loading |
-| Live parts, categories, loose parts, cut points per section | The mod's spawn census from the v0.95 run of 18 Nov 2026, with exact joints between parts |
+| Live parts, categories, loose parts, cut points per section | The mod's spawn census from the v0.9.5 run of 18 Nov 2026, with exact joints between parts |
 | Dimensions, per-section sizes | Part bounds in the Unity editor |
 | Volume | Calculated from part bounds, as described above |
 | Mass | Calculated with the game's own formula from mesh volume and material density, plus game-reported masses for stock parts |
