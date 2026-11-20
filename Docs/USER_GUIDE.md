@@ -1444,9 +1444,21 @@ So the old save was not the cause, and neither is the placeholder: continuing a 
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| In-progress ship shows the previous card's image | A ship read from the save has a null space-truck parts list when the ship has none; the job board throws before it sets the image | Loader patch (null list becomes empty). The Tachi also carries one spare-part pickup per deck (`.claude/place_truck_parts.py`) |
+| In-progress ship shows the previous card's image | A ship read from the save has a null space-truck parts list when the ship has none; the job board throws before it sets the image | Loader patch (null list becomes empty). The Tachi also has one spare-part hardpoint per deck (see below) |
 | No salvage milestones, or the previous card's milestones | The ship's basis has no `ShipRewardsAsset`. `Javelin_Science_Survey` (the Tachi's original basis) has none; every other regular stock ship type has one (`python .claude/mca_rewards_dump.py` lists them) | Loader patch stops the stale display; real milestones need a basis that has rewards. The Tachi's basis was changed 2026-11-19 to `Javelin_Industrial_Cargo_Lrg` (9 tiers, the most any stock type has; same hazard levels 6-9; role becomes Heavy Cargo, theme Industrial) |
 | Hazard and core-system icons missing | They are counted from the parts in the ship prefab when the card is created; a card created before the prefab was ever filled in that session counts none | Loader patch: a mod prefab's load now waits for its references (untested as of 2026-11-19) |
+
+**What the job board can see.** Hazards, core systems and "Detected on ship" are read from the ship's module prefabs, never from parts an `AddressableLoader` spawns at runtime.
+
+| Shown | Needs |
+|---|---|
+| Explosion (triangle) | a baked part whose blueprint has a Fire-type explosive (reactor core, fuel tank, thruster) |
+| Cryo (snowflake) | a Coolant-type explosive (cryo pipe, cryo canister) |
+| Electric (bolt) | an Electricity-type explosive; among the Tachi's blueprints only `BP_Subsystem_PowerGenerator` has one. The Tachi has two baked generators in the crawlspace above the flight deck for this |
+| Fuel (flame) | a machine part that sources fuel both globally and locally; none of the game's 18 machine-part assets has both, so it never lights on any ship |
+| Space-truck parts | the pickup spawned as a child module from a `HardPoint` (bridge op `hardpoint {parent,name,pos,euler,list}`), not placed as an addressable. `python .claude/make_truck_part_lists.py` writes one `ModuleListAsset` per part type into `Data/TruckParts` and adds them to the Addressables group. Every stock basis with rewards caps a ship at 8 space-truck modules or fewer; the Tachi carries 10 (one of each type, one per deck from the flight deck to Deck 2), so its construction asset has its own `m_Restrictions` list with one blank entry, which replaces the basis list and is skipped by the game |
+
+`python .claude/tachi_hazard_audit.py` lists the hazard flags of every blueprint the ship's baked parts use.
 
 A `StructurePart` with no asset on a GameObject that already has a filled one (the bodysuit's four `Right Glove` objects had this) is destroyed at spawn and logs errors: `python .claude/remove_duplicate_empty_sp.py <prefab> [--apply]` removes it; check other prefabs for loader entries pointing at it first (`.claude/remove_loader_entry.py`).
 

@@ -1,4 +1,4 @@
-#if UNITY_EDITOR
+﻿#if UNITY_EDITOR
 
 using System;
 using System.Collections.Generic;
@@ -166,6 +166,7 @@ public static class ClaudeBridge
                 case "meshcast":  result = MeshCast(cmd); break;
                 case "signmat":   result = SignMat(cmd); break;
                 case "placeprefab": result = PlacePrefab(cmd); break;
+                case "hardpoint": result = HardPointOp(cmd); break;
                 case "console":   result = "drained"; break;   // errors ride along as consoleErrors
                 case "validate":  result = Validate(); break;
                 case "save":      result = UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); break;
@@ -460,6 +461,25 @@ public static class ClaudeBridge
         foreach (Transform c in parent) used.Add(c.name);
         if (!used.Contains(name)) return name;
         for (int i = 1; ; i++) if (!used.Contains($"{name} ({i})")) return $"{name} ({i})";
+    }
+
+    // { op:"hardpoint", parent, name, pos:[x,y,z], euler:[x,y,z], list:"<ModuleListAsset guid>" }
+    // A module spawn point: the game spawns one module from the list here as a child module of the ship, so the
+    // job board's ship summary sees it (unlike a part an AddressableLoader spawns at runtime).
+    static JToken HardPointOp(JObject cmd)
+    {
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        var go = new GameObject(UniqueName(parent, (string)cmd["name"]), typeof(BBI.Unity.Game.HardPoint));
+        go.transform.SetParent(parent, false);
+        go.transform.position = ToV(cmd["pos"], parent.position);
+        go.transform.rotation = Quaternion.Euler(ToV(cmd["euler"], Vector3.zero));
+        typeof(BBI.Unity.Game.HardPoint).GetField("m_AssetRef", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .SetValue(go.GetComponent<BBI.Unity.Game.HardPoint>(), new BBI.Unity.Game.AssetReferenceModuleListAsset((string)cmd["list"]));
+        EditorUtility.SetDirty(go.GetComponent<BBI.Unity.Game.HardPoint>());
+        Ledger(go);
+        Dirty(go);
+        return new JObject { ["path"] = PathOf(go), ["pos"] = V(go.transform.position) };
     }
 
     static JToken Group(JObject cmd)
