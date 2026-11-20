@@ -52,6 +52,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 9. [Caveats & Gotchas](#9-caveats--gotchas)
 10. [Expected Unity Exceptions](#10-expected-unity-exceptions)
 11. [Career Job Board (ModdedShipLoader)](#11-career-job-board-moddedshiploader)
+12. [Ship Variants (Liveries and Variant-Only Parts)](#12-ship-variants-liveries-and-variant-only-parts)
 
 ---
 
@@ -1462,3 +1463,25 @@ The fix is a placeholder `StructurePartAsset` on the parts. The editor applies i
 | Space-truck parts | the pickup spawned as a child module from a `HardPoint` (bridge op `hardpoint {parent,name,pos,euler,list}`), not placed as an addressable. `python .claude/make_truck_part_lists.py` writes one `ModuleListAsset` per part type into `Data/TruckParts` and adds them to the Addressables group. Every stock basis with rewards caps a ship at 8 space-truck modules or fewer; to carry more, give the construction asset its own `m_Restrictions` list with one blank entry, which replaces the basis list and is skipped by the game. Place the hardpoints about 0.12 m above the deck: a pickup spawned within joint distance of the floor joints to it and has to be tugged off instead of floating free |
 
 PartInfoLogger's `PlaceholderCheck` (off by default; set `Enabled = true` under `[PlaceholderCheck]` in its config; writes `placeholder_check.txt` next to its output file a few seconds after gameplay starts) lists parts with no asset, parts still on `SPA_Placeholder`, and parts whose real asset has scanner info or a highlight that the part itself lacks. On a healthy ship every count is zero; mesh-less wrapper objects (for example the roots of ceiling terminals) can show under "no highlight" and are harmless.
+
+## 12. Ship Variants (Liveries and Variant-Only Parts)
+
+A ship can spawn as one of several versions, picked at random by weight each time it is generated. Each version is a Unity **prefab variant** of the ship prefab, so every later change to the ship reaches all versions; a variant only stores what differs (other hull materials, extra parts).
+
+| Piece | Where | What it does |
+|---|---|---|
+| `<ShipName>_<Variant>.prefab` | next to the ship prefab | Prefab variant of `<ShipName>.prefab`. Holds the material overrides and any parts that exist only in this version |
+| `<Material>_<Variant>.mat` + textures | `Materials/`, `Textures/<Variant>/` | Copies of the hull materials pointing at the repainted textures |
+| `Spawn_ModuleEntryDefinition_<Variant>.asset` | `Spawn/` | A second entry in `Spawn_ModuleEntryContainer`, with `Module Def Ref` set to the variant prefab |
+| Addressables entry | the ship's Addressables group | The variant prefab must be in the group, or the entry cannot load it |
+
+**Setting the chance.** Each `Spawn_ModuleEntryDefinition*.asset` has a `Weight`. The chance of a version is its weight divided by the sum of all weights (1 and 1 = 50 % each; 3 and 1 = 75 % / 25 %). Weight 0 means never; set the other entry to 0 to force one version while testing. The roll is made from the ship's seed.
+
+**Variant-only parts.** Open the variant prefab (double-click it, or drag it into a scene) and add the parts there, under the same group as their neighbours so they joint like any other part. Parts added in the variant never appear on the base ship. Edit everything shared in the base ship as before.
+
+**New hull parts.** A variant overrides materials per renderer, so a hull part added to the ship later keeps the base material in the variant until it gets its own override: select it in the variant and assign the variant material, or re-run the script that created the variant.
+
+**Things to know.**
+- A build stores each variant as a full copy of the ship prefab's objects (meshes and unchanged textures are shared), plus the variant's own textures.
+- Changing weights between starting a Career ship and continuing it can change which version is rebuilt; leave the weights alone while a shift on that ship is in progress.
+- The catalogue image and free-play thumbnail are per ship, not per variant.
