@@ -464,7 +464,7 @@ Keeps every loader-filled `StructurePart` in your ship prefabs pointed at a stan
 | **Apply To All Ship Prefabs** | Does the same for every prefab under `Assets/_CustomShips` in one pass and reports the count. Use it once on a ship built before this existed, or after a fresh checkout |
 
 - A part nothing fills (no loader entry in the same prefab) is left empty on purpose: nothing would ever replace the placeholder on it.
-- The placeholder asset is the `SPA_Placeholder.asset` inside the ship's own folder if it has one (the Tachi's is in `Tachi/Data`), otherwise the shared `Assets/_CustomShips/_Common/SPA_Placeholder.asset`.
+- The placeholder asset is the `SPA_Placeholder.asset` inside the ship's own folder if it has one (for example `<ShipName>/Data`), otherwise the shared `Assets/_CustomShips/_Common/SPA_Placeholder.asset`.
 - Imports of more than 25 prefabs at once (a fresh checkout, a Library rebuild) are skipped, so opening the project never rewrites prefabs.
 - To take the placeholders off a ship again: `python .claude/spa_placeholder.py remove <Ship>` with automatic mode unticked.
 
@@ -846,7 +846,7 @@ Pastes the previously copied world position and rotation onto the selected GO.
 6. Exit the prefab editor (click the back arrow)
 7. Reset your ship prefab's position to `(0, 0, 0)` in the scene
 
-**Seeing the jack lights and the barge while you place the ship:** the editor's bay preview does not include the five floating jack lights or the barge. `Assets/Editor/BayRecorded/BayRecorded.prefab` is a record of them taken from the running game; drag it into the scene while positioning. The same folder has a script that renders a four-view picture of the ship at the Hardpoint pose (`Docs/Tachi_Bay_Placement.png`). Step-by-step instructions are in `Assets/Editor/BayRecorded/Source~/README.md`.
+**Seeing the jack lights and the barge while you place the ship:** the editor's bay preview does not include the five floating jack lights or the barge. `Assets/Editor/BayRecorded/BayRecorded.prefab` is a record of them taken from the running game; drag it into the scene while positioning. The same folder has a script that renders a four-view picture of the ship at the Hardpoint pose. Step-by-step instructions are in `Assets/Editor/BayRecorded/Source~/README.md`.
 
 ---
 
@@ -1376,15 +1376,15 @@ These exceptions appear in the Unity console during normal editor use and do not
 | `catalog` | Render game parts to thumbnails in `.claude/bridge/catalog/` |
 | `group`, `place`, `move`, `delete` | Create a container, place an `AddressableLoader` part by its bounds (`center` + `floorY`), reposition, or remove |
 | `wall` | Place a baked board (or any baked prefab via `asset`) resized with Lock In Rescale; `glass`, or `material` for a text sign, and `oi` for a display name |
-| `clone`, `setoi` | Copy one baked part already in the ship (e.g. a spare PDC barrel); `setoi` gives its StructureParts the same display-name asset as the originals (omit `oi` to list) |
+| `clone`, `setoi` | Copy one baked part already in the ship (e.g. a spare gun barrel); `setoi` gives its StructureParts the same display-name asset as the originals (omit `oi` to list) |
 | `bakeparts` | `{guid, name, folder, sp, bp, smallSp, smallBp, smallMax, decor, clipBelow, skip}` — bakes a game addressable that has no salvage data (Hab set dressing has no colliders or StructureParts, so it is not solid or interactable in game) into a local prefab where every mesh is a part: convex collider + StructurePart + EntityBlueprintComponent, resolved by GUID through an AddressableComponentLoader. `decor:{nameSubstr: hostNode}` keeps meshes render-only as children of a host part; `clipBelow:{nameSubstr: height}` trims a collider so its convex hull does not swallow open space; uniform node scales are baked into the meshes. Run a texture de-dup over the output folder afterwards |
 | `disablechild` | `{path, children:[..], enable}` — edits an AddressableLoader's `disabledChildren` list (child paths relative to the loaded prefab), same as the loader inspector's tree |
 | `meshcast` | `{rays:[{o,d}], max, ignore, only, inactive}` — ray vs render-mesh triangles; `inactive:true` also tests disabled objects (e.g. hull tiles switched off for access), `only` restricts by path |
-| `room` | `{parent, name, center, size, roomAsset, airlock}` — adds one world-aligned box room authored like the ship's existing rooms (`[ ] name` ModuleDefinition > `Volumes` RoomContainerDefinition + AddressableSOLoader > `Volume` RoomSubVolumeDefinition). Used for `Tachi/Cabin Rooms` (one room per closed cabin so each door has a room on both sides); delete that object to revert, or `python .claude/cabin_rooms.py --remove` |
+| `room` | `{parent, name, center, size, roomAsset, airlock}` — adds one world-aligned box room authored like the ship's existing rooms (`[ ] name` ModuleDefinition > `Volumes` RoomContainerDefinition + AddressableSOLoader > `Volume` RoomSubVolumeDefinition). Use it to give each closed cabin its own room, so every door has a room on both sides; delete the object to revert |
 | `rescale` | `{path, scale:[sx,sy,sz], euler, center}` — multiplies a bridge-made object's local scale and bakes it into the mesh with Lock In Rescale (used with `clone` to cut a filler section from an existing plate). `clone` resets rotation, so pass the source's world euler. Save before running `clean_orphan_meshes.py` |
 | `bake`, `postervariant`, `signmat`, `placeprefab` | Bake a game part to a local prefab, make a poster prefab or sign material from a texture, place a local prefab |
 | `inspect` | `{path, depth, fake}` — components, mesh and bounds per node; `fake:true` also walks the hidden preview children of addressable parts (`python .claude/inspect_fake.py <path>`; `python .claude/preview_missing.py <path>` lists loaders whose preview is not loaded, which is what makes the Joint Compatibility Check say "No StructurePart MeshFilters found") |
-| `worlddump` | `{paths, dir, preview}` — writes each object's render mesh in world space for the jointing emulator (`.claude/joint_emul.py`, run in Blender); `preview:true` dumps the preview meshes of addressable parts. `python .claude/gen_risers_emul.py` is a worked example: it pairs up neighbouring parts and reports which pairs find a joint plane |
+| `worlddump` | `{paths, dir, preview}` — writes each object's render mesh in world space for the jointing emulator (`.claude/joint_emul.py`, run in Blender); `preview:true` dumps the preview meshes of addressable parts. The emulator pairs up neighbouring parts and reports which pairs find a joint plane |
 | `sodump` | `{guids:[..], depth, expand, png}` — read-only dump of game or mod ScriptableObjects by addressable GUID (object references as names, AssetReferences as GUIDs); `expand` follows referenced ScriptableObjects, `png` also writes a texture to `.claude/bridge/shots/` |
 | `manifest` | Write `placement_manifest.json` (see 10.2) |
 | `save`, `refresh`, `menu` | Save open scenes, recompile/reimport, run a menu item |
@@ -1433,36 +1433,23 @@ The loader adds the ship to every ship class whose hazard level is at or above t
 
 The job board draws its ships at random from the class pool, so a custom ship is not offered every day. Mass and value read "Unknown (Modded)".
 
-**Ship name.** The name shown on the job board and when the ship loads is generated by the `CompanyInfoAsset` in `Manufacturer Ref`; left empty, the basis ship's manufacturer picks a random one. To fix the name, give the ship its own `CompanyInfoAsset` (in the Addressables group) whose only `CompanyShipNameAsset` has a single entry in `Possible Primary Names` and no prefixes, adjectives or suffixes. For the Tachi these are `Data/Tachi_CompanyInfoAsset.asset` and `Data/Tachi_CompanyShipNameAsset.asset`; edit the one line under `m_PossiblePrimaryNames` to rename the ship.
+**Ship name.** The name shown on the job board and when the ship loads is generated by the `CompanyInfoAsset` in `Manufacturer Ref`; left empty, the basis ship's manufacturer picks a random one. To fix the name, give the ship its own `CompanyInfoAsset` (in the Addressables group) whose only `CompanyShipNameAsset` has a single entry in `Possible Primary Names` and no prefixes, adjectives or suffixes. For example `Data/<ShipName>_CompanyInfoAsset.asset` and `Data/<ShipName>_CompanyShipNameAsset.asset`; edit the one line under `m_PossiblePrimaryNames` to rename the ship.
 
-**Catalogue image.** With the ship scene open in Unity, `python .claude/tachi_catalog_shots.py tc_-x -x` renders the ship alone on black and on white (bridge `capture` with `bg` and `only`), then `python .claude/make_tachi_catalog.py` turns the pair into a transparent 1024x512 image with the orange outline. `python .claude/career_dump.py` re-reads the class, rank and hazard tables from the game through the bridge.
+**Catalogue image.** With the ship scene open in Unity, render the ship alone on black and again on white (bridge `capture` with `bg` and `only`); the difference between the two gives the transparency, and the pair becomes a transparent 1024x512 image with the orange outline. `python .claude/career_dump.py` re-reads the class, rank and hazard tables from the game through the bridge.
 
 **Job-board summary errors (open issue).** The game builds a summary of every ship on the job board (and of the ship being loaded) before ModdedShipLoader has filled in the parts' `StructurePartAsset`s. Every part still empty at that moment logs an error per core-system type, and each error is sent to the game's crash reporter; a ship with thousands of baked parts turns that into tens of thousands of errors and a very slow load whenever it is on the board.
 
-The fix is a placeholder `StructurePartAsset` on the parts. The editor now applies it by itself whenever a ship prefab is written (`Shipbuilder / Actions / Part Placeholders`, section 2); the script below is the original manual version and is still the way to remove or list them. It was first tested on the Tachi (2026-11-19): `python .claude/spa_placeholder.py apply` points every loader-filled `StructurePart` at `Data/SPA_Placeholder.asset` (`report` lists, `remove` reverts; back up first). Results on that build:
+The fix is a placeholder `StructurePartAsset` on the parts. The editor applies it by itself whenever a ship prefab is written (`Shipbuilder / Actions / Part Placeholders`, section 2). `python .claude/spa_placeholder.py report <ShipName>` lists the parts that have it and `remove` reverts (back up first). On a ship with several thousand baked parts it cut the summary errors from about 41,000 to 32, with no effect on Free Play (a new ship, or one restored by FreePlayPlus).
 
-| Case | Result |
-|---|---|
-| Job-board summary errors | about 41,000 down to 32 |
-| Free Play, new ship | healthy |
-| Free Play, ship restored by FreePlayPlus | healthy |
-| Career, in-progress ship (saved on the previous build) restored after a game restart | 1,636 parts with no scanner info or highlight, not grappleable or cuttable |
-
-| Career, Tachi started fresh on the placeholder build | healthy |
-| Career, that same ship continued after a full game restart | 1,637 parts with no scanner info, 1,491 with no highlight |
-| Career, a different modded ship (no placeholder anywhere) continued after a full game restart | also broken: parts fall off, no scanner; the check sees only 49 StructureParts |
-
-So the old save was not the cause, and neither is the placeholder: continuing a modded ship in Career after a game restart breaks with or without it. Within one game session, ending a shift and continuing works. The placeholder only changes how the break looks (parts keep a stale setup instead of losing their `StructurePart`). It is applied to the Tachi prefabs (re-applied 2026-11-19) for the faster job board. The break also happens with FreePlayPlus uninstalled.
-
-**Continuing a modded ship after a game restart (found and patched 2026-11-19).** ModdedShipLoader filled part references only after a prefab was instantiated, so a ship spawned without an earlier load in the same session (Career "continue" after a restart) lost parts in `StructurePart.Awake` (87 on the Wombat) or kept a stale placeholder setup (1,637 on the Tachi). The patched loader (fork branch `fix/fill-refs-before-instantiate`, not yet upstream) fills the prefab before instantiating it; both ships then continue cleanly.
+**Continuing a modded ship after a game restart.** ModdedShipLoader filled part references only after a prefab was instantiated, so a ship spawned without an earlier load in the same session (Career "continue" after a restart) came up broken: parts lost their `StructurePart` and fell off, or, with the placeholder applied, kept the placeholder's setup (no scanner info, no highlight, not grappleable or cuttable). This happens with or without the placeholder and with or without FreePlayPlus; ending a shift and continuing within one game session works. The patched loader (fork branch `fix/fill-refs-before-instantiate`, not yet upstream) fills the prefab before instantiating it, and ships then continue cleanly.
 
 **Job-board image and milestones for a modded ship.**
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| In-progress ship shows the previous card's image | A ship read from the save has a null space-truck parts list when the ship has none; the job board throws before it sets the image | Loader patch (null list becomes empty). The Tachi also has one spare-part hardpoint per deck (see below) |
-| No salvage milestones, or the previous card's milestones | The ship's basis has no `ShipRewardsAsset`. `Javelin_Science_Survey` (the Tachi's original basis) has none; every other regular stock ship type has one (`python .claude/mca_rewards_dump.py` lists them) | Loader patch stops the stale display; real milestones need a basis that has rewards. The Tachi's basis was changed 2026-11-19 to `Javelin_Industrial_Cargo_Lrg` (9 tiers, the most any stock type has; same hazard levels 6-9; role becomes Heavy Cargo, theme Industrial) |
-| Hazard and core-system icons missing | They are counted from the parts in the ship prefab when the card is created; a card created before the prefab was ever filled in that session counts none | Loader patch: a mod prefab's load now waits for its references (untested as of 2026-11-19) |
+| In-progress ship shows the previous card's image | A ship read from the save has a null space-truck parts list when the ship has none; the job board throws before it sets the image | Loader patch (null list becomes empty) |
+| No salvage milestones, or the previous card's milestones | The ship's basis has no `ShipRewardsAsset`. `Javelin_Science_Survey` has none; every other regular stock ship type has one (`python .claude/mca_rewards_dump.py` lists them) | Loader patch stops the stale display; real milestones need a basis that has rewards, for example `Javelin_Industrial_Cargo_Lrg` (9 tiers, the most any stock type has; hazard levels 6-9; role Heavy Cargo, theme Industrial) |
+| Hazard and core-system icons missing | They are counted from the parts in the ship prefab when the card is created; a card created before the prefab was ever filled in that session counts none | Loader patch: a mod prefab's load now waits for its references (untested) |
 
 **What the job board can see.** Hazards, core systems and "Detected on ship" are read from the ship's module prefabs, never from parts an `AddressableLoader` spawns at runtime.
 
@@ -1470,21 +1457,8 @@ So the old save was not the cause, and neither is the placeholder: continuing a 
 |---|---|
 | Explosion (triangle) | a baked part whose blueprint has a Fire-type explosive (reactor core, fuel tank, thruster) |
 | Cryo (snowflake) | a Coolant-type explosive (cryo pipe, cryo canister) |
-| Electric (bolt) | an Electricity-type explosive; among the Tachi's blueprints only `BP_Subsystem_PowerGenerator` has one. The Tachi has two baked generators in the crawlspace above the flight deck for this (the addressable one that stood by the deck 9 hatch was removed; the two on the engineering deck stay) |
+| Electric (bolt) | an Electricity-type explosive, for example a baked power generator (`BP_Subsystem_PowerGenerator`); one placed as an addressable does not count |
 | Fuel (flame) | a machine part that sources fuel both globally and locally; none of the game's 18 machine-part assets has both, so it never lights on any ship |
-| Space-truck parts | the pickup spawned as a child module from a `HardPoint` (bridge op `hardpoint {parent,name,pos,euler,list}`), not placed as an addressable. `python .claude/make_truck_part_lists.py` writes one `ModuleListAsset` per part type into `Data/TruckParts` and adds them to the Addressables group. Every stock basis with rewards caps a ship at 8 space-truck modules or fewer; the Tachi carries 10 (one of each type, one per deck from the flight deck to Deck 2), so its construction asset has its own `m_Restrictions` list with one blank entry, which replaces the basis list and is skipped by the game. The hardpoints hover 0.12 m above the deck (`python .claude/lift_truck_parts.py [--apply]`): a pickup spawned within joint distance of the floor joints to it and has to be tugged off instead of floating free |
+| Space-truck parts | the pickup spawned as a child module from a `HardPoint` (bridge op `hardpoint {parent,name,pos,euler,list}`), not placed as an addressable. `python .claude/make_truck_part_lists.py` writes one `ModuleListAsset` per part type into `Data/TruckParts` and adds them to the Addressables group. Every stock basis with rewards caps a ship at 8 space-truck modules or fewer; to carry more, give the construction asset its own `m_Restrictions` list with one blank entry, which replaces the basis list and is skipped by the game. Place the hardpoints about 0.12 m above the deck: a pickup spawned within joint distance of the floor joints to it and has to be tugged off instead of floating free |
 
-`python .claude/tachi_hazard_audit.py` lists the hazard flags of every blueprint the ship's baked parts use.
-
-**Cable trays that turn.** Besides the straight `PRF_Roomkit_Props_ElectricalCables_Straight_*` pieces (0.25 to 8 m) the game has two turning pieces, both 0.5 m square:
-
-| Piece | Shape | Use |
-|---|---|---|
-| `PRF_Roomkit_Props_ElectricalCables_RoundCornerTurn_BxBxB` | flat 90° turn in the tray's own plane; ports on local -X and -Z, rounded outer corner at +X +Z | sideways jog of a wall riser: corner, straight, corner shifts the riser by the straight's length + 0.5 m and uses 0.5 m of height |
-| `PRF_Roomkit_Props_ElectricalCables_UpwardJunction_BxBxB` | 0.30 m tall L: a slab with a port on local -Z and a leg rising at the +Z end with a port on top | as built, a floor tray turning up a wall; mounted upside down, a wall riser turning inboard over the top of the wall |
-
-The Tachi's two roof generators are fed this way from the north-east and north-west crawl-space risers (`python .claude/gen_risers2.py`, dry run by default): jog along the diagonal wall, upper riser, upside-down junction over the wall lip, and a 0.5 m tray ending 2 mm off the generator's upper rib; each generator sits with its flat base parallel to the wall. The risers are cosmetic: power reaches every part through the hull, and breaker panels are live whether or not a tray touches them. The parts should still joint, which `python .claude/gen_risers_emul.py` checks.
-
-A `StructurePart` with no asset on a GameObject that already has a filled one (the bodysuit's four `Right Glove` objects had this) is destroyed at spawn and logs errors: `python .claude/remove_duplicate_empty_sp.py <prefab> [--apply]` removes it; check other prefabs for loader entries pointing at it first (`.claude/remove_loader_entry.py`).
-
-PartInfoLogger's `PlaceholderCheck` (off by default; set `Enabled = true` under `[PlaceholderCheck]` in its config; writes `placeholder_check.txt` next to its output file a few seconds after gameplay starts) lists parts with no asset, parts still on `SPA_Placeholder`, and parts whose real asset has scanner info or a highlight that the part itself lacks. On a healthy Tachi every count is zero except four mesh-less ceiling-terminal wrappers under "no highlight".
+PartInfoLogger's `PlaceholderCheck` (off by default; set `Enabled = true` under `[PlaceholderCheck]` in its config; writes `placeholder_check.txt` next to its output file a few seconds after gameplay starts) lists parts with no asset, parts still on `SPA_Placeholder`, and parts whose real asset has scanner info or a highlight that the part itself lacks. On a healthy ship every count is zero; mesh-less wrapper objects (for example the roots of ceiling terminals) can show under "no highlight" and are harmless.
