@@ -713,9 +713,11 @@ public static class ClaudeBridge
     {
         var t = Find((string)cmd["path"]);
         if (t == null) throw new Exception("Not found: " + cmd["path"]);
-        return InspectNode(t, (int?)cmd["depth"] ?? 1);
+        inspectFake = (bool?)cmd["fake"] ?? false;   // fake:true also walks the hidden addressable preview children
+        try { return InspectNode(t, (int?)cmd["depth"] ?? 1); } finally { inspectFake = false; }
     }
 
+    static bool inspectFake;
     static JObject InspectNode(Transform t, int depth)
     {
         var o = new JObject
@@ -740,7 +742,7 @@ public static class ClaudeBridge
         {
             var kids = new JArray();
             foreach (Transform c in t)
-                if (c.GetComponent<FakePrefabDisplay>() == null) kids.Add(InspectNode(c, depth - 1));
+                if (inspectFake || c.GetComponent<FakePrefabDisplay>() == null) kids.Add(InspectNode(c, depth - 1));
             if (kids.Count > 0) o["kids"] = kids;
         }
         return o;
