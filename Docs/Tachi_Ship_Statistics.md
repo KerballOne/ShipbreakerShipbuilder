@@ -1,8 +1,8 @@
-# Tachi v0.9.6: Ship Statistics
+# Tachi: Ship Statistics
 
 A custom salvage ship for Hardspace: Shipbreaker, modelled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
 
-Figures are from the v0.9.6 build of 19 November 2026. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
+Figures are from the builds of 20 November 2026, which are newer than the v0.9.6 release. Where a table still shows v0.9.6 figures it says so. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
 
 ## At a glance
 
@@ -11,11 +11,11 @@ Figures are from the v0.9.6 build of 19 November 2026. "Measured" means taken fr
 | Length (engine bell to antenna tip) | 133.7 m |
 | Beam (port to starboard, over the gun mounts) | 54.6 m |
 | Height (dorsal to ventral) | 46.3 m |
-| Live parts at spawn | 5,339 |
+| Live parts at spawn | 5,290 (Gas livery variant: 5,876) |
 | Cut points | 237 |
 | Loose items at spawn | 184 (props, pickups and one floating corpse) |
 | Estimated mass | at least 268 t (see Mass) |
-| Download size | 180 MB (zip) |
+| Download size | 163 MB (zip, both liveries) |
 | Load time on the test PC | 45 to 138 s |
 
 ---
@@ -35,7 +35,9 @@ Measured on the test PC, from choosing the ship to being able to move:
 | 18 Nov, v0.9.5 | 126.8 s | 97.1 s | 29.7 s |
 | 19 Nov, v0.9.6 | 45.2 s | 28.2 s | 17.0 s |
 | 19 Nov, v0.9.6 | 53.6 s | 37.0 s | 16.6 s |
-| 19 Nov, v0.9.6, after a fresh build | 55.0 s | 37.5 s | 17.6 s |
+| 20 Nov, after a fresh build | 61.9 s | 44.3 s | 17.7 s |
+| 20 Nov | 49.0 s | 30.6 s | 18.4 s |
+| 20 Nov, Gas variant | 59.3 s | 42.4 s | 17.0 s |
 
 The v0.9.5 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
 
@@ -60,12 +62,12 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 
 | | |
 |---|---|
-| Live parts at spawn (every piece the game simulates) | 5,339 |
-| Parts counted by the game's joint pass | 5,337 |
+| Live parts at spawn (every piece the game simulates) | 5,290 |
+| Parts counted by the game's joint pass | 5,288 |
 | Objects in the ship that never become parts | 277 (see below) |
 | Largest mesh | `PDC_Mid_Port_Nest_02`, 18,291 vertices |
 | Part ceiling at that mesh size | 7,337 |
-| Headroom | 2,000 parts |
+| Headroom | 2,049 parts |
 
 **The part ceiling.** While the ship loads, the game multiplies the number of parts by the vertex count of the largest single mesh. If that product passes 134,217,728 the game crashes on load. With the current largest mesh that allows 7,337 parts. Adding parts, or adding one mesh larger than 18,291 vertices, both use up the headroom.
 
@@ -93,6 +95,8 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 | Hull panels | 208 | 3.9 % |
 | Structural frame | 204 | 3.8 % |
 
+The category and section tables below are from the v0.9.6 census of 19 November. The 20 November pipe rework removed a net 49 parts, all pipe pieces and pipe cut points, and has not been re-counted by category.
+
 Categories are assigned from each part's joint type and name. The rules were rewritten for v0.9.5, so these shares are not comparable with earlier versions of this document.
 
 ### Parts by section
@@ -108,11 +112,11 @@ Categories are assigned from each part's joint type and name. The rules were rew
 
 ### Loose parts
 
-Every structural part of the ship is attached. At spawn the main structure is one body of 5,155 parts, and nothing structural is separate from it.
+Every structural part of the ship is attached. At spawn the main structure is one body of 5,106 parts, and nothing structural is separate from it.
 
 | | |
 |---|---|
-| Main structure | 5,155 parts in one body |
+| Main structure | 5,106 parts in one body |
 | Loose parts | 184, in 159 separate bodies |
 | Loose single items | 149 |
 | Loose bodies of more than one part | 10 |
@@ -142,6 +146,37 @@ The loose bodies of more than one part:
 | Bowl, spoon and food set | 5 |
 | Coffee maker, pot and vending part | 3 |
 | Seven pairs of small items | 2 each |
+
+### Pipes, cut points and hull colliders
+
+Every hull part collides as the convex shape wrapped round it, not as its visible mesh. On the folded hull panels of the engineering section that left invisible collider faces across the pockets where the fuel and coolant pipes run, and put pipe cut points out of reach. The 20 November rework changed three things:
+
+| | |
+|---|---|
+| Hull parts given inside plates | 14 (11 engineering wall panels, the sealed hatch, the two mid thermal vents) |
+| Plate area added | 50 to 210 m² per part; each part's outline and collider are unchanged |
+| Pipe cut points at spawn | 80, every one jointed and none fully inside a collider |
+| Inline cut points on the coolant ring | 12 |
+| Pipe pieces loose at spawn | 0 |
+
+- **Inside plates.** Each of the 14 parts is closed along its own collider on every face except those on the outside of the ship, so what blocks the player is now visible.
+- **Cut points.** Each fuel and coolant line keeps its start on the interior wall. Its cut point sits on the last stretch of pipe that is clear of the part's collider, as close to the part as it fits, and one short piece of pipe runs on into the part.
+- **Coolant ring.** The ring runs straight through the hull panels, with inline cut points on each open stretch. The stretch under the ventral panel has no open pipe and no cut point of its own.
+
+Four cut points still reach a few centimetres into a collider (up to 13 cm) where there was less than 25 cm of open pipe.
+
+### Gas livery variant
+
+The ship can also spawn as a gas-hauler version with 24 external tanks on trusses in place of the point defence cannons. It is not part of the v0.9.6 release. Measured on 20 November:
+
+| | Standard | Gas variant |
+|---|---|---|
+| Live parts at spawn | 5,290 | 5,876 |
+| Parts counted by the joint pass | 5,288 | 5,874 |
+| Headroom under the part ceiling | 2,049 | 1,463 |
+| Main structure | 5,106 | 5,691 |
+| Loose parts | 184 in 159 bodies | 185 in 160 bodies |
+| Cut points | 237 at v0.9.6 (not re-counted) | 333 |
 
 Earlier versions of this document listed the engine nozzle, the reactor and a coolant pipe network as separate bodies. That was a counting error in the analysis, not a fault in the ship; the census now records exact joints.
 
@@ -186,7 +221,7 @@ The game works out a part's mass from its material density and the volume of its
 | B_External | Engineering hull, support ring, engine | 257 | 54.4 × 28.0 × 46.3 | 70.9 | 32 |
 | B_Internal | Aft airlock, cryogenics, fusion reactor | 552 | 28.8 × 23.1 × 21.0 | 34.6 | 14 |
 
-Sizes and masses were measured on an earlier 18 November build and not re-measured since; the changes since then (a reactor mount of 12 parts, two roof generators, spare-part pickups) do not move them noticeably. Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
+Sizes and masses were measured on an earlier 18 November build and not re-measured since; the changes since then (a reactor mount of 12 parts, two roof generators, spare-part pickups, the inside plates) do not move them noticeably. The live-part column is from the v0.9.6 census. Section masses carry the same caveat as the total. The interior figure is the least complete, because it is mostly stock assemblies.
 
 ---
 
@@ -272,7 +307,7 @@ The lore gives performance figures for the Epstein drive in general, not for thi
 | Figure | Source |
 |---|---|
 | Load times, joint-pass part count, largest mesh, part ceiling | Logged by the PartInfoLogger mod during loading |
-| Live parts, categories, loose parts, cut points per section | The mod's spawn census from a v0.9.6 run of 19 Nov 2026, with exact joints between parts |
+| Live parts, categories, loose parts, cut points per section | The mod's spawn census: totals from runs of 20 Nov 2026, category and section breakdowns from the v0.9.6 run of 19 Nov 2026; exact joints between parts |
 | Dimensions, per-section sizes | Part bounds in the Unity editor |
 | Volume | Calculated from part bounds, as described above |
 | Mass | Calculated with the game's own formula from mesh volume and material density, plus game-reported masses for stock parts |

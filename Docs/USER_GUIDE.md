@@ -53,6 +53,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 10. [Expected Unity Exceptions](#10-expected-unity-exceptions)
 11. [Career Job Board (ModdedShipLoader)](#11-career-job-board-moddedshiploader)
 12. [Ship Variants (Liveries and Variant-Only Parts)](#12-ship-variants-liveries-and-variant-only-parts)
+13. [Pipes, Cut Points and Convex Colliders](#13-pipes-cut-points-and-convex-colliders)
 
 ---
 
@@ -1485,3 +1486,32 @@ A ship can spawn as one of several versions, picked at random by weight each tim
 - A build stores each variant as a full copy of the ship prefab's objects (meshes and unchanged textures are shared), plus the variant's own textures.
 - Changing weights between starting a Career ship and continuing it can change which version is rebuilt; leave the weights alone while a shift on that ship is in progress.
 - The catalogue image and free-play thumbnail are per ship, not per variant.
+
+---
+
+## 13. Pipes, Cut Points and Convex Colliders
+
+Every custom hull part collides as the **convex hull** of its mesh, because the game needs a convex collider on anything that can become a free body. A part that is folded or wrapped round a pocket therefore has collider faces across the open side of that pocket: the player sees open space but cannot fly, grapple or cut into it, and the scanner reports the part there. Unity shows this shape as the green wireframe of the part's `MeshCollider`.
+
+Anything placed in such a pocket is inside the part's collider. A pipe cut point there cannot be reached, and a pipe that ends there looks reachable when it is not.
+
+**Rules for pipes that run from an interior wall to a hull part**
+
+1. Never move the point where a line leaves the interior wall; it has a counterpart pipe on the other side.
+2. Test every pipe end and cut point against the convex hull of each hull part nearby, not against the visible mesh.
+3. Put the cut point on the last straight stretch of pipe that is clear of the part's collider, as close to the part as it fits. Follow it with one short piece of pipe that runs on into the part.
+4. A cut point right against a junction box is redundant: the box can be cut.
+5. A long main that passes through several parts runs straight through them, with an inline cut point on each open stretch near where it enters a part.
+6. Do not leave pipe that no longer comes from a wall. A piece whose upstream connection was removed is jointed to nothing and floats away at spawn.
+
+**Closing a pocket so the collider is visible**
+
+Add thin plates to the existing part along the faces of its own convex hull, so the part reads as a closed hollow box. Because every plate lies on or inside the hull, the collider, the part's outline and its existing triangles do not change. Leave open only the hull faces on the outside of the ship. Where a hull face partly coincides with existing mesh, set the plate about 1 cm inside it so the two surfaces do not flicker.
+
+Keep the plates thin and closed (a slab, not a single sheet): the game works out a part's mass from the volume of its mesh.
+
+**Things to know.**
+- New plates lie in the same planes as neighbouring parts' faces and can change which joints the game finds. Compare the joint search before and after, then confirm with a spawn census.
+- Pipes are not held by hull panels: the pipe joint type cannot joint to an exterior panel. A hull part is released by cutting its hull joints; its pipes are released at their cut points.
+- A pipe piece of 6 cm joints like any other, but only if both its neighbours are still there.
+
