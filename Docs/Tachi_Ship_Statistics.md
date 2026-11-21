@@ -11,7 +11,7 @@ Figures are from the builds of 20 November 2026, which are newer than the v0.9.6
 | Length (engine bell to antenna tip) | 133.7 m |
 | Beam (port to starboard, over the gun mounts) | 54.6 m |
 | Height (dorsal to ventral) | 46.3 m |
-| Live parts at spawn | 5,290 (Gas livery variant: 5,876) |
+| Live parts at spawn | 5,290 (Gas variant: 5,868) |
 | Cut points | 237 |
 | Loose items at spawn | 184 (props, pickups and one floating corpse) |
 | Estimated mass | at least 268 t (see Mass) |
@@ -38,6 +38,7 @@ Measured on the test PC, from choosing the ship to being able to move:
 | 20 Nov, after a fresh build | 61.9 s | 44.3 s | 17.7 s |
 | 20 Nov | 49.0 s | 30.6 s | 18.4 s |
 | 20 Nov, Gas variant | 59.3 s | 42.4 s | 17.0 s |
+| 20 Nov, Gas variant, raised pose | 49.8 s | 33.2 s | 16.6 s |
 
 The v0.9.5 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
 
@@ -165,18 +166,41 @@ Every hull part collides as the convex shape wrapped round it, not as its visibl
 
 Four cut points still reach a few centimetres into a collider (up to 13 cm) where there was less than 25 cm of open pipe.
 
-### Gas livery variant
+### Variants
 
-The ship can also spawn as a gas-hauler version with 24 external tanks on trusses in place of the point defence cannons. It is not part of the v0.9.6 release. Measured on 20 November:
+The ship has one base version and two variants. A variant is the same ship with its own hull textures and, for the Gas variant, its own parts and bay pose. Neither variant is part of the v0.9.6 release.
 
-| | Standard | Gas variant |
-|---|---|---|
-| Live parts at spawn | 5,290 | 5,876 |
-| Parts counted by the joint pass | 5,288 | 5,874 |
-| Headroom under the part ceiling | 2,049 | 1,463 |
-| Main structure | 5,106 | 5,691 |
-| Loose parts | 184 in 159 bodies | 185 in 160 bodies |
-| Cut points | 237 at v0.9.6 (not re-counted) | 333 |
+| | MCRN Tachi (base) | Rocinante | Beratnas Gas Hauler |
+|---|---|---|---|
+| What differs | | Tri-colour livery only | Livery, 24 external tanks on trusses, point defence cannons removed, own bay pose |
+| Spawn weight in the ship files | 1 | 0 (never picked until given a weight) | 20 |
+| Live parts at spawn | 5,290 | same parts as the base (not measured) | 5,868 |
+| Parts counted by the joint pass | 5,288 | | 5,866 |
+| Headroom under the part ceiling | 2,049 | | 1,471 |
+| Main structure | 5,106 | | 5,684 |
+| Loose parts | 184 in 159 bodies | | 184 in 159 bodies |
+| Cut points | 237 at v0.9.6 (not re-counted) | | 333 (counted before two rack cut points were removed) |
+| Size (length x beam x height) | 133.7 x 54.6 x 46.3 m | same | 133.7 x 67.2 x 55.1 m |
+
+Base figures are from the morning of 20 November, before hull panel A_312 was merged into its neighbour (one part fewer). Gas figures are from the load of 20 November, 19:59.
+
+**Gas variant tank racks**
+
+| | |
+|---|---|
+| Tanks | 24: 16 large and 8 small |
+| Truss parts | 78 (24 beams, 35 feet, 19 links), aluminium structure |
+| Hull cut points holding the racks | 35 |
+| Tank cradle cut points | 48 |
+| Joints between truss and hull other than through cut points | 0 |
+| Large tank body mass | 7,500 kg (28,689 kg before hollowing) |
+| Small tank body mass | 5,500 kg (7,879 kg before hollowing) |
+
+The racks are held to the ship only by cut points: in the census every foot joints to its beam and to a cut point, and every hull cut point joints to a hull part.
+
+The tank masses are calculated with the game's own formula (material density times the signed volume of the part's mesh) and reproduce the figures the game reported before the change. Each tank body has an inward-facing inner shell that subtracts volume, so the outside size is unchanged. The new masses have not yet been read back in game.
+
+**Gas variant bay pose.** The Gas variant is too wide to sit between the light jacks, so it spawns level, nose toward the Master Jack, raised above them: the ship's axis is 49.5 m above the bay's centre line. The engine bell and reactor housing are 5 m above the tallest light jack. One tank hangs below that level and clears the nearest light jack by 7.5 m. No mod is needed to make room for it.
 
 Earlier versions of this document listed the engine nozzle, the reactor and a coolant pipe network as separate bodies. That was a counting error in the analysis, not a fault in the ship; the census now records exact joints.
 

@@ -1482,6 +1482,21 @@ A ship can spawn as one of several versions, picked at random by weight each tim
 
 **New hull parts.** A variant overrides materials per renderer, so a hull part added to the ship later keeps the base material in the variant until it gets its own override: select it in the variant and assign the variant material, or re-run the script that created the variant.
 
+**A variant with its own bay pose.** The bay pose belongs to the HardPoint that spawns the ship, so every entry in one module list shares it. To give one variant a different pose, point its entry at a small mount prefab instead of at the variant itself:
+
+| Piece | What it does |
+|---|---|
+| `Spawn/<ShipName>_<Variant>_Mount.prefab` | Holds a second HardPoint. The variant's entry in the main container points here |
+| `Spawn_<Variant>Inner_ModuleListAsset` / `...EntryContainer` / `...EntryDefinition` | A one-entry list on that HardPoint which spawns `<ShipName>_<Variant>.prefab` |
+
+The mount is spawned at the base ship's pose, so the second HardPoint's local transform is the base pose inverted, times the pose wanted for the variant. Both the mount prefab and the inner list must be in the ship's Addressables group.
+
+**A variant that is too big for the bay.** Two ways to handle it:
+- Pose it clear of the bay's fixtures. A ship that is too wide to sit between the light jacks can be posed level above them; nothing in the bay is in the way higher up. Check the pose against the recorded bay geometry before a test load.
+- Ship the variant's entry with `Weight` 0 and let a mod that makes room for it give it a weight. Players without the mod then never get it.
+
+**Mass of scaled-up parts.** The game sets a part's mass to its material's density times the volume of its collider mesh, and it adds that volume up as signed triangle volumes. Scaling a part by a factor multiplies its mass by the factor cubed, so a stock part scaled 2.35 times weighs 13 times as much and can be too heavy to tether. To cut the mass without changing the size, add an inward-facing copy of the mesh, scaled down about its centre of volume, to the same mesh: with a copy scaled by `s` the mass becomes `1 - s^3` of what it was (0.90 leaves 26 %). The copy is only visible from inside the part.
+
 **Things to know.**
 - A build stores each variant as a full copy of the ship prefab's objects (meshes and unchanged textures are shared), plus the variant's own textures.
 - Changing weights between starting a Career ship and continuing it can change which version is rebuilt; leave the weights alone while a shift on that ship is in progress.
