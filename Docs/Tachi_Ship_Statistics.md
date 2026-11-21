@@ -171,12 +171,12 @@ Four cut points still reach a few centimetres into a collider (up to 13 cm) wher
 
 ### Variants
 
-The ship has one base version and two variants. A variant is the same ship with its own hull textures and, for the Gas variant, its own parts and bay pose. All three are in the v0.9.7 release; the game picks one each time the ship is offered, by the weights below.
+The ship comes in three versions, each listed as its own ship in Free Play and on the Career job board, with its own name and picture: MCRN Tachi, Rocinante and Beratnas Gas Hauler. The second and third are prefab variants of the first: the same ship with its own hull textures and, for the Gas Hauler, its own parts and bay pose. All three are in one bundle and share meshes and unchanged textures. All three are in the v0.9.7 release; the game picks one each time the ship is offered, by the weights below.
 
 | | MCRN Tachi (base) | Rocinante | Beratnas Gas Hauler |
 |---|---|---|---|
 | What differs | | Tri-colour livery only | Livery, 24 external tanks on trusses, point defence cannons removed, own bay pose |
-| Spawn weight in the ship files | 4 | 5 | 1 |
+| How it is picked | Own ship entry | Own ship entry | Own ship entry |
 | Live parts at spawn | 5,211 | same parts as the base (not measured) | 5,868 |
 | Parts counted by the joint pass | 5,208 | | 5,866 |
 | Headroom under the part ceiling | 2,129 | | 1,471 |

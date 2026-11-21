@@ -1498,6 +1498,17 @@ A ship can spawn as one of several versions, picked at random by weight each tim
 
 **New hull parts.** A variant overrides materials per renderer, so a hull part added to the ship later keeps the base material in the variant until it gets its own override: select it in the variant and assign the variant material, or re-run the script that created the variant.
 
+**A variant as its own ship.** A version picked by weight shares the ship's name and pictures, so the job board cannot show which one will spawn. To give a variant its own name and pictures, list it as a separate ship that spawns the variant prefab:
+
+| Piece | What it does |
+|---|---|
+| `Data/<ShipName>_<Variant>_LevelAsset.asset` | Free Play entry: display name and thumbnail. Addressables labels `GameMode_Free` and `Release` |
+| `Data/<ShipName>_<Variant>_ModuleConstructionAsset.asset` | The ship itself: root prefab, catalogue picture, manufacturer. Label `ModdedLevel`; its `m_AssetGUID` must be its own GUID |
+| `Data/<ShipName>_<Variant>_CompanyInfoAsset.asset` + `..._CompanyShipNameAsset.asset` | The names the job board can give it |
+| `Spawn/<ShipName>_<Variant>_RootRef.prefab` | Its own HardPoint (and so its own bay pose), with a one-entry module list that spawns `<ShipName>_<Variant>.prefab` |
+
+The ship loader registers every construction asset labelled `ModdedLevel` in the bundle, so the extra ships need no second bundle and add only these small files. Take the variant out of the base ship's `Spawn_ModuleEntryContainer` so the base ship always spawns as itself. The archetype asset can be shared.
+
 **A variant with its own bay pose.** The bay pose belongs to the HardPoint that spawns the ship, so every entry in one module list shares it. To give one variant a different pose, point its entry at a small mount prefab instead of at the variant itself:
 
 | Piece | What it does |
