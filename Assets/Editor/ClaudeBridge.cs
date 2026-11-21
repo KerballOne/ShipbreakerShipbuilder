@@ -2701,16 +2701,18 @@ public static class ClaudeBridge
         go.transform.position = parent.position;
         go.transform.rotation = Quaternion.identity;
 
-        BBI.Unity.Game.AddressableComponentLoader srcAcl = null;
-        for (var t = src; t != null && srcAcl == null; t = t.parent) srcAcl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+        // Every loader above the source may hold its entries (a part can carry an empty loader of its own while the
+        // real entries sit on a group further up), so all of them are searched; snapshots, because `parent` may be one.
+        var srcEntries = new List<BBI.Unity.Game.AddressableComponentValue>();
+        for (var t = src; t != null; t = t.parent) { var a = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); if (a != null && a.componentValues != null) srcEntries.AddRange(a.componentValues); }
         int registered = 0;
-        if (srcAcl != null)
+        if (srcEntries.Count > 0)
         {
             var acl = parent.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
             if (acl == null) acl = parent.gameObject.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
             var srcAll = src.GetComponentsInChildren<Component>(true);
             var dstAll = go.GetComponentsInChildren<Component>(true);
-            foreach (var cv in srcAcl.componentValues)
+            foreach (var cv in srcEntries)
             {
                 if (cv == null || cv.component == null) continue;
                 int idx = Array.IndexOf(srcAll, cv.component);

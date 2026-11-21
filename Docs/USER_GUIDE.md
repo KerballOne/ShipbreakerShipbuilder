@@ -1344,6 +1344,21 @@ If you unpack a room prefab instance (right-click → Unpack Prefab) into the sh
 **Room Overlap volumes can swallow probes**
 Baked wall panels (e.g. `PRF_Panel_4xBx4`) include a `RoomOpeningDefinition` with `Type = Overlap` and a default Size of `(3, 1.25, 3)`. If a panel is placed adjacent to an atmosphere regulator, this large overlap volume can cover the regulator's `RoomProbe` position, breaking the interaction button. Shrink the offending panel's Overlap volume size (approximately `(1, 0.2, 1)` works) to fix this.
 
+**A joint that forms in only one search order can disappear after an unrelated edit**
+The game searches each pair of parts in one order only, and the result can differ between the two orders. A part that hangs on a single such joint stays attached until some other change (a part added, removed or merged elsewhere) alters the order, and then it falls off at spawn with no other symptom. In the spawn census it shows 0 joints. Do not nudge it: run the joint search for the pair in both orders, in the editor frame and in the game's world frame, and change the geometry until all four pass. Two fixes that worked: bring the raised underside of a fin down flat onto the floor of the slot it stands in; sink a part whose rim only shares vertices with the rim of its hole 1 to 2 cm into the skin so the rim rests on a real face.
+
+**A StructurePart on an AddressableLoader object is an error every load**
+An object that only loads a game prefab must carry the `AddressableLoader` and nothing else. If it also has a `StructurePart` (left over from a copy), the game logs `Failed to joint part "<name>", it has no MeshFilter or shared mesh` on every load and the census lists a part with no mesh. Remove the component; the loaded prefab brings its own parts.
+
+**Salvage value comes from the blueprint, not the material**
+The credits a part awards are set by the `EntityBlueprintAsset` (its salvageable component): either a flat value or a value scaled by mass. Two blueprints with identical behaviour can differ only in that value, so a part that salvages for a token amount usually has a generic blueprint. Compare the candidates' awarded-currency fields before choosing one.
+
+**Set dressing is not a pickup**
+Bottles, snack packs, galley items and soft pouches are plain props: they float free and never show a collect prompt, even where the mesh is the same as a real pickup's. For something the player can collect, place the game's pickup prefab. A pickup's prompt can also depend on progression events recorded in the player's profile, so some pickups spawn but cannot be collected in every game mode.
+
+**Items on an open shelf can be inside the shelf's collider**
+A cupboard or shelf unit baked as one part has a convex collider that covers its open front. Anything stored on its shelves is inside that collider and cannot be aimed at. Hang or stand such items in front of the unit, or split the unit into convex pieces.
+
 **Addressable scaling requires baking first**
 Addressable loader GOs (`AddressableLoader` component) cannot be rescaled — the game ignores transform scale on loaded addressables. If you need a game part at a different scale, bake it first via the Import Game Part Wizard, then rescale the baked prefab and apply Lock In Rescale.
 
@@ -1378,7 +1393,8 @@ These exceptions appear in the Unity console during normal editor use and do not
 | `catalog` | Render game parts to thumbnails in `.claude/bridge/catalog/` |
 | `group`, `place`, `move`, `delete` | Create a container, place an `AddressableLoader` part by its bounds (`center` + `floorY`), reposition, or remove |
 | `wall` | Place a baked board (or any baked prefab via `asset`) resized with Lock In Rescale; `glass`, or `material` for a text sign, and `oi` for a display name |
-| `clone`, `setoi` | Copy one baked part already in the ship (e.g. a spare gun barrel); `setoi` gives its StructureParts the same display-name asset as the originals (omit `oi` to list) |
+| `stripcomponents`, `setsoloader` | `{path, types:[..], dry}` removes named component types from one object (e.g. a stray StructurePart on a loader object); `{paths:[..], sp, bp}` re-points per-object loaders at another StructurePartAsset or blueprint (omit `sp`/`bp` to list) |
+| `clone`, `setoi` | `clone` copies the part's loader entries from every loader above the source, so do not clone into the object that holds them. Copy one baked part already in the ship (e.g. a spare gun barrel); `setoi` gives its StructureParts the same display-name asset as the originals (omit `oi` to list) |
 | `bakeparts` | `{guid, name, folder, sp, bp, smallSp, smallBp, smallMax, decor, clipBelow, skip}` — bakes a game addressable that has no salvage data (Hab set dressing has no colliders or StructureParts, so it is not solid or interactable in game) into a local prefab where every mesh is a part: convex collider + StructurePart + EntityBlueprintComponent, resolved by GUID through an AddressableComponentLoader. `decor:{nameSubstr: hostNode}` keeps meshes render-only as children of a host part; `clipBelow:{nameSubstr: height}` trims a collider so its convex hull does not swallow open space; uniform node scales are baked into the meshes. Run a texture de-dup over the output folder afterwards |
 | `disablechild` | `{path, children:[..], enable}` — edits an AddressableLoader's `disabledChildren` list (child paths relative to the loaded prefab), same as the loader inspector's tree |
 | `meshcast` | `{rays:[{o,d}], max, ignore, only, inactive}` — ray vs render-mesh triangles; `inactive:true` also tests disabled objects (e.g. hull tiles switched off for access), `only` restricts by path |
@@ -1529,4 +1545,13 @@ Keep the plates thin and closed (a slab, not a single sheet): the game works out
 - New plates lie in the same planes as neighbouring parts' faces and can change which joints the game finds. Compare the joint search before and after, then confirm with a spawn census.
 - Pipes are not held by hull panels: the pipe joint type cannot joint to an exterior panel. A hull part is released by cutting its hull joints; its pipes are released at their cut points.
 - A pipe piece of 6 cm joints like any other, but only if both its neighbours are still there.
+
+**Parts that glow when a line reaches them**
+
+Some hull parts (thermal vents, filters) are built from materials that accept fuel or coolant. If a pipe, a junction box or the game's own pipe cut point joints to one of them, the part glows bright white in game. The game's pipe cut point does not prevent this: its type joints with everything.
+
+1. Check which fuel and coolant objects find a joint with each such part (joint search, both orders), and confirm in the spawn census which ones actually jointed.
+2. Keep live pipe and junction boxes from jointing to the part. Do not close such a part with inside plates if that brings a line into contact with it.
+3. For the pieces that must sit against the part, use baked copies whose type does not joint with it: bake the game's cut point, bend or straight pipe to a local prefab and give it the plain chassis cut point StructurePartAsset and the cut point blueprint. They look like pipe, carry nothing, and still joint to pipe and junction boxes.
+4. Put the cut point where it was, then the baked bend or pipe after it, so the line still releases at the cut point.
 
