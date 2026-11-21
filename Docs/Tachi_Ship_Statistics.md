@@ -175,9 +175,9 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 
 | | MCRN Tachi (base) | Rocinante | Beratnas Gas Hauler |
 |---|---|---|---|
-| What differs | | Colours only: the ship as an independent warship | Colours, 24 external tanks on trusses, point defence cannons removed, own bay pose |
+| What differs | | Colours as an independent warship, Belter posters, less furniture | Colours, 24 external tanks on trusses, point defence cannons removed, own bay pose, Belter posters, less furniture |
 | How it is picked | Own ship entry | Own ship entry | Own ship entry |
-| Live parts at spawn | 5,211 | same parts as the base (not measured) | 5,868 |
+| Live parts at spawn | 5,211 | the base less 20 switched-off objects (not measured) | 5,868 (measured before 20 objects were switched off) |
 | Parts counted by the joint pass | 5,208 | | 5,866 |
 | Headroom under the part ceiling | 2,129 | | 1,471 |
 | Main structure | 5,030 | | 5,684 |
@@ -185,8 +185,20 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 | Cut points | 254 | | 333 |
 | Size (length x beam x height) | 133.7 x 54.6 x 46.3 m | same | 133.7 x 67.2 x 55.1 m |
 | Estimated mass | at least 268 t | same | about 394 t (see Mass) |
+| Wall posters at 30 spots | MCRN | Belter | Belter |
+| Crew bunks (berths) | 28 | 12 | 12 |
+| Medbay beds | 5 | 5 | 5 |
+| Galley tables | centre, long and 3 corner tables | centre and long table | centre and long table |
 
 Base figures are from the build of 20 November, 21:52 (the release build). Gas figures are from the load of 20 November, 19:59, before the last interior changes of that evening (four flight deck seats replaced by server towers, a galley table and two chairs removed), which take about 60 parts off every variant.
+
+**Interior differences.** The three ships share one interior, with these differences:
+
+- **Posters.** Thirty wall posters are MCRN posters in the MCRN Tachi (MCRN Colors, MCRN Logo, MCRN Corvette, Mars Needs You) and Belter posters in the other two (OPA, three Remember the Cant designs, Beltalowda, Tycho, Ceres Water). The poster objects are the same; only the picture differs.
+- **Bunks.** The six crew cabins on Decks 3 and 4 hold 14 two-tier bunks in the MCRN Tachi (28 berths) and one two-tier bunk each in the other two (6 bunks, 12 berths). The 5 medbay beds are in all three and are not counted as crew bunks.
+- **Galley.** The other two ships have no corner tables: three tables, six chairs and the three bottles on them are switched off. The centre table and the long table are in all three.
+
+Switched-off objects are still in the download, so the size is the same. These differences were checked in the editor, not yet in game, and the part counts above were measured before them.
 
 **Gas variant tank racks**
 
@@ -265,7 +277,8 @@ Sizes and masses were measured on an earlier 18 November build and not re-measur
 | Point defence cannons | 6: fore port, fore starboard, mid port, mid starboard, aft dorsal, aft ventral |
 | Torpedo tubes | 2 (dorsal and ventral) |
 | Torpedoes aboard | 12: five per tube plus two on ceiling racks |
-| Crew bunks | 33 |
+| Crew bunks | 28 berths in 14 two-tier bunks (12 in 6 bunks in the Rocinante and the Gas Hauler) |
+| Medbay beds | 5 |
 | Acceleration couches | 32 |
 | Main drive | 1, with a 16-segment nozzle and 8 fuel injectors |
 | Reactor | 1 fusion reactor |

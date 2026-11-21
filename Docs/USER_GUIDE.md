@@ -1524,6 +1524,11 @@ The mount is spawned at the base ship's pose, so the second HardPoint's local tr
 
 **Mass of scaled-up parts.** The game sets a part's mass to its material's density times the volume of its collider mesh, and it adds that volume up as signed triangle volumes. Scaling a part by a factor multiplies its mass by the factor cubed, so a stock part scaled 2.35 times weighs 13 times as much and can be too heavy to tether. To cut the mass without changing the size, add an inward-facing copy of the mesh, scaled down about its centre of volume, to the same mesh: with a copy scaled by `s` the mass becomes `1 - s^3` of what it was (0.90 leaves 26 %). The copy is only visible from inside the part.
 
+**Interior differences between variants.** A variant can also differ inside, without any new objects:
+- **Leave something out.** Open the variant prefab, select the object and untick it in the Inspector. The variant stores that as an override; the base ship keeps the object. Switch off whatever sits on or hangs from it too (bottles on a table, bedding on a bunk), or it floats. Switched-off objects are not spawned, but they are still in the download.
+- **Change a picture.** Posters and signs that share one mesh can show a different picture per variant: assign another material to the poster in the variant. To have the base ship differ and the variants keep the original, change the picture on the base ship and assign the original material again in each variant.
+- When writing such overrides into a variant file by script, put them in the variant's own instance of the ship (the one whose source is `<ShipName>.prefab`); a variant that adds parts holds other prefab instances as well.
+
 **Things to know.**
 - A build stores each variant as a full copy of the ship prefab's objects (meshes and unchanged textures are shared), plus the variant's own textures.
 - Changing weights between starting a Career ship and continuing it can change which version is rebuilt; leave the weights alone while a shift on that ship is in progress.
