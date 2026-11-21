@@ -175,7 +175,7 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 
 | | MCRN Tachi (base) | Rocinante | Beratnas Gas Hauler |
 |---|---|---|---|
-| What differs | | Tri-colour livery only | Livery, 24 external tanks on trusses, point defence cannons removed, own bay pose |
+| What differs | | Colours only: the ship as an independent warship | Colours, 24 external tanks on trusses, point defence cannons removed, own bay pose |
 | How it is picked | Own ship entry | Own ship entry | Own ship entry |
 | Live parts at spawn | 5,211 | same parts as the base (not measured) | 5,868 |
 | Parts counted by the joint pass | 5,208 | | 5,866 |
