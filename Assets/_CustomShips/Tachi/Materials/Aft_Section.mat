@@ -9,7 +9,7 @@ Material:
   m_PrefabAsset: {fileID: 0}
   m_Name: Aft_Section
   m_Shader: {fileID: 4800000, guid: 61dbaea3826b0344794f35dbff252404, type: 3}
-  m_ShaderKeywords: _EMISSIVE_COLOR_MAP _MASKMAP _SKIN_PLANAR_MAPPING
+  m_ShaderKeywords: _BAKED_DECALS_ON _EMISSIVE_COLOR_MAP _MASKMAP _NORMALMAP _NORMALMAP_TANGENT_SPACE
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -215,7 +215,7 @@ Material:
     - _Micro_near: 2
     - _NoiseScale: 0
     - _NormalMapSpace: 0
-    - _NormalScale: 1
+    - _NormalScale: 0.35
     - _PPDLodThreshold: 5
     - _PPDMaxSamples: 15
     - _PPDMinSamples: 5

@@ -162,6 +162,7 @@ public static class ClaudeBridge
                 case "deletemany": result = DeleteMany(cmd); break;
                 case "inspect":   result = Inspect(cmd); break;
                 case "sodump":    result = SoDump(cmd); break;
+                case "prefabdump": result = PrefabDump(cmd); break;
                 case "setoi":     result = SetOi(cmd); break;
                 case "meshcast":  result = MeshCast(cmd); break;
                 case "signmat":   result = SignMat(cmd); break;
@@ -673,6 +674,44 @@ public static class ClaudeBridge
             catch (Exception ex) { outp[guid] = "error: " + ex.Message; }
         }
         return outp;
+    }
+
+    // { op:"prefabdump", guid:"<addressable or project prefab GUID>", depth:3 } — read-only: every transform of the
+    // prefab with its local pose and each component's serialized fields (same value format as sodump).
+    static JToken PrefabDump(JObject cmd)
+    {
+        var guid = (string)cmd["guid"];
+        int depth = (int?)cmd["depth"] ?? 3;
+        var localPath = AssetDatabase.GUIDToAssetPath(guid);
+        var root = string.IsNullOrEmpty(localPath) ? null : AssetDatabase.LoadAssetAtPath<GameObject>(localPath);
+        if (root == null) root = AddressableBaker.LoadAddressableAsync(guid, "").Result;   // same loader the baker uses (handles multi-type keys)
+        if (root == null) throw new Exception("Could not load prefab " + guid);
+        s_SoExpand = false;
+        return PrefabDumpNode(root.transform, depth);
+    }
+
+    static JObject PrefabDumpNode(Transform t, int depth)
+    {
+        var comps = new JArray();
+        foreach (var c in t.GetComponents<Component>())
+        {
+            if (c == null) { comps.Add("<missing script>"); continue; }
+            if (c is Transform) continue;
+            var cj = new JObject { ["type"] = c.GetType().Name };
+            if (c is MonoBehaviour) cj["fields"] = SoDumpValue(c, depth, true);
+            else if (c is MeshFilter mf) cj["mesh"] = mf.sharedMesh != null ? mf.sharedMesh.name : null;
+            else if (c is Renderer r) cj["materials"] = new JArray(r.sharedMaterials.Select(m => m != null ? m.name + " [" + string.Join(" ", m.shaderKeywords) + "]" : null));
+            comps.Add(cj);
+        }
+        var o = new JObject
+        {
+            ["name"] = t.name, ["active"] = t.gameObject.activeSelf, ["localPos"] = V(t.localPosition),
+            ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale), ["components"] = comps,
+        };
+        var kids = new JArray();
+        foreach (Transform c in t) kids.Add(PrefabDumpNode(c, depth));
+        if (kids.Count > 0) o["kids"] = kids;
+        return o;
     }
 
     static bool s_SoExpand;
