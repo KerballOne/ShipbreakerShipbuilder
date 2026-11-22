@@ -1,6 +1,6 @@
 # Tachi: Ship Statistics
 
-A custom salvage ship for Hardspace: Shipbreaker, modelled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
+A custom salvage ship for Hardspace: Shipbreaker, modeled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
 
 Version 0.9.8, 21 November 2026. Figures marked v0.9.8 are from loads of that build on 21 November: the MCRN Tachi as a normal ship and the Rocinante as a ghost ship. The category, section and loose-part tables are from a census of the Rocinante on this build, with the 106 furniture parts the MCRN Tachi has in addition added in. The Gas Hauler was not loaded on this build; its figures are still from the v0.9.7 builds of 20 November 2026. Base ship ("MCRN Tachi") part figures are from the build of 20 November, 21:52 (the release build); Gas variant ("Beratnas Gas Hauler") part figures are from the load of 20 November, 19:59, and are marked where the two differ in date. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
 
@@ -170,7 +170,7 @@ Every hull part collides as the convex shape wrapped round it, not as its visibl
 - **Cut points.** Each fuel and coolant line keeps its start on the interior wall. Its cut point sits on the last stretch of pipe that is clear of the part's collider, as close to the part as it fits, and one short piece of pipe runs on into the part.
 - **Coolant ring.** The ring runs straight through the hull panels, with inline cut points on each open stretch. The stretch under the ventral panel has no open pipe and no cut point of its own.
 
-Four cut points still reach a few centimetres into a collider (up to 13 cm) where there was less than 25 cm of open pipe.
+Four cut points still reach a few centimeters into a collider (up to 13 cm) where there was less than 25 cm of open pipe.
 
 **Thermal vents.** The four thermal vents are built from a material that accepts fuel, and glowed white in game wherever a fuel pipe, junction box or the game's pipe cut point jointed to them. The cut points beside all four vents are now baked cut points of the plain chassis type, and each fore riser ends in a bend and a pipe of the same type running into its vent. Those pieces look like fuel pipe but carry nothing and do not joint to the vents.
 
@@ -213,7 +213,7 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 
 | | MCRN Tachi (base) | Rocinante | Beratnas Gas Hauler |
 |---|---|---|---|
-| What differs | | Colours as an independent warship, Belter posters, less furniture | Colours, 24 external tanks on trusses, point defence cannons removed, own bay pose, Belter posters, less furniture |
+| What differs | | Colors as an independent warship, Belter posters, less furniture | Colors, 24 external tanks on trusses, point defense cannons removed, own bay pose, Belter posters, less furniture |
 | How it is picked | Own ship entry | Own ship entry | Own ship entry |
 | Live parts at spawn | 5,212 (v0.9.8, see Parts) | 5,106 (v0.9.8 census) | 5,868 (v0.9.7, measured before 20 objects were switched off) |
 | Parts counted by the joint pass | 5,210 (v0.9.8) | 5,104 as a normal ship, 5,163 as a ghost ship (v0.9.8) | 5,866 (v0.9.7, not re-measured) |
@@ -226,9 +226,9 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 | Wall posters at 30 spots | MCRN | Belter | Belter |
 | Crew bunks (berths) | 28 | 12 | 12 |
 | Medbay beds | 5 | 5 | 5 |
-| Galley tables | centre, long and 3 corner tables | centre and long table | centre and long table |
-| Deck carpets | red on the command and weapons decks, blue in the medbay and crew decks, green in the galley, grey on the airlock deck | same | same |
-| Floating corpse | one, in one of 6 places, as one of 7 factions, each with its own suit colours and visor | same | same |
+| Galley tables | center, long and 3 corner tables | center and long table | center and long table |
+| Deck carpets | red on the command and weapons decks, blue in the medbay and crew decks, green in the galley, gray on the airlock deck | same | same |
+| Floating corpse | one, in one of 6 places, as one of 7 factions, each with its own suit colors and visor | same | same |
 | As a ghost ship | 59 Protomolecule nodes, 251 growth patches | same | same |
 
 Base figures are from the build of 20 November, 21:52 (the release build). Gas figures are from the load of 20 November, 19:59, before the last interior changes of that evening (four flight deck seats replaced by server towers, a galley table and two chairs removed), which take about 60 parts off every variant.
@@ -237,7 +237,7 @@ Base figures are from the build of 20 November, 21:52 (the release build). Gas f
 
 - **Posters.** Thirty wall posters are MCRN posters in the MCRN Tachi (MCRN Colors, MCRN Logo, MCRN Corvette, Mars Needs You) and Belter posters in the other two (OPA, three Remember the Cant designs, Beltalowda, Tycho, Ceres Water). The poster objects are the same; only the picture differs.
 - **Bunks.** The six crew cabins on Decks 3 and 4 hold 14 two-tier bunks in the MCRN Tachi (28 berths) and one two-tier bunk each in the other two (6 bunks, 12 berths). The 5 medbay beds are in all three and are not counted as crew bunks.
-- **Galley.** The other two ships have no corner tables: three tables, six chairs and the three bottles on them are switched off. The centre table and the long table are in all three.
+- **Galley.** The other two ships have no corner tables: three tables, six chairs and the three bottles on them are switched off. The center table and the long table are in all three.
 
 Switched-off objects are still in the download, so the size is the same. These differences were checked in the editor, not yet in game, and the part counts above were measured before them.
 
@@ -257,7 +257,7 @@ The racks are held to the ship only by cut points: in the census every foot join
 
 The tank masses are calculated with the game's own formula (material density times the signed volume of the part's mesh) and reproduce the figures the game reported before the change. Each tank body has an inward-facing inner shell that subtracts volume, so the outside size is unchanged. The new masses have not yet been read back in game.
 
-**Gas variant bay pose.** The Gas variant is too wide to sit between the light jacks, so it spawns level, nose toward the Master Jack, raised above them: the ship's axis is 49.5 m above the bay's centre line. The engine bell and reactor housing are 5 m above the tallest light jack. One tank hangs below that level and clears the nearest light jack by 7.5 m. No mod is needed to make room for it.
+**Gas variant bay pose.** The Gas variant is too wide to sit between the light jacks, so it spawns level, nose toward the Master Jack, raised above them: the ship's axis is 49.5 m above the bay's center line. The engine bell and reactor housing are 5 m above the tallest light jack. One tank hangs below that level and clears the nearest light jack by 7.5 m. No mod is needed to make room for it.
 
 Earlier versions of this document listed the engine nozzle, the reactor and a coolant pipe network as separate bodies. That was a counting error in the analysis, not a fault in the ship; the census now records exact joints.
 
@@ -275,7 +275,7 @@ Earlier versions of this document listed the engine nozzle, the reactor and a co
 | Decks | 12 (Deck 0 to Deck 9, Command, Flight) |
 | Hull envelope volume (estimate) | about 68,000 m³ |
 
-The volume is an upper estimate: the outline of the hull parts was taken every metre along the ship and the slices added up. It counts the space inside the hull's outline, not the solid material, and it excludes the gun mounts and thrusters.
+The volume is an upper estimate: the outline of the hull parts was taken every meter along the ship and the slices added up. It counts the space inside the hull's outline, not the solid material, and it excludes the gun mounts and thrusters.
 
 ### Mass
 
@@ -283,7 +283,7 @@ Estimated total: **at least 268 t**.
 
 The game works out a part's mass from its material density and the volume of its mesh. This figure adds that up for every custom mesh, and uses the mass the game reported for each stock part. It covers 2,592 of 3,461 objects (75 %). The rest could not be resolved, and stock assemblies made of several pieces are counted by their main piece only, so the true figure is higher.
 
-**Gas variant mass.** About 394 t, an estimate built on the base figure: 268 t, less up to 38 t for the point defence cannon parts the variant removes, plus 164 t for the 24 tank bodies (16 at 7,500 kg and 8 at 5,500 kg). The trusses, tank end caps and cradle cut points are not included, so the true figure is somewhat higher.
+**Gas variant mass.** About 394 t, an estimate built on the base figure: 268 t, less up to 38 t for the point defense cannon parts the variant removes, plus 164 t for the 24 tank bodies (16 at 7,500 kg and 8 at 5,500 kg). The trusses, tank end caps and cradle cut points are not included, so the true figure is somewhat higher.
 
 ### Cut points and joint groups
 
@@ -311,11 +311,11 @@ Sizes and masses were measured on an earlier 18 November build and not re-measur
 
 ## 3. The ship in *The Expanse*
 
-### What is modelled on this ship
+### What is modeled on this ship
 
 | | |
 |---|---|
-| Point defence cannons | 6: fore port, fore starboard, mid port, mid starboard, aft dorsal, aft ventral |
+| Point defense cannons | 6: fore port, fore starboard, mid port, mid starboard, aft dorsal, aft ventral |
 | Torpedo tubes | 2 (dorsal and ventral) |
 | Torpedoes aboard | 12: five per tube plus two on ceiling racks |
 | Crew bunks | 28 berths in 14 two-tier bunks (12 in 6 bunks in the Rocinante and the Gas Hauler) |
@@ -340,7 +340,7 @@ Sourcing note: the Expanse Wiki could not be read directly when this was compile
 |---|---|
 | Class | Corvette-class light frigate |
 | Operator | Martian Congressional Republic Navy (MCRN) |
-| Roles | Fast attack, missile defence, law enforcement, reconnaissance, border patrol |
+| Roles | Fast attack, missile defense, law enforcement, reconnaissance, border patrol |
 | Carried by | Donnager-class battleships; the *Tachi* sat in the hangar of the MCRN *Donnager* |
 | Standing | Second-smallest MCRN warship |
 | Length | 46 m (unconfirmed) |
@@ -358,7 +358,7 @@ Sourcing note: the Expanse Wiki could not be read directly when this was compile
 
 | | |
 |---|---|
-| Point defence | 6 × Nariman Dynamics 40 mm point defence cannons |
+| Point defense | 6 × Nariman Dynamics 40 mm point defense cannons |
 | Torpedoes | 2 launchers, 10 torpedoes each (20 total) |
 | Drones | 4 reconnaissance drones |
 
