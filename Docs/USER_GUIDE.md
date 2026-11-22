@@ -1254,6 +1254,48 @@ An example of a fully set-up custom mesh material can be found at `Assets/_Custo
 
 **After any material change:** Run `Shipbuilder / Actions / Rebuild Addressables` to ensure the updated material is included in the next build.
 
+### Making part of a mesh glow
+
+Use this to give some faces of a custom part a steady glow of their own, such as coils, indicator strips or end caps, while the rest of the part keeps its normal texture. The glowing faces get their own material slot, and that slot gets a flat-colour material with an emissive colour.
+
+**1. Give the glowing faces their own material slot (Blender)**
+
+1. Select the part and enter Edit Mode.
+2. Select the faces that should glow. For a separate piece of the mesh, hover over it and press `L`.
+3. In the Material tab, press `+` to add a slot, create or pick a material in it (the name is only a label), and press **Assign**.
+4. Export with [Export to Unity FBX](#11-export-to-unity-fbx) as usual.
+
+In Unity the part's `MeshRenderer` now lists one more material. The part is still one part with one collider; nothing about its joints or mass changes.
+
+**2. Make the glow material (Unity)**
+
+1. Pick a flat-colour material your ship already uses with the `HDRP/Lit` shader, select it in the Project panel and press `Ctrl+D`. Rename the copy, for example `<ShipName>_Glow_Blue`.
+2. In the Inspector, under **Surface Inputs**, clear the Base Map, Mask Map and Normal Map slots, and set the base colour to a dark shade of the glow colour.
+3. Under **Emission Inputs**, clear the Emissive Map slot, leave **Use Emission Intensity** off, and set the **Emissive Color** (it is an HDR colour, so the numbers can go above 1).
+
+The brightness is the size of the emissive colour's numbers:
+
+| Look | Example Emissive Color (R, G, B) |
+|---|---|
+| Faint blue | 0.08, 0.32, 0.9 |
+| Clear blue | 0.2, 1.1, 2.0 |
+| Bright blue | 0.4, 1.6, 6.0 |
+
+Keep the same proportions between R, G and B to change brightness without changing the hue.
+
+**3. Assign it**
+
+1. Select the part in the scene.
+2. On its `MeshRenderer`, drag the glow material onto the new slot in **Materials**.
+3. Save the scene, then run `Shipbuilder / Actions / Rebuild Addressables` before the next build.
+
+**Notes**
+
+- The glow is the surface only. It does not light the surfaces around it; add a light for that.
+- Use one glow material for every part that should glow the same way, so a later change of colour or brightness is a single edit.
+- A part whose blueprint makes it a powered machine part has its emissive colour set by the game every frame, and the numbers in the material are ignored. See [Power-state-dependent glow](#power-state-dependent-glow-different-from-the-above--machinepartemissivesystem) in Caveats.
+- If the whole part glows white or orange after this, the cause is a different one. See [Persistent glow after SP/BP copy](#persistent-glow-after-spbp-component-copy) in Caveats.
+
 ---
 
 ## 7. SP_Mat & BP_Mat GUID Reference
@@ -1534,7 +1576,7 @@ The mount is spawned at the base ship's pose, so the second HardPoint's local tr
 - Pose it clear of the bay's fixtures. A ship that is too wide to sit between the light jacks can be posed level above them; nothing in the bay is in the way higher up. Check the pose against the recorded bay geometry before a test load.
 - Ship the variant's entry with `Weight` 0 and let a mod that makes room for it give it a weight. Players without the mod then never get it.
 
-**Mass of scaled-up parts.** The game sets a part's mass to its material's density times the volume of its collider mesh, and it adds that volume up as signed triangle volumes. Scaling a part by a factor multiplies its mass by the factor cubed, so a stock part scaled 2.35 times weighs 13 times as much and can be too heavy to tether. To cut the mass without changing the size, add an inward-facing copy of the mesh, scaled down about its centre of volume, to the same mesh: with a copy scaled by `s` the mass becomes `1 - s^3` of what it was (0.90 leaves 26 %). The copy is only visible from inside the part.
+**Mass of scaled-up parts.** The game sets a part's mass to its material's density times the volume of its collider mesh, and it adds that volume up as signed triangle volumes. Scaling a part by a factor multiplies its mass by the factor cubed, so a stock part scaled 2.35 times weighs 13 times as much and can be too heavy to tether. To cut the mass without changing the size, add an inward-facing copy of the mesh, scaled down about its center of volume, to the same mesh: with a copy scaled by `s` the mass becomes `1 - s^3` of what it was (0.90 leaves 26 %). The copy is only visible from inside the part.
 
 **Interior differences between variants.** A variant can also differ inside, without any new objects:
 - **Leave something out.** Open the variant prefab, select the object and untick it in the Inspector. The variant stores that as an override; the base ship keeps the object. Switch off whatever sits on or hangs from it too (bottles on a table, bedding on a bunk), or it floats. Switched-off objects are not spawned, but they are still in the download.
