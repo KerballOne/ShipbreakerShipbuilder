@@ -168,6 +168,7 @@ public static class ClaudeBridge
                 case "signmat":   result = SignMat(cmd); break;
                 case "placeprefab": result = PlacePrefab(cmd); break;
                 case "hardpoint": result = HardPointOp(cmd); break;
+                case "hardpointasset": result = HardPointAssetOp(cmd); break;
                 case "console":   result = "drained"; break;   // errors ride along as consoleErrors
                 case "validate":  result = Validate(); break;
                 case "save":      result = UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); break;
@@ -481,6 +482,19 @@ public static class ClaudeBridge
         Ledger(go);
         Dirty(go);
         return new JObject { ["path"] = PathOf(go), ["pos"] = V(go.transform.position) };
+    }
+
+    // { op:"hardpointasset", folder:"Assets/...", name, refs:[{guid, weight}], empty:0, property:"<game property GUID>" }
+    // Same as Assets / Create / Shipbreaker / Create hardpoint asset: writes the module list (entries, container, list)
+    // into `folder`; with `property` the entries are tied to that ship property. Returns the list's GUID.
+    static JToken HardPointAssetOp(JObject cmd)
+    {
+        var folder = ((string)cmd["folder"]).TrimEnd('/');
+        AddressableBaker.EnsureFolder(folder);
+        var refs = ((JArray)cmd["refs"]).Select(r => new Create_Hardpoint.HardpointAssetReference
+            { assetRef = (string)r["guid"], weight = (float?)r["weight"] ?? 1f }).ToArray();
+        var guid = Create_Hardpoint.CreateHardpointAsset(folder, (string)cmd["name"], refs, (float?)cmd["empty"] ?? 0f, (string)cmd["property"]);
+        return new JObject { ["list"] = guid, ["path"] = AssetDatabase.GUIDToAssetPath(guid) };
     }
 
     static JToken Group(JObject cmd)

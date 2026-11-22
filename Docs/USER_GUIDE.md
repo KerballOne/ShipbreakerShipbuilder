@@ -54,6 +54,7 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
 11. [Career Job Board (ModdedShipLoader)](#11-career-job-board-moddedshiploader)
 12. [Ship Variants (Liveries and Variant-Only Parts)](#12-ship-variants-liveries-and-variant-only-parts)
 13. [Pipes, Cut Points and Convex Colliders](#13-pipes-cut-points-and-convex-colliders)
+14. [Hardpoints and Module Lists](#14-hardpoints-and-module-lists)
 
 ---
 
@@ -939,7 +940,7 @@ Creates a complete room prefab setup: a `RoomContainerDefinition` + `RoomSubVolu
 
 #### `Assets / Create / Shipbreaker / Create hardpoint asset`
 
-Creates a hardpoint asset with weighted `ModuleEntry` asset references and an optional empty-spawn weight. Used for ship spawn points and module attachment points.
+Creates the module list a `HardPoint` component points at: one weighted entry per prefab, an optional "spawn nothing" entry, the container and the list, and adds the list to the default Addressables group. With a game property GUID in **Only on ships with this property**, the entries spawn only on ships that have that property (for example ghost ships). Used for ship spawn points and for anything that should appear only sometimes or only on some ships. Step-by-step use is in [Section 14](#14-hardpoints-and-module-lists).
 
 #### `Assets / Create / Shipbreaker / Create level asset`
 
@@ -1492,6 +1493,17 @@ A ship can spawn as one of several versions, picked at random by weight each tim
 | `Spawn_ModuleEntryDefinition_<Variant>.asset` | `Spawn/` | A second entry in `Spawn_ModuleEntryContainer`, with `Module Def Ref` set to the variant prefab |
 | Addressables entry | the ship's Addressables group | The variant prefab must be in the group, or the entry cannot load it |
 
+**Making a variant by hand.**
+
+1. In the Project window, right-click `<ShipName>.prefab` and choose `Create / Prefab Variant`. Name it `<ShipName>_<Variant>`.
+2. Open the variant and make it differ: assign other materials, add parts, or untick objects it should not have. Leave everything shared alone; edit that in the base ship.
+3. Add the variant prefab to the ship's Addressables group.
+4. In `Spawn/`, duplicate `Spawn_ModuleEntryDefinition.asset`, name the copy `Spawn_ModuleEntryDefinition_<Variant>`, and set its `Module Def Ref` to the variant prefab.
+5. Select `Spawn_ModuleEntryContainer.asset` and add the new entry to its `Data` list.
+6. Set the `Weight` of each entry (see below), run the Ship Validator, build, and load the ship several times.
+
+A variant inherits everything in the base ship, including its hardpoints ([Section 14](#14-hardpoints-and-module-lists)), so content spawned from hardpoints appears in every variant without further work. The spawn list itself is an ordinary module list: the ship is the prefab its entries point at.
+
 **Setting the chance.** Each `Spawn_ModuleEntryDefinition*.asset` has a `Weight`. The chance of a version is its weight divided by the sum of all weights (1 and 1 = 50 % each; 3 and 1 = 75 % / 25 %). Weight 0 means never; set the other entry to 0 to force one version while testing. The roll is made from the ship's seed.
 
 **Variant-only parts.** Open the variant prefab (double-click it, or drag it into a scene) and add the parts there, under the same group as their neighbours so they joint like any other part. Parts added in the variant never appear on the base ship. Edit everything shared in the base ship as before.
@@ -1571,3 +1583,174 @@ Some hull parts (thermal vents, filters) are built from materials that accept fu
 3. For the pieces that must sit against the part, use baked copies whose type does not joint with it: bake the game's cut point, bend or straight pipe to a local prefab and give it the plain chassis cut point StructurePartAsset and the cut point blueprint. They look like pipe, carry nothing, and still joint to pipe and junction boxes.
 4. Put the cut point where it was, then the baked bend or pipe after it, so the line still releases at the cut point.
 
+---
+
+## 14. Hardpoints and Module Lists
+
+A hardpoint is a spawn point. When the game builds a ship it visits every hardpoint in it, rolls once on that hardpoint's list, and spawns the prefab the roll picked at the hardpoint's position and rotation. The roll comes from the ship's seed, so the same seed gives the same result.
+
+Use a hardpoint when something should be there only sometimes, only on some kinds of ship, in one of several places, or as one of several versions. Use an ordinary placed part when it should always be there.
+
+Everything in this section can be done by hand in the Unity editor with the menu items named below.
+
+### 14.1 The pieces
+
+| Piece | What it is | Where it lives |
+|---|---|---|
+| `HardPoint` component | The spawn point. Its GameObject's position and rotation become the spawned prefab's position and rotation | On an empty GameObject inside the ship prefab, or inside any prefab the ship spawns |
+| `ModuleListAsset` | The list a hardpoint rolls on. The hardpoint's `Asset Ref` points at it | An asset in the ship's Addressables group |
+| `ModuleEntryContainer` | Holds the list's entries | An asset next to the list |
+| `ModuleEntryDefinition` | One entry: "spawn this prefab", with a `Weight` and optional `Properties` | An asset next to the list |
+| `ModuleEntryEmpty` | One entry: "spawn nothing", with a `Weight` | An asset next to the list |
+| The prefab to spawn | Anything: one part, a group of parts, another hardpoint. Its root must carry a `ModuleDefinition` component | In the ship's Addressables group |
+| Property reference (optional) | A stand-in for one of the game's ship properties, used to tie entries to a kind of ship | An asset next to the list |
+
+A spawned prefab becomes a child module of the ship. Its parts are real parts: they joint, scan, salvage and count toward the ship's part total and value like placed parts.
+
+### 14.2 How the game picks an entry
+
+1. **Filter by properties.** An entry with `Properties` is offered only to a ship that has every one of them. An entry with no properties is offered to every ship.
+2. **Priority.** If the ship has a property with priority above 0, and at least one offered entry carries it, entries that do not carry it are dropped. The property references this toolkit creates have priority 1.
+3. **Weights.** One of the remaining entries is picked at random, with chance equal to its `Weight` divided by the sum of the remaining weights.
+
+Examples for one hardpoint:
+
+| Entries | Result |
+|---|---|
+| Prefab A, weight 1 | Always A |
+| Prefab A, weight 1; Empty, weight 3 | A on one ship in four |
+| Prefab A, weight 2; Prefab B, weight 1 | A on two ships in three, B on the rest |
+| Prefab A tied to property P; Empty | A on every ship that has P, nothing on ships without P |
+| Prefab A and Prefab B, both tied to P, weight 1 each; Empty | A or B, half each, on ships with P; nothing on the rest |
+
+### 14.3 Making a hardpoint by hand
+
+1. **Make the prefab to spawn.**
+   - Build it like any other part or group of parts (a baked game part, a custom part from the wizard, or several under one root).
+   - Select its root, **Add Component**, and add `Module Definition`. Without it the game refuses to spawn the prefab.
+   - Add the prefab to your ship's Addressables group (Addressables Groups window, drag it in).
+   - Decide which way it faces. A wall-mounted prefab is easiest to place when one fixed axis points out of the wall, for example the root's +Z, and the mounting face sits at the root's origin.
+2. **Copy the prefab's GUID.** Right-click it in the Project window and choose `Assets / Copy GUID`.
+3. **Create the list.**
+   - Select the folder the assets should go in.
+   - Choose `Assets / Create / Shipbreaker / Create hardpoint asset`.
+   - **Hardpoint name:** the prefix for the new files.
+   - **Asset references:** set the size to the number of prefabs, paste one GUID per row, and give each a weight.
+   - **Spawn empty weight:** above 0 adds a "spawn nothing" entry with that weight.
+   - **Only on ships with this property:** leave empty for now. See [14.4](#144-content-for-one-kind-of-ship-only).
+   - Press **Create**. The window writes one `<Name>_ModuleEntryDefinition` asset per prefab (numbered when there are several), the Empty entry if asked for, the container and `<Name>_ModuleListAsset`.
+4. **Move the list into your ship's Addressables group.** The window puts it in the default group. Open the Addressables Groups window and drag `<Name>_ModuleListAsset` into the group your ship uses.
+5. **Place the hardpoint.**
+   - In the ship, create an empty GameObject where the prefab should appear.
+   - **Add Component** and add `Hard Point`.
+   - Drag `<Name>_ModuleListAsset` onto its **Asset Ref** field.
+   - Leave the other fields at their defaults.
+   - Move and rotate the GameObject. The spawned prefab's root takes exactly this pose.
+6. **Save, run the Ship Validator, build, and load the ship.** Load it more than once if the list has more than one outcome.
+
+To change the odds later, select an entry asset and edit its `Weight` in the Inspector. To add an outcome later, duplicate an entry asset, change its `Module Def Ref`, and add it to the `Data` list of the container asset.
+
+One list can serve any number of hardpoints. Each hardpoint rolls on its own.
+
+### 14.4 Content for one kind of ship only
+
+Some game features mark the ship with a property. A ghost ship, for example, carries the game's ghost ship property. An entry tied to that property spawns only on ghost ships.
+
+1. Find the property's GUID. Search `known_assets.json` in the project root for the property's name, for example `GhostShip_ModulePropertyAsset`, and copy the 32-character GUID at the start of that line.
+2. Create the list as in [14.3](#143-making-a-hardpoint-by-hand), and paste that GUID into **Only on ships with this property**.
+3. The window then does three things:
+   - It creates a property reference asset, `ShipProperty_<first 8 characters>_Reference`, or reuses the one the project already has for that GUID.
+   - It puts that reference in the `Properties` list of every prefab entry.
+   - It adds an Empty entry, so ships without the property have something to pick and spawn nothing.
+4. Place hardpoints as usual. They cost nothing on ships without the property.
+
+**Why a reference asset.** The game compares properties by asset GUID, and the game's own property asset is not in your project. The reference asset is a local asset whose own GUID is the game's GUID, which is what makes the comparison succeed. Do not type a GUID into a property asset's `Asset GUID` field by hand: Unity overwrites that field with the asset's own GUID, and the entries then silently stop matching.
+
+**Always test both ways.** Load the ship once with the property and once without. A broken tie shows up as "nothing spawns on either".
+
+The ship must be able to get the property in the first place. For the ghost ship property that means ghost ships are available for your ship, through its job board setup or through a mod that turns ghost mode on.
+
+### 14.5 Example: AI nodes
+
+A ghost ship is haunted while it has AI nodes. Each node is a part carrying the game's AI node blueprint. The haunting weakens as nodes are destroyed and stops when none are left, so the number of nodes sets how long the job is.
+
+To add nodes, with your own look if you like:
+
+1. Bake the game's AI node (`PRF_Props_AI_Node_Regular`, or one of the two large versions) to a local prefab with `Shipbuilder / Bake Addressable In Place`. Keep its structure part and blueprint.
+2. Optional: swap the mesh and material for your own. Keep the mounting face flat, at the root's origin, with the node growing along one axis.
+3. Add `Module Definition` to the root and put the prefab in the ship's Addressables group.
+4. Create the list with the ghost ship property GUID ([14.4](#144-content-for-one-kind-of-ship-only)). Several node prefabs in one list give a random mix.
+5. Place hardpoints on flat surfaces with clear space in front, rotated so the node's growing axis points out of the surface.
+
+Things specific to nodes:
+
+- **Glow.** The node's blueprint makes it a powered machine part, and the game then sets the material's emissive colour itself, every frame, while the node has power. Emissive numbers in the material are ignored. Brightness is set by how bright the emissive map is: paint the map darker to dim the node.
+- **Light.** The stock node carries a spot light that shines away from the wall. Change its type to Point for an even glow, and expect to lower its intensity a great deal: it sits a few centimetres from the mesh.
+- **Name.** The scanner name comes from the structure part's `Object Info Asset Override`. Set it with `Shipbuilder / Set Display Name on Selected…`.
+- **Clearance.** Check each spot against the deepest and widest node prefab in the list, not the one the editor shows.
+
+### 14.6 One of several places, or two independent rolls
+
+A hardpoint can spawn a prefab that itself contains a hardpoint. The game follows these to any depth. Two uses:
+
+**Exactly one object, in one of several places.** Placing a hardpoint at each place would roll each one separately and could give none or several. Instead:
+
+1. Make the object a prefab with `Module Definition`, as in [14.3](#143-making-a-hardpoint-by-hand).
+2. For each place, make a small "mount" prefab: an empty root with `Module Definition`, and one child GameObject with a `Hard Point`. Position that child, inside the mount prefab, at the place in ship coordinates. Point its `Asset Ref` at a list that spawns the object.
+3. Make a second list whose entries are the mount prefabs, one per place.
+4. Put a single hardpoint at the ship's root, with no offset or rotation, pointing at that second list.
+
+The outer roll picks the place. Exactly one mount spawns, so exactly one object appears.
+
+**Two things that vary independently.** In the same setup, give the inner list several entries, for example the same object with different names or colours. The outer roll picks the place and the inner roll picks the version, so every combination can occur.
+
+A prefab can also carry a hardpoint for an optional extra, for example something that should appear on the object only on one kind of ship: put a hardpoint with a property-tied list inside the object's prefab.
+
+### 14.7 Decals through hardpoints
+
+The game can paint a texture onto the parts around a point when the ship spawns. It is the same system the game uses for hull markings and damage. The paint stays on each part after cutting. Because it is spawned from a hardpoint, it can be random or tied to one kind of ship like anything else.
+
+**The prefab.**
+
+| Object | Components | Settings |
+|---|---|---|
+| Root | `Module Definition` | |
+| Child | `Baked Decal Projector` and `Entity Blueprint Component` | `Decal Texture`: your texture. `Size`: the box, in metres. The blueprint component stays empty with Auto Initialize ticked |
+
+- The projector paints along its own downward axis (local -Y) onto every part its box touches. Rotate the child so that its +Y points out of the surface the hardpoint will sit on, and move it a little way out along that axis.
+- `Size` X and Z are the width and height of the painted area. Y is the depth of the box; make it deep enough to reach the surface.
+- The texture's alpha is the coverage: transparent where the surface should show. Set the texture's wrap mode to Clamp and keep its outer edge fully transparent, because parts larger than the box sample the edge.
+- Do not put a projector directly in the ship prefab. Its blueprint component fails the Ship Validator. Always spawn it from a hardpoint.
+
+**Which parts take it.**
+
+- Only materials with the shader keyword `_BAKED_DECALS_ON` are painted. Many stock materials have it. To see a material's keywords, switch the Inspector to Debug mode and read `Shader Keywords`.
+- You cannot edit a stock game material. You can edit the materials of your own and baked parts.
+- When adding the keyword to your own material, the whole keyword set must be one the game's shader was built with, or the decal is baked but never drawn. Copy the complete keyword set from a stock material that shows decals and has the same maps as yours. `_BAKED_DECALS_ON _MASKMAP _NORMALMAP _NORMALMAP_TANGENT_SPACE` is one such set.
+- That set turns the material's normal map on. If the surface relief becomes too strong, lower the material's `Normal Scale`.
+- Check which other parts share a material before changing it. A hull material is sometimes also used on interior parts.
+
+**Limits.**
+
+- A part keeps at most two decals. A third projector touching the same part is ignored for that part. Large single parts therefore need larger decals, not more of them.
+- A part is skipped when its pivot lies in front of the projector along the projection direction. Keep the projector in front of the parts it should paint.
+- A decal colours the surface only. It cannot glow.
+- Each part that receives a decal gets its own copy of its mesh and material at load, so very many painted parts cost some load time and frame rate.
+- One decal is one texture stretched over the box. A 2 m box from a 1024 pixel texture is sharp up close; a 10 m box from the same texture is soft.
+
+### 14.8 Checking and troubleshooting
+
+**In the editor.** `Shipbuilder / Actions / Force View Refresh` draws a preview at each hardpoint. It always draws the first entry of the list, ignores properties and weights, does not follow a hardpoint inside a spawned prefab, and does not draw decals.
+
+**In the game.** The ship's part count rises by the parts spawned. Run the Ship Validator before each build, and keep an eye on the part budget ([Caveats & Gotchas](#8-caveats--gotchas)) when hardpoints add many parts.
+
+| What you see | Likely cause |
+|---|---|
+| Nothing spawns at any hardpoint using the list | The list or the prefab is not in the ship's Addressables group; or the prefab's root has no `Module Definition` |
+| Nothing spawns on the kind of ship it is tied to, and nothing on other ships either | The property reference no longer carries the game's GUID. Delete it and create the list again with the window |
+| It spawns on every ship although it is tied to a property | The entry's `Properties` list is empty, or the list has an untied prefab entry |
+| It spawns only sometimes | The list has an Empty entry or other entries sharing the weight. That may be what you asked for |
+| Several appear where one was wanted | Several hardpoints each rolled. Use the nested setup in [14.6](#146-one-of-several-places-or-two-independent-rolls) |
+| It appears in the wrong pose | The hardpoint's rotation is the prefab root's rotation. Check which axis of the prefab points out of the surface |
+| A decal is missing on one part but present on its neighbours | That part's material lacks the keyword set, or the part already has two decals |
+| A decal is missing everywhere | The projector is not spawned from a hardpoint, or its child lacks the blueprint component, or it points away from the surface |
