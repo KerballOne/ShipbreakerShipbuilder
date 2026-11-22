@@ -159,6 +159,30 @@ public static class ClaudeBridge
                     result = "reloaded " + sp;
                     break;
                 }
+                // { op:"openprefab", asset:"Assets/.../Tachi_Rocinante.prefab" } opens a prefab (e.g. a variant) in prefab mode: every
+                // other op then works on it, with its root name as the path root. "saveprefab" writes the stage to its asset,
+                // "closeprefab" saves and returns to the main scene.
+                case "openprefab":
+                {
+                    var pa = AssetDatabase.LoadAssetAtPath<GameObject>((string)cmd["asset"]);
+                    if (pa == null) throw new Exception("Prefab not found: " + cmd["asset"]);
+                    AssetDatabase.OpenAsset(pa);
+                    var st = PrefabStageUtility.GetCurrentPrefabStage();
+                    result = st != null ? st.assetPath + " root=" + st.prefabContentsRoot.name : "no stage";
+                    break;
+                }
+                case "saveprefab":
+                case "closeprefab":
+                {
+                    var st = PrefabStageUtility.GetCurrentPrefabStage();
+                    if (st == null) { result = "no prefab stage"; break; }
+                    var ap = st.assetPath;
+                    PrefabUtility.SaveAsPrefabAsset(st.prefabContentsRoot, ap, out bool okSave);
+                    st.ClearDirtiness();
+                    if (op == "closeprefab") UnityEditor.SceneManagement.StageUtility.GoToMainStage();
+                    result = (okSave ? "saved " : "SAVE FAILED ") + ap;
+                    break;
+                }
                 case "deletemany": result = DeleteMany(cmd); break;
                 case "inspect":   result = Inspect(cmd); break;
                 case "sodump":    result = SoDump(cmd); break;
