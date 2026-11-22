@@ -1,30 +1,11 @@
 Combined changelog for the Tachi / Rocinante page on NexusMods.
 
-The page carries three files, each with its own version numbers: the ships, ModdedShipLoader and TheExpanse.
+The page carries two files, each with its own version numbers: the ships and ModdedShipLoader.
 NexusMods keeps one changelog per page and shows them all in one dropdown, so every line starts with the
 name of the file it belongs to. One block per version: the first line is the version to enter, the lines
 under it are the changelog lines.
 
-
-=== TheExpanse ===
-
-0.4.0
-TheExpanse: new StraightenShip setting, on by default. A custom ship posed at an angle is turned square to the bay before it is centred.
-TheExpanse: the ship's length comes from the tightest box around it, and its roll from its mirror symmetry where width and height are too alike.
-TheExpanse: new StraightenRatio setting, for how clear a ship's shape must be before it is trusted.
-TheExpanse: saved ships load as they were saved: as posed, centred, or straightened and centred.
-
-0.3.2
-TheExpanse: CenterShip is on by default, for custom ships only. The game's own ships and their jacks are never moved.
-
-0.3.1
-TheExpanse: better choice of placement when restoring a saved ship.
-TheExpanse: the Master Jack's scanner outline follows it to its new position.
-
-0.3.0
-TheExpanse: new CenterShip setting. Places the ship in the middle of the bay and moves the jacks clear of it.
-TheExpanse: the settings file is re-read on every ship load.
-TheExpanse: removed variant unlock, size thresholds and mass override.
+TheExpanse has its own page; its changelog is in the ShipbreakerMods repository, TheExpanse/NexusMods_Changelog.txt.
 
 
 === ModdedShipLoader (our fork of PieMods v1.2.0) ===
