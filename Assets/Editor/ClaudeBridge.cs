@@ -194,6 +194,7 @@ public static class ClaudeBridge
                 case "placeprefab": result = PlacePrefab(cmd); break;
                 case "hardpoint": result = HardPointOp(cmd); break;
                 case "hardpointasset": result = HardPointAssetOp(cmd); break;
+                case "addrmove":  result = AddrMove(cmd); break;
                 case "console":   result = "drained"; break;   // errors ride along as consoleErrors
                 case "validate":  result = Validate(); break;
                 case "save":      result = UnityEditor.SceneManagement.EditorSceneManager.SaveOpenScenes(); break;
@@ -520,6 +521,21 @@ public static class ClaudeBridge
             { assetRef = (string)r["guid"], weight = (float?)r["weight"] ?? 1f }).ToArray();
         var guid = Create_Hardpoint.CreateHardpointAsset(folder, (string)cmd["name"], refs, (float?)cmd["empty"] ?? 0f, (string)cmd["property"]);
         return new JObject { ["list"] = guid, ["path"] = AssetDatabase.GUIDToAssetPath(guid) };
+    }
+
+    // { op:"addrmove", guid, group:"Tachi" } — moves (or adds) an asset's Addressables entry into that group, keeping its
+    // address as the asset path. hardpointasset puts new lists in the DEFAULT group (Common), which a ship build leaves out.
+    static JToken AddrMove(JObject cmd)
+    {
+        var settings = UnityEditor.AddressableAssets.AddressableAssetSettingsDefaultObject.Settings;
+        var group = settings.FindGroup((string)cmd["group"]);
+        if (group == null) throw new Exception("No Addressables group " + cmd["group"]);
+        var guid = (string)cmd["guid"];
+        var entry = settings.CreateOrMoveEntry(guid, group);
+        entry.address = AssetDatabase.GUIDToAssetPath(guid);
+        EditorUtility.SetDirty(settings); EditorUtility.SetDirty(group);
+        AssetDatabase.SaveAssets();
+        return new JObject { ["group"] = entry.parentGroup.Name, ["address"] = entry.address };
     }
 
     static JToken Group(JObject cmd)
