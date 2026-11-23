@@ -12,7 +12,7 @@ def _log(msg):
 bl_info = {
     "name": "Fix Inner Normals",
     "author": "KerballOne",
-    "version": (1, 7),
+    "version": (1, 8),
     "blender": (4, 0, 0),
     "category": "Mesh",
     "description": "Fix inner shell normals using raycasts from the ring centre",
@@ -289,9 +289,78 @@ class MESH_OT_check_mesh(bpy.types.Operator):
         return {'FINISHED'}
 
 
+_SHELL_GROUP = "SB_Shell"      # vertices of the shell made by Solidify (inner wall); the rim hangs between them and the skin
+
+
+def _strip_shell(obj):
+    """Delete the shell a previous Solidify run of this tool made (with its rim). Returns the number of vertices removed."""
+    vg = obj.vertex_groups.get(_SHELL_GROUP)
+    if vg is None:
+        return 0
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    layer = bm.verts.layers.deform.active
+    if layer is None:
+        bm.free()
+        return 0
+    gi = vg.index
+    doomed = [v for v in bm.verts if v[layer].get(gi, 0.0) > 0.0]
+    n = len(doomed)
+    if n:
+        bmesh.ops.delete(bm, geom=doomed, context='VERTS')
+        bm.to_mesh(obj.data)
+        obj.data.update()
+    bm.free()
+    return n
+
+
+def _already_solid(obj):
+    """'' if the mesh is a single skin; otherwise the reason it looks solid / layered already."""
+    import random
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    if not bm.faces:
+        bm.free()
+        return "it has no faces"
+    tris = [[v.co.copy() for v in f.verts] for f in bm.faces]
+    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.0005)
+    open_edges = sum(1 for e in bm.edges if e.is_boundary)
+    bm.free()
+    if open_edges == 0:
+        return "it is a closed mesh already (no open edges)"
+    vs = [v for t in tris for v in t]
+    bvh = BVHTree.FromPolygons(vs, [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(len(tris))], all_triangles=True)
+    sc = max(1e-6, sum(abs(x) for x in obj.matrix_world.to_scale()) / 3.0)
+    nr, ar = [], []
+    for a, b, c in tris:
+        n = (b - a).cross(c - a)
+        l = n.length
+        nr.append(n / l if l > 1e-12 else Vector((0, 0, 1)))
+        ar.append(l / 2)
+    rng = random.Random(5)
+    idx = rng.choices(range(len(tris)), weights=ar, k=1500)
+    hit = 0
+    for i in idx:
+        a, b, c = tris[i]
+        r1 = rng.random() ** 0.5
+        r2 = rng.random()
+        q = a * (1 - r1) + b * (r1 * (1 - r2)) + c * (r1 * r2)
+        loc, hn, hi, d = bvh.ray_cast(q + nr[i] * (2e-4 / sc), nr[i], 0.05 / sc)
+        if loc is not None and hn.dot(nr[i]) > 0.95:
+            hit += 1
+    share = hit / len(idx)
+    if share > 0.15:
+        return "%.0f%% of its surface has a copy of itself within 5 cm in front (stacked layers)" % (share * 100)
+    return ""
+
+
 class MESH_OT_solidify_meshes(bpy.types.Operator):
     bl_idname  = "mesh.solidify_meshes"
     bl_label   = "Solidify Meshes"
+    bl_description = ("Give the selected single-skin meshes wall thickness, growing inward. Running it again replaces "
+                      "the wall it made before instead of adding another one")
     bl_options = {'UNDO'}
 
     thickness: bpy.props.FloatProperty(
@@ -309,9 +378,20 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
         description=(
             "Keep wall thickness uniform around corners by extending miters "
             "further. More prone to self-intersecting geometry at sharp "
-            "concave corners/notches — turn off for parts with tight details"
+            "concave corners/notches. If it goes wrong the mesh is put back "
+            "and nothing is changed"
         ),
-        default=True,
+        default=False,
+    )
+
+    force: bpy.props.BoolProperty(
+        name="Solidify Even If Already Solid",
+        description=(
+            "Normally a mesh that is already closed, or already made of stacked "
+            "layers by something other than this tool, is skipped: solidifying "
+            "it would add another layer inside. Tick to do it anyway"
+        ),
+        default=False,
     )
 
     @classmethod
@@ -325,20 +405,77 @@ class MESH_OT_solidify_meshes(bpy.types.Operator):
     def draw(self, context):
         self.layout.prop(self, "thickness")
         self.layout.prop(self, "use_even_offset")
+        self.layout.prop(self, "force")
 
     def execute(self, context):
         meshes = [o for o in context.selected_objects if o.type == 'MESH']
         prev_active = context.view_layer.objects.active
+        done, redone, skipped, failed = [], [], [], []
         for obj in meshes:
+            if obj.data.users > 1:
+                obj.data = obj.data.copy()
+            backup = obj.data.copy()
+            stripped = _strip_shell(obj)
+            if not self.force:
+                why = _already_solid(obj)
+                if why:
+                    skipped.append("%s: %s" % (obj.name, why))
+                    bpy.data.meshes.remove(backup)
+                    continue
+            vg = obj.vertex_groups.get(_SHELL_GROUP) or obj.vertex_groups.new(name=_SHELL_GROUP)
+            lo0 = [min(v.co[k] for v in obj.data.vertices) for k in range(3)]
+            hi0 = [max(v.co[k] for v in obj.data.vertices) for k in range(3)]
             mod = obj.modifiers.new(name="Solidify", type='SOLIDIFY')
             mod.thickness = self.thickness
             mod.offset = -1.0  # grow inward so outer surface stays in place
             mod.use_even_offset = self.use_even_offset
             mod.use_quality_normals = True
+            mod.use_rim = True
+            mod.shell_vertex_group = vg.name
             context.view_layer.objects.active = obj
             bpy.ops.object.modifier_apply(modifier=mod.name)
+            lo1 = [min(v.co[k] for v in obj.data.vertices) for k in range(3)]
+            hi1 = [max(v.co[k] for v in obj.data.vertices) for k in range(3)]
+            sc = max(1e-6, min(abs(x) for x in obj.matrix_world.to_scale()))
+            grow = max(max(lo0[k] - lo1[k], hi1[k] - hi0[k]) for k in range(3))
+            if grow > 3.0 * self.thickness / sc + 1e-6:
+                old = obj.data
+                obj.data = backup
+                bpy.data.meshes.remove(old)
+                failed.append("%s: the shell shot %.2f m outside the part" % (obj.name, grow * sc))
+                continue
+            bpy.data.meshes.remove(backup)
+            obj["sb_solid_thickness"] = self.thickness
+            (redone if stripped else done).append(obj.name)
         context.view_layer.objects.active = prev_active or meshes[0]
-        self.report({'INFO'}, f"Solidified {len(meshes)} object(s) at {self.thickness:.4f}m thickness")
+        msg = "Solidified %d, replaced the wall on %d, skipped %d, failed %d (%.4f m)" % (len(done), len(redone), len(skipped), len(failed), self.thickness)
+        for line in skipped:
+            self.report({'WARNING'}, "Skipped " + line)
+        for line in failed:
+            self.report({'ERROR'}, "Put back " + line + ". Turn off Even Thickness and try again")
+        self.report({'INFO'}, msg)
+        return {'FINISHED'}
+
+
+class MESH_OT_unsolidify_meshes(bpy.types.Operator):
+    bl_idname  = "mesh.unsolidify_meshes"
+    bl_label   = "Remove Shell"
+    bl_description = "Remove the wall that Solidify (this tool) added, leaving the original single skin"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == 'OBJECT' and
+                any(o.type == 'MESH' and o.vertex_groups.get(_SHELL_GROUP) for o in context.selected_objects))
+
+    def execute(self, context):
+        n = 0
+        for obj in context.selected_objects:
+            if obj.type == 'MESH' and _strip_shell(obj):
+                n += 1
+                if "sb_solid_thickness" in obj:
+                    del obj["sb_solid_thickness"]
+        self.report({'INFO'}, "Removed the shell from %d object(s)" % n)
         return {'FINISHED'}
 
 
@@ -367,6 +504,8 @@ class VIEW3D_PT_fix_inner_normals(bpy.types.Panel):
     def draw(self, context):
         self.layout.operator(MESH_OT_solidify_meshes.bl_idname,
                              text="Solidify", icon='MOD_SOLIDIFY')
+        self.layout.operator(MESH_OT_unsolidify_meshes.bl_idname,
+                             text="Remove Shell", icon='X')
         self.layout.operator(MESH_OT_fix_inner_normals.bl_idname,
                              text="Fix Inner Normals", icon='NORMALS_FACE')
         self.layout.operator(MESH_OT_clear_debug_rays.bl_idname,
@@ -375,7 +514,7 @@ class VIEW3D_PT_fix_inner_normals(bpy.types.Panel):
 
 def register():
     _install_draw_handler()
-    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
+    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, MESH_OT_unsolidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:
@@ -385,7 +524,7 @@ def register():
 
 def unregister():
     _remove_draw_handler()
-    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
+    for cls in (MESH_OT_fix_inner_normals, MESH_OT_clear_debug_rays, MESH_OT_check_mesh, MESH_OT_solidify_meshes, MESH_OT_unsolidify_meshes, VIEW3D_PT_check_mesh, VIEW3D_PT_fix_inner_normals):
         try:
             bpy.utils.unregister_class(cls)
         except Exception:

@@ -19,6 +19,8 @@ This guide covers every tool in the ShipbreakerShipbuilder mod — menus, contex
    - [Fix Normals](#18-fix-normals)
    - [Material & Texture Pipeline](#19-material--texture-pipeline)
    - [Cut Point Seat](#110-cut-point-seat)
+   - [Part Splitting](#111-part-splitting)
+   - [Rebuilding a Layered Part from Its Original Model](#112-rebuilding-a-layered-part-from-its-original-model)
 2. [The Shipbuilder Menu](#2-the-shipbuilder-menu)
    - [Build & Run](#21-build--run)
    - [Actions Submenu](#22-actions-submenu)
@@ -206,6 +208,9 @@ Adds thickness to all selected mesh objects using Blender's Solidify modifier, t
 - Grows inward (`offset = -1`) so the outer surface stays in place
 - Use this when Check Mesh reports NEEDS SOLIDIFY
 - **Thickness affects in-game mass** — the game uses mesh volume for mass calculation, so adjust thickness intentionally
+- **Running it again does not stack shells.** Solidify marks the shell it adds (vertex group `SB_Shell`). A second run removes that shell first and builds a new one, so you can change the thickness by simply running it again. Meshes that are already closed are skipped.
+- **Remove Shell** takes the added shell off again and leaves the original faces.
+- **Even Thickness** is off by default: on meshes with sharp angles it can throw vertices far away. If the result grows well beyond the chosen thickness, the tool restores the mesh and reports it.
 
 **Workflow for game-exported ring meshes (e.g. reactor housing segments):**
 1. Select all segments
@@ -378,6 +383,80 @@ The reason is shown in the status bar and written to `blender_debug.log`.
 4. **Check the joints** with the tools in section 5, then confirm in game that the cut point holds both parts and that they separate when it is cut.
 
 Keep in mind that a cut point only joints parts whose joint types allow it (section 5.1), and that the pad takes the material and one colour sample of the face it stands on, so it blends in but has no detail of its own.
+
+---
+
+### 1.11 Part Splitting
+
+**ShipBreaker sidebar → Part Splitting panel**
+
+Every part of a custom ship collides as its **convex hull**, not as its visible shape. A part that other parts pass through or sit inside (a ring, a frame, a collar, a tunnel) therefore has an invisible collider that fills its opening. Whatever sits in that opening is embedded in the collider: it can be pushed away when a joint is cut, and the cutter can hit the invisible collider first. The fix is to cut such a part into pieces that are each close to convex. These three tools do the cutting and the checking.
+
+#### Cut Along Face
+
+Cuts objects along the plane of a face you pick on another object, fills every cut in the same step, and keeps both sides as separate objects.
+
+1. In Object Mode select the parts to cut, then select the **reference** part last (the part whose face gives the plane).
+2. Press Tab. All selected objects enter Edit Mode together.
+3. Select one face on the reference part. (Instead of a face you can select exactly three vertices; the plane goes through them.)
+4. Click **Cut Others Along This Face**.
+
+The reference part is never cut. Each cut part keeps the side behind the face under its own name; the side in front becomes a new object named `<name>_2` (next free number). The panel then lists every resulting piece as OK or FIX.
+
+Options in the redo panel (bottom left of the viewport, or F9):
+
+| Option | Meaning |
+|---|---|
+| **Keep** | Both sides (default), only the side behind the face, or only the side in front |
+| **Offset** | Moves the cut plane along the face normal, in metres |
+| **Fill the cut** | Closes every cut loop. A loop inside another loop (a hollow cross-section) is filled as a ring, so a thick-walled tube gets a ring-shaped cap and not a lid |
+| **Separate loose pieces** | If a side falls into several pieces, each becomes its own object |
+
+**Pick Cut Plane (use later)** stores the plane of the selected face instead of cutting. Back in Object Mode, **Cut Selected Along Stored Plane** then cuts whatever is selected along it. Use this when the reference part and the parts to cut are awkward to select together, or to reuse one plane for several rounds.
+
+**Why cut along another part's face:** parts that nest inside each other should be cut along the *same* planes, taken from the part they nest with. Then the seams of both line up and every piece stays on its own side of the plane. Cutting each part along its own, slightly different planes leaves pieces that reach across each other's seams.
+
+#### Check Parts
+
+Reports for every selected object: open edges, non-manifold edges, loose pieces, volume and triangle count. A part is good when it is **closed and one piece**. Afterwards only the objects that need attention stay selected. Vertices closer than 0.2 mm count as one, so UV seams and split normals are not reported as open edges.
+
+#### Collider Check
+
+For every pair of selected objects, reports how much of one lies inside the convex hull of the other: the share of it and the deepest point, in metres. Parts that only touch are not reported (the default tolerance is 5 mm; change it in the redo panel). Use **Convex Hull Preview** (1.4) to see the hull of a single part.
+
+A result of *no overlaps* means no selected part is embedded in another one's collider. Small overlaps where two pieces of the same seam meet are normal.
+
+The full text of the last report of any of the three tools is in the Text Editor under `SB_Part_Report`.
+
+---
+
+### 1.12 Rebuilding a Layered Part from Its Original Model
+
+Use this when a part of the ship has become heavy and messy inside: stacked shells from repeated Solidify, interleaved sheets, open rims after slicing. Going back to the original model and repeating the steps in the right order is quicker and cleaner than repairing the result. The order matters more than any single step.
+
+**Before you start:** find the earliest version of the model you have. The original objects are usually simple: a few open sheets and a few closed boxes.
+
+1. **Take the original objects** of the part into a new collection. If a piece you need is only a region of a larger object, select its faces in Edit Mode and use **Mesh → Separate → Selection**.
+2. **Solidify once, open sheets only.** Run **Fix Normals → Solidify** (1.8) on the open sheets with a plain thickness. Leave closed boxes alone. Solidify marks the shell it adds, so running it again replaces that shell and does not stack a second one; **Remove Shell** takes it off again.
+3. **Separate the originals from each other while each is still whole.** Where two solids share volume, give one a Boolean modifier (Difference, Exact solver) with the other as the object, and apply it. If the result is not one closed piece, undo and subtract the other way round.
+4. **Shorten with one square cut** where the part should end (for example at an end plate): **Cut Along Face** with **Keep** set to one side. Use the part's own direction for the plane, not the ship's axes; a part that is turned a few degrees gets a skewed cut otherwise.
+5. **Cut what belongs to different pieces apart**, for example a flange from the tube behind it: **Cut Along Face** with both sides kept.
+6. **Split every part that something passes through**, along the planes of the part it nests with:
+   - a tube or tunnel into its walls, at the corners;
+   - a flat plate around an opening into strips, along the faces of the frame that surrounds it;
+   - what is left around the opening into quarters, along the same seams as the tube behind it.
+7. **Check Parts** on everything. Every piece must be closed and one piece.
+8. **Collider Check** on the pieces together with whatever sits inside them. Cut again where something is still deep inside a collider, or join small details into the piece they rest on.
+9. **Replace heavy detail that reads as a simple shape** with the simple shape (for example a stack of rings by a half cylinder), and join it into the piece it rests on. Give it its own material slot if it needs its own material.
+10. **Set each origin to its geometry** (**Object → Set Origin → Origin to Geometry**) and export with **Export to Unity FBX** (1.1).
+11. **In Unity**, place the new parts, register them like any other part, switch the old pieces off and compare from several sides. Delete the old pieces only when the new ones look right, then run the build validation (it reports list entries left behind by deleted objects; clean them before building).
+
+Rules that keep the result clean:
+
+- **Solidify before any cut.** Solidifying pieces after cutting makes neighbouring pieces grow into each other.
+- **Fill each cut in the same step as the cut.** Open rims are far harder to close later.
+- **One Solidify pass.** If the wall is too thin, remove the shell and solidify again with a larger thickness.
+- **Judge overlap by the collider, not by the visible mesh.** Two parts can look clear of each other and still sit inside one another's convex hull.
 
 ---
 
