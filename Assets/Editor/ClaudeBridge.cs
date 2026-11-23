@@ -144,6 +144,7 @@ public static class ClaudeBridge
                 case "bayshow": result = BayShow(cmd); break;
                 case "restructure": result = Restructure(cmd); break;
                 case "aclcopy": result = AclCopy(cmd); break;
+                case "aclregister": result = AclRegister(cmd); break;
                 case "stripcomponents": result = StripComponents(cmd); break;
                 case "splitpart": result = SplitPart(cmd); break;
                 case "roomvolume": result = RoomVolume(cmd); break;
@@ -2437,6 +2438,31 @@ public static class ClaudeBridge
         bool added = c == null;
         if (added) { t.gameObject.AddComponent<BBI.Unity.Game.MandatoryJointContainer>(); Dirty(t.gameObject); }
         return new JObject { ["path"] = PathOf(t.gameObject), ["added"] = added, ["parts"] = t.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Length };
+    }
+
+    // { op:"aclregister", path:"Tachi_Gas/.../Part", from:"Tachi_Gas/.../SiblingPart" }
+    // Registers an EXISTING object's components in the loader that holds `from`'s entries, with the same addresses
+    // (component by component, same order and type). For objects that were cloned in the base prefab while a variant
+    // overrides that loader's list, so the variant never received their entries. Entries already there are left alone.
+    static JToken AclRegister(JObject cmd)
+    {
+        var dst = Find((string)cmd["path"]); if (dst == null) throw new Exception("Not found: " + cmd["path"]);
+        var src = Find((string)cmd["from"]); if (src == null) throw new Exception("Not found: " + cmd["from"]);
+        var srcAll = src.GetComponents<Component>(); var dstAll = dst.GetComponents<Component>(); int added = 0, had = 0;
+        for (var t = src; t != null; t = t.parent)
+        {
+            var acl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); if (acl == null || acl.componentValues == null) continue;
+            foreach (var cv in acl.componentValues.ToList())
+            {
+                if (cv == null || cv.component == null) continue;
+                int idx = Array.IndexOf(srcAll, cv.component);
+                if (idx < 0 || idx >= dstAll.Length || dstAll[idx] == null || dstAll[idx].GetType() != cv.component.GetType()) continue;
+                if (acl.componentValues.Any(x => x != null && x.component == dstAll[idx] && x.field == cv.field)) { had++; continue; }
+                acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = dstAll[idx], field = cv.field, address = cv.address }); added++;
+            }
+            EditorUtility.SetDirty(acl);
+        }
+        return new JObject { ["path"] = (string)cmd["path"], ["added"] = added, ["had"] = had };
     }
 
     // { op:"aclcopy", path:"Tachi/.../Part", from:"Tachi/.../OtherPart", field:"m_StructurePartAsset", dry:true }
