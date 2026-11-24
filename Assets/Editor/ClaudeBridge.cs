@@ -2866,7 +2866,7 @@ public static class ClaudeBridge
             {
                 var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(instRoot);
                 if (!byAsset.TryGetValue(assetPath, out var l)) byAsset[assetPath] = l = new List<string>();
-                l.Add(RelPath(t, instRoot.transform));
+                l.Add(RelPathIdx(t, instRoot.transform));
             }
             else
             {
@@ -2890,7 +2890,7 @@ public static class ClaudeBridge
             {
                 foreach (var rel in kv.Value)
                 {
-                    var target = contents.transform.Find(rel);
+                    var target = FindRel(contents.transform, rel);
                     if (target == null) { notFound.Add(rel); continue; }
                     var parentGo = target.parent != null ? target.parent.gameObject : null;
                     var nested = parentGo != null ? PrefabUtility.GetNearestPrefabInstanceRoot(parentGo) : null;
@@ -2898,7 +2898,7 @@ public static class ClaudeBridge
                     {
                         var nestedAsset = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(nested);
                         if (!deferred.TryGetValue(nestedAsset, out var l)) deferred[nestedAsset] = l = new List<string>();
-                        l.Add(RelPath(target, nested.transform));
+                        l.Add(RelPathIdx(target, nested.transform));
                         continue;
                     }
                     UnityEngine.Object.DestroyImmediate(target.gameObject);
@@ -2936,6 +2936,37 @@ public static class ClaudeBridge
             if (c == root) break;
         }
         return true;
+    }
+
+    // Like RelPath, but a node with same-named siblings gets "#k" (k-th of that name, 0-based); FindRel reads it back.
+    static string RelPathIdx(Transform t, Transform root)
+    {
+        string Seg(Transform x)
+        {
+            if (x.parent == null) return x.name;
+            int same = 0, idx = 0;
+            foreach (Transform c in x.parent) { if (c == x) idx = same; if (c.name == x.name) same++; }
+            return same > 1 ? x.name + "#" + idx : x.name;
+        }
+        if (t == root) return "";
+        var p = Seg(t);
+        for (var c = t.parent; c != null && c != root; c = c.parent) p = Seg(c) + "/" + p;
+        return p;
+    }
+
+    static Transform FindRel(Transform root, string rel)
+    {
+        var t = root;
+        foreach (var seg in rel.Split('/'))
+        {
+            string want = seg; int skip = 0; int hash = seg.LastIndexOf('#');
+            if (hash > 0 && int.TryParse(seg.Substring(hash + 1), out int k)) { want = seg.Substring(0, hash); skip = k; }
+            Transform next = null;
+            foreach (Transform c in t) if (c.name == want && skip-- == 0) { next = c; break; }
+            if (next == null) return null;
+            t = next;
+        }
+        return t;
     }
 
     static string RelPath(Transform t, Transform root)
