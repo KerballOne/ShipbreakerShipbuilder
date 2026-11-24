@@ -176,8 +176,11 @@ public class GameRenderWindow : EditorWindow
                 EditorGUILayout.HelpBox(lastFrameStatus, MessageType.Info);
         }
 
-        if (drawJointCensus && GUILayout.Button("Reload joint_census.csv"))
+        if (drawJointCensus && GUILayout.Button(new GUIContent("Reload census",
+                "Uses the newest of joint_census_live.csv (PartInfoLogger F10) / joint_census_spawn.csv, matched by entity id + position; falls back to joint_census.csv")))
             JointCensusGizmos.ReloadCsv();
+        if (drawJointCensus && !string.IsNullOrEmpty(JointCensusGizmos.SourceDescription))
+            EditorGUILayout.HelpBox(JointCensusGizmos.SourceDescription, MessageType.None);
         if (drawJointCensus && JointCensusGizmos.LoadFailed)
             EditorGUILayout.HelpBox(
                 "joint_census.csv not found or unreadable. Run PartInfoLogger's JointCensus in-game first.",

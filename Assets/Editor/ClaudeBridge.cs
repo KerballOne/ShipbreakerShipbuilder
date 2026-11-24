@@ -133,6 +133,8 @@ public static class ClaudeBridge
                 case "worlddump": result = WorldDump(cmd); break;
                 case "jointpads": result = JointPads(cmd); break;
                 case "setsoloader": result = SetSoLoader(cmd); break;
+                case "placesub":  result = PlaceSub(cmd); break;
+                case "select":    result = Select(cmd); break;
                 case "colormat": result = ColorMat(cmd); break;
                 case "prefabdelete": result = PrefabDelete(cmd); break;
                 case "aclpurge": result = AclPurge(cmd); break;
@@ -636,6 +638,59 @@ public static class ClaudeBridge
         Ledger(go);
         Dirty(go);
         return Describe(go);
+    }
+
+    // { op:"placesub", guid, childPath, disabled:[...], parent, name, pos, euler } — like place, but the loader only
+    // spawns one child of the addressable (childPath, as ModdedShipLoader does) and drops the listed children
+    // (disabledChildren, paths relative to that child). The editor preview mirrors both.
+    static JToken PlaceSub(JObject cmd)
+    {
+        var guid = (string)cmd["guid"];
+        var childPath = (string)cmd["childPath"] ?? "";
+        var disabled = cmd["disabled"] != null ? cmd["disabled"].Select(t => (string)t).ToList() : new List<string>();
+        var parent = Find((string)cmd["parent"]);
+        if (parent == null) throw new Exception("Parent not found: " + cmd["parent"]);
+        if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
+        var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+        if (src == null) throw new Exception("Could not load addressable " + guid);
+        var srcT = string.IsNullOrEmpty(childPath) ? src.transform : src.transform.Find(childPath);
+        if (srcT == null) throw new Exception("childPath not found: " + childPath);
+
+        var go = new GameObject(UniqueName(parent, (string)cmd["name"] ?? srcT.name));
+        go.transform.SetParent(parent, false);
+        go.transform.position = parent.position;
+        go.transform.rotation = Quaternion.identity;
+        var loader = go.AddComponent<BBI.Unity.Game.AddressableLoader>();
+        loader.assetGUID = guid; loader.childPath = childPath; loader.disabledChildren = disabled;
+        CloneVisual(srcT, go.transform, guid, null, new Dictionary<Material, Material>(), true);
+        // preview: drop the disabled subtrees (matched by name under the preview root)
+        foreach (var d in disabled)
+        {
+            var leaf = d.Split('/').Last();
+            foreach (var t in go.GetComponentsInChildren<Transform>(true).Where(x => x != go.transform && x.name == leaf).ToList())
+                if (t != null) UnityEngine.Object.DestroyImmediate(t.gameObject);
+        }
+        ApplyPose(go.transform, cmd);
+        Ledger(go);
+        Dirty(go);
+        return Describe(go);
+    }
+
+    // { op:"select", under:"Tachi/...", filter:"regex", frame:true } — selects every descendant of `under` whose name
+    // matches `filter` (Hierarchy + Scene view selection) and frames the Scene view on them.
+    static JToken Select(JObject cmd)
+    {
+        var root = Find((string)cmd["under"]);
+        if (root == null) throw new Exception("Not found: " + cmd["under"]);
+        var rx = new System.Text.RegularExpressions.Regex((string)cmd["filter"] ?? ".");
+        var gos = root.GetComponentsInChildren<Transform>(true).Where(t => t != root && rx.IsMatch(t.name)).Select(t => t.gameObject).ToArray();
+        Selection.objects = gos;
+        if (((bool?)cmd["frame"] ?? true) && gos.Length > 0 && SceneView.lastActiveSceneView != null)
+        {
+            SceneView.lastActiveSceneView.FrameSelected();
+            SceneView.lastActiveSceneView.Repaint();
+        }
+        return new JObject { ["selected"] = gos.Length };
     }
 
     static JToken Move(JObject cmd)

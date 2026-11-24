@@ -51,13 +51,162 @@ public static class JointCensusGizmos
     public static void ReloadCsv()
     {
         s_loaded = false;
-        s_parts.Clear();
+        s_parts.Clear(); s_byObj.Clear(); s_drawable.Clear(); s_clusterBounds.Clear(); SourceDescription = "";
         s_clusterSizes.Clear();
         s_clusterNames.Clear();
         ClusterCount = 0;
         MaxClusterSize = 0;
         LoadFailed = false;
         TryLoad();
+    }
+
+    // Per-scene-object census info (GameObject instance ID -> info), filled when the census has entity
+    // ids (joint_census_live.csv / joint_census_spawn.csv from PartInfoLogger's SpawnDiagnostics).
+    // Names repeat on this ship (tunnel tiles, cables...), so these are matched by name AND position
+    // after a rigid game->editor fit, not by name alone.
+    static Dictionary<int, PartInfo> s_byObj = new Dictionary<int, PartInfo>();
+    // Built once per load so the scene GUI never walks the whole hierarchy per repaint.
+    static List<(MeshFilter Mf, PartInfo Info)> s_drawable = new List<(MeshFilter, PartInfo)>();
+    static Dictionary<int, Bounds> s_clusterBounds = new Dictionary<int, Bounds>();
+    public static string SourceDescription { get; private set; } = "";
+
+    static bool Lookup(GameObject go, out PartInfo info)
+    {
+        if (s_byObj.Count > 0) return s_byObj.TryGetValue(go.GetInstanceID(), out info);
+        return s_parts.TryGetValue(go.name.Replace("(Clone)", "").Trim(), out info);
+    }
+
+    // Newest of the id-based census files, or null.
+    static string FindIdCensus()
+    {
+        var root = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        return new[] { "joint_census_live.csv", "joint_census_spawn.csv" }
+            .Select(f => Path.Combine(root, f)).Where(File.Exists)
+            .OrderByDescending(File.GetLastWriteTime).FirstOrDefault();
+    }
+
+    static Vector3 ParseVec(string s)
+    {
+        var p = s.Split(' ');
+        if (p.Length < 3) return Vector3.zero;
+        float.TryParse(p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x);
+        float.TryParse(p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var y);
+        float.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var z);
+        return new Vector3(x, y, z);
+    }
+
+    // Rotation whose columns are an orthonormal frame built from three points.
+    static Matrix4x4 Frame(Vector3 a, Vector3 b, Vector3 c)
+    {
+        var e1 = (b - a).normalized;
+        var e2 = Vector3.Cross(e1, c - a).normalized;
+        var e3 = Vector3.Cross(e1, e2);
+        var m = Matrix4x4.identity;
+        m.SetColumn(0, e1); m.SetColumn(1, e2); m.SetColumn(2, e3);
+        return m;
+    }
+
+    static bool TryLoadIdCensus(string path)
+    {
+        var lines = File.ReadAllLines(path);
+        if (lines.Length < 2) return false;
+        var header = SplitCsvLine(lines[0]);
+        int iName = header.IndexOf("PartName"), iPos = header.IndexOf("WorldPos"), iCount = header.IndexOf("JointedNeighbours"),
+            iId = header.IndexOf("Id"), iNb = header.IndexOf("NeighbourIds");
+        if (iName < 0 || iPos < 0 || iId < 0 || iNb < 0) return false;
+
+        var rows = new List<(string Name, Vector3 Pos, int Count, int Id, int[] Nb)>();
+        for (int i = 1; i < lines.Length; i++)
+        {
+            if (string.IsNullOrWhiteSpace(lines[i])) continue;
+            var f = SplitCsvLine(lines[i]);
+            if (f.Count <= Math.Max(iNb, iId)) continue;
+            if (!int.TryParse(f[iId], out var id) || id < 0) continue;
+            if (f[iName].StartsWith("InvisibleJoint", StringComparison.OrdinalIgnoreCase)) continue;
+            int.TryParse(iCount >= 0 ? f[iCount] : "0", out var count);
+            var nb = f[iNb].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x, out var v) ? v : -1).Where(v => v >= 0).ToArray();
+            rows.Add((f[iName], ParseVec(f[iPos]), count, id, nb));
+        }
+        if (rows.Count == 0) return false;
+
+        // Clusters: union-find over entity ids (exact, unlike names).
+        var parent = rows.ToDictionary(r => r.Id, r => r.Id);
+        int Find(int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+        foreach (var r in rows)
+            foreach (var n in r.Nb)
+                if (parent.ContainsKey(n)) { var a = Find(r.Id); var b = Find(n); if (a != b) parent[a] = b; }
+        var groups = rows.GroupBy(r => Find(r.Id)).OrderBy(g => g.Count()).ToList();
+        var rowCluster = new Dictionary<int, int>();
+        MaxClusterSize = 0;
+        for (int c = 0; c < groups.Count; c++)
+        {
+            s_clusterSizes[c] = groups[c].Count();
+            s_clusterNames[c] = groups[c].Select(r => r.Name).ToList();
+            MaxClusterSize = Math.Max(MaxClusterSize, groups[c].Count());
+            foreach (var r in groups[c]) rowCluster[r.Id] = c;
+        }
+        ClusterCount = groups.Count;
+
+        // Scene parts the overlay can draw.
+        var scene = new List<(GameObject Go, string Name, Vector3 Pos)>();
+        foreach (var root in GetActiveRootObjects())
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(false))
+                if (mf.GetComponent<StructurePart>() != null)
+                    scene.Add((mf.gameObject, mf.gameObject.name.Replace("(Clone)", "").Trim(), mf.transform.position));
+
+        // Rigid game->editor fit from names that are unique on both sides (RANSAC over point triples).
+        var gameByName = rows.GroupBy(r => r.Name).Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.First().Pos);
+        var pairs = scene.GroupBy(s => s.Name).Where(g => g.Count() == 1 && gameByName.ContainsKey(g.Key))
+                         .Select(g => (G: gameByName[g.Key], U: g.First().Pos)).ToList();
+        Matrix4x4 rot = Matrix4x4.identity; Vector3 gOrigin = Vector3.zero, uOrigin = Vector3.zero;
+        int bestInliers = -1;
+        if (pairs.Count >= 3)
+        {
+            var rng = new System.Random(1);
+            for (int it = 0; it < 400; it++)
+            {
+                var a = pairs[rng.Next(pairs.Count)]; var b = pairs[rng.Next(pairs.Count)]; var c = pairs[rng.Next(pairs.Count)];
+                if ((a.G - b.G).magnitude < 3f || Vector3.Cross(b.G - a.G, c.G - a.G).magnitude < 3f) continue;
+                var r = Frame(a.U, b.U, c.U) * Frame(a.G, b.G, c.G).transpose;
+                int inl = pairs.Count(p => (r.MultiplyVector(p.G - a.G) + a.U - p.U).sqrMagnitude < 0.01f);
+                if (inl > bestInliers) { bestInliers = inl; rot = r; gOrigin = a.G; uOrigin = a.U; }
+            }
+        }
+
+        // Match each scene part to the nearest unused census row of the same name.
+        var rowsByName = rows.GroupBy(r => r.Name).ToDictionary(g => g.Key, g => g.Select(r => (r.Id, r.Count, P: rot.MultiplyVector(r.Pos - gOrigin) + uOrigin)).ToList());
+        var used = new HashSet<int>();
+        int matched = 0;
+        foreach (var s in scene)
+        {
+            if (!rowsByName.TryGetValue(s.Name, out var cands)) continue;
+            float best = 0.25f * 0.25f; int bestId = -1, bestCount = 0;
+            foreach (var c in cands)
+            {
+                if (used.Contains(c.Id)) continue;
+                var d = (c.P - s.Pos).sqrMagnitude;
+                if (d < best) { best = d; bestId = c.Id; bestCount = c.Count; }
+            }
+            if (bestId < 0) continue;
+            used.Add(bestId); matched++;
+            var cl = rowCluster[bestId];
+            var info = new PartInfo { NeighborCount = bestCount, ClusterId = cl, ClusterSize = s_clusterSizes[cl] };
+            s_byObj[s.Go.GetInstanceID()] = info;
+            var mf = s.Go.GetComponent<MeshFilter>();
+            if (mf != null) s_drawable.Add((mf, info));
+        }
+        // Every cluster can be framed from its census positions (fitted into editor space), even when
+        // none of its parts exist as meshes in the editor (stock parts loaded from the game).
+        foreach (var r in rows)
+        {
+            var p = rot.MultiplyVector(r.Pos - gOrigin) + uOrigin;
+            var c = rowCluster[r.Id];
+            if (s_clusterBounds.TryGetValue(c, out var b)) { b.Encapsulate(p); s_clusterBounds[c] = b; }
+            else s_clusterBounds[c] = new Bounds(p, Vector3.one);
+        }
+        SourceDescription = $"{Path.GetFileName(path)} ({File.GetLastWriteTime(path):MM-dd HH:mm}): {rows.Count} parts, {ClusterCount} clusters; " +
+                            $"{matched}/{scene.Count} scene parts matched (fit {Math.Max(0, bestInliers)}/{pairs.Count} unique-name anchors)";
+        return true;
     }
 
     static void TryLoad()
@@ -67,7 +216,11 @@ public static class JointCensusGizmos
 
         try
         {
+            var idPath = FindIdCensus();
+            if (idPath != null && TryLoadIdCensus(idPath)) { LoadFailed = false; return; }
+
             var path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "joint_census.csv"));
+            SourceDescription = "joint_census.csv (old name-only format)";
             if (!File.Exists(path))
             {
                 LoadFailed = true;
@@ -162,7 +315,7 @@ public static class JointCensusGizmos
         catch
         {
             LoadFailed = true;
-            s_parts.Clear();
+            s_parts.Clear(); s_byObj.Clear();
             s_clusterSizes.Clear();
             s_clusterNames.Clear();
             ClusterCount = 0;
@@ -219,23 +372,21 @@ public static class JointCensusGizmos
     {
         var matchedObjects = new List<GameObject>();
         Bounds? bounds = null;
-        foreach (var root in GetActiveRootObjects())
+        foreach (var (mf, info) in Drawable())
         {
-            foreach (var meshFilter in root.GetComponentsInChildren<MeshFilter>(false))
-            {
-                if (meshFilter.GetComponent<StructurePart>() == null) continue;
-
-                var name = meshFilter.gameObject.name.Replace("(Clone)", "").Trim();
-                if (!s_parts.TryGetValue(name, out var info)) continue;
-                if (info.ClusterId != clusterId) continue;
-                matchedObjects.Add(meshFilter.gameObject);
-
-                var renderer = meshFilter.GetComponent<Renderer>();
-                if (renderer == null) continue;
-
-                if (bounds == null) bounds = renderer.bounds;
-                else { var b = bounds.Value; b.Encapsulate(renderer.bounds); bounds = b; }
-            }
+            if (mf == null || info.ClusterId != clusterId) continue;
+            matchedObjects.Add(mf.gameObject);
+            var renderer = mf.GetComponent<Renderer>();
+            if (renderer == null) continue;
+            if (bounds == null) bounds = renderer.bounds;
+            else { var b = bounds.Value; b.Encapsulate(renderer.bounds); bounds = b; }
+        }
+        // Id-based census: frame from the census positions so clusters made only of stock parts
+        // (no editor mesh) still frame.
+        if (s_clusterBounds.TryGetValue(clusterId, out var cb))
+        {
+            if (bounds == null) bounds = cb;
+            else { var b = bounds.Value; b.Encapsulate(cb); bounds = b; }
         }
         return (matchedObjects, bounds);
     }
@@ -244,7 +395,7 @@ public static class JointCensusGizmos
     public static void SelectClusterObjects(int clusterId)
     {
         TryLoad();
-        if (s_parts.Count == 0) return;
+        if (s_parts.Count == 0 && s_byObj.Count == 0) return;
 
         var (matchedObjects, _) = GetClusterObjects(clusterId);
         if (matchedObjects.Count > 0)
@@ -256,7 +407,7 @@ public static class JointCensusGizmos
     public static string FrameCluster(int clusterId)
     {
         TryLoad();
-        if (s_parts.Count == 0) return "No joint_census.csv data loaded.";
+        if (s_parts.Count == 0 && s_byObj.Count == 0) return "No joint census data loaded.";
 
         var (matchedObjects, bounds) = GetClusterObjects(clusterId);
 
@@ -265,7 +416,7 @@ public static class JointCensusGizmos
                 ? $"No scene GameObjects matched cluster {clusterId} by name."
                 : $"Matched {matchedObjects.Count} part(s) in cluster {clusterId} but none had a Renderer to frame.";
 
-        Selection.objects = matchedObjects.ToArray();
+        if (matchedObjects.Count > 0) Selection.objects = matchedObjects.ToArray();
 
         var sceneView = SceneView.lastActiveSceneView;
         if (sceneView == null)
@@ -285,7 +436,10 @@ public static class JointCensusGizmos
         expanded.Expand(expanded.size.magnitude * 0.5f);
         sceneView.Frame(expanded, false);
         sceneView.Repaint();
-        return $"Framed {matchedObjects.Count} part(s) in cluster {clusterId}.";
+        int total = GetClusterSize(clusterId);
+        return matchedObjects.Count == total
+            ? $"Framed cluster {clusterId}: {total} part(s), all selected."
+            : $"Framed cluster {clusterId}: {total} part(s); {matchedObjects.Count} have editor meshes and are selected, the rest are stock parts (framed by census position).";
     }
 
     // Convex hull edges (local space) cached by mesh instance ID — hull computation is
@@ -338,19 +492,20 @@ public static class JointCensusGizmos
         if (!GameRenderWindow.drawJointCensus) return;
 
         TryLoad();
-        if (s_parts.Count == 0) return;
+        if (s_parts.Count == 0 && s_byObj.Count == 0) return;
 
         bool clusterMode = !GameRenderWindow.jointCensusShowByClusterSize;
         int selectedCluster = GameRenderWindow.jointCensusClusterIndex;
 
-        foreach (var root in GetActiveRootObjects())
-        {
-            foreach (var meshFilter in root.GetComponentsInChildren<MeshFilter>(false))
-            {
-                if (meshFilter.GetComponent<StructurePart>() == null) continue;
+        // Selected cluster's census extent (covers stock parts the editor has no mesh for).
+        if (clusterMode && s_clusterBounds.TryGetValue(selectedCluster, out var cb))
+            using (new Handles.DrawingScope(GameRenderWindow.jointCensusClusterColor))
+                Handles.DrawWireCube(cb.center, cb.size);
 
-                var name = meshFilter.gameObject.name.Replace("(Clone)", "").Trim();
-                if (!s_parts.TryGetValue(name, out var info)) continue;
+        foreach (var (meshFilter, info) in Drawable())
+        {
+            {
+                if (meshFilter == null) continue;
 
                 Color col;
                 if (clusterMode)
@@ -371,21 +526,35 @@ public static class JointCensusGizmos
 
                 var m = meshFilter.transform.localToWorldMatrix;
 
-                if (GameRenderWindow.drawJointCensusHull)
-                {
-                    var hullEdges = GetHullEdges(mesh);
-                    using (new Handles.DrawingScope(col, m))
-                        foreach (var (a, b) in hullEdges)
-                            Handles.DrawLine(a, b);
-                }
-                else
-                {
-                    var wireEdges = GetWireEdges(mesh);
-                    using (new Handles.DrawingScope(col, m))
-                        foreach (var (a, b) in wireEdges)
-                            Handles.DrawLine(a, b);
-                }
+                var segs = GetSegments(mesh, GameRenderWindow.drawJointCensusHull);
+                using (new Handles.DrawingScope(col, m))
+                    Handles.DrawLines(segs);   // one batched call per part instead of one per edge
             }
         }
+    }
+
+    // Edge list flattened to the pairs array Handles.DrawLines wants, cached per mesh + mode.
+    static Dictionary<(int, bool), Vector3[]> s_segCache = new Dictionary<(int, bool), Vector3[]>();
+    static Vector3[] GetSegments(Mesh mesh, bool hull)
+    {
+        var key = (mesh.GetInstanceID(), hull);
+        if (s_segCache.TryGetValue(key, out var segs)) return segs;
+        var edges = hull ? GetHullEdges(mesh) : GetWireEdges(mesh);
+        segs = new Vector3[edges.Count * 2];
+        for (int i = 0; i < edges.Count; i++) { segs[i * 2] = edges[i].Item1; segs[i * 2 + 1] = edges[i].Item2; }
+        s_segCache[key] = segs;
+        return segs;
+    }
+
+    // Drawable scene parts with their census info. Id-based census fills this at load; for the old
+    // name-only census it is built once here (not per repaint).
+    static List<(MeshFilter Mf, PartInfo Info)> Drawable()
+    {
+        if (s_drawable.Count > 0 || s_parts.Count == 0) return s_drawable;
+        foreach (var root in GetActiveRootObjects())
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(false))
+                if (mf.GetComponent<StructurePart>() != null && Lookup(mf.gameObject, out var info))
+                    s_drawable.Add((mf, info));
+        return s_drawable;
     }
 }

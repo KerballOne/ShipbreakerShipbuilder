@@ -65,14 +65,14 @@ public class JointAssistWindow : EditorWindow
     float autoDedupRadius      = 0.05f;
 
     // Joint compatibility check state
-    float compatCoplanarThreshold     = 0.025f; // mirrors game's coplanarDistanceThreshold
+    float compatCoplanarThreshold     = 0.05f;  // ship-spawn value (ShipRandomizationHelper.JointPartsAsync); see comment below
     // Game uses TWO different threshold pairs at different call sites (decompiled
     // BBI.Unity.Game): JointingService.JointStructureParts (general/runtime, player
     // cutting/placing/grappling) uses 0.1 coplanar / 0.8 codirectional; ShipRandomizationHelper's
     // JointPartsAsync (ship-spawn/generation) uses a STRICTER 0.05 / 0.9. This was previously
     // hardcoded (kCodirectionalDotThresholdRuntime = 0.8f, no UI control at all) — now exposed so
     // both halves of either pair can actually be tested together against real in-game behavior.
-    float compatCodirectionalThreshold = 0.8f;
+    float compatCodirectionalThreshold = 0.9f;  // ship-spawn value (~25.8 deg)
 
     struct CompatResult
     {
@@ -269,6 +269,12 @@ public class JointAssistWindow : EditorWindow
             "scenario you're checking."),
             codirectionalThresholdDeg);
         compatCodirectionalThreshold = Mathf.Cos(Mathf.Clamp(codirectionalThresholdDeg, 0f, 180f) * Mathf.Deg2Rad);
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button(new GUIContent("Spawn (0.05 m, 25.8°)", "Ship spawn jointing — what decides the ship's joints when it loads")))
+        { compatCoplanarThreshold = 0.05f; compatCodirectionalThreshold = 0.9f; GUI.FocusControl(null); }
+        if (GUILayout.Button(new GUIContent("Runtime (0.1 m, 36.9°)", "Re-jointing during play (cutting, placing, grappling)")))
+        { compatCoplanarThreshold = 0.1f; compatCodirectionalThreshold = 0.8f; GUI.FocusControl(null); }
+        EditorGUILayout.EndHorizontal();
 
         int compatSel = Selection.gameObjects.Length;
         EditorGUILayout.BeginHorizontal();
@@ -730,8 +736,16 @@ public class JointAssistWindow : EditorWindow
                 var boundsB = TransformBoundsToWorld(mfB.transform.localToWorldMatrix, mfB.sharedMesh.bounds);
                 if (!expandedA.Intersects(boundsB)) { continue; }
 
-                if (TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
-                    out var nearMiss, pairLabel))
+                // The game's search is order-dependent (it locks onto the closest plane from part A's
+                // side), and which part it treats as A is not under our control — so a pair joints if
+                // EITHER order finds a polygon. Census-confirmed case: A_221_2.007 -> tunnel tile joints,
+                // tile -> A_221_2.007 does not. Keep the first order's near-miss if both fail.
+                bool found = TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
+                    out var nearMiss, pairLabel);
+                if (!found && !checkCanceled)
+                    found = TryFindJointPolygon(mfB, mfA, out planeOrigin, out faceNorm, out tan, out bitan, overlapPoly,
+                        out _, pairLabel);
+                if (found)
                 {
                     overlapCount++;
                     float area = Mathf.Abs(SignedArea2D(overlapPoly));
