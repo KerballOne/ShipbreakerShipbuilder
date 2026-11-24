@@ -370,6 +370,61 @@ MonoBehaviour:
   lightBrokenChance: 0.1
   componentsOnChildren: []
   componentsOnChildrenPaths: []
+--- !u!1 &1922197782933505023
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 317450284979739459}
+  - component: {fileID: 6695245907348549303}
+  m_Layer: 0
+  m_Name: PowerGenerator_Railgun_Upper
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &317450284979739459
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1922197782933505023}
+  m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: -0.7071068}
+  m_LocalPosition: {x: -1.875, y: -16.8218, z: -9.3615}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 785646628128145474}
+  m_RootOrder: 6
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6695245907348549303
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1922197782933505023}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  refs: []
+  assetGUID: df2433759a9b7f446aa1f7f0ccbe76d5
+  childPath: PRF_SubSystems_PowerGenerator_MainTile_Optimised_3CxAx3C
+  enableChildHardpoints: 0
+  disabledChildren:
+  - GRP_Group
+  - Lights
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
+  componentsOnChildren: []
+  componentsOnChildrenPaths: []
 --- !u!1 &3584629280816647134
 GameObject:
   m_ObjectHideFlags: 0
@@ -506,59 +561,6 @@ MonoBehaviour:
   mLastKnownEntityIndex: 0
   mLastKnownEntityVersion: 0
   mLastKnownShipMemberID: 0
---- !u!1 &3693184308465164605
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1777938396762266792}
-  - component: {fileID: 9107302079876935941}
-  m_Layer: 0
-  m_Name: PowerGenerator_Railgun_Upper
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1777938396762266792
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3693184308465164605}
-  m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: -0.7071068}
-  m_LocalPosition: {x: 0, y: -15.07, z: -9.3615}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
-  m_Father: {fileID: 785646628128145474}
-  m_RootOrder: 6
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &9107302079876935941
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3693184308465164605}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  refs: []
-  assetGUID: df2433759a9b7f446aa1f7f0ccbe76d5
-  childPath: PRF_SubSystems_PowerGenerator_MainTile_Optimised_3CxAx3C/PRF_SubSystems_PowerGenerator_MainUnit_2BxBx2A
-  enableChildHardpoints: 0
-  disabledChildren: []
-  lightRoomTypeGUID: 
-  lightDamagedChance: 0.2
-  lightBrokenChance: 0.1
-  componentsOnChildren: []
-  componentsOnChildrenPaths: []
 --- !u!1 &4341360274056637616
 GameObject:
   m_ObjectHideFlags: 0
@@ -884,8 +886,8 @@ Transform:
   - {fileID: 8166656549299532695}
   - {fileID: 5267482201016809556}
   - {fileID: 8850436556033098153}
-  - {fileID: 5608174226798600888}
-  - {fileID: 1777938396762266792}
+  - {fileID: 2069524189338870105}
+  - {fileID: 317450284979739459}
   m_Father: {fileID: 4454983023609678522}
   m_RootOrder: 10
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -1064,59 +1066,6 @@ MonoBehaviour:
   refs:
   - f2a98996e05c2204d89779c6650fe267
   - 922309cf07b82954aa007a7af6ca42f3
---- !u!1 &7452119066500496645
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 5608174226798600888}
-  - component: {fileID: 5509924768969598652}
-  m_Layer: 0
-  m_Name: PowerGenerator_Railgun_Lower
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &5608174226798600888
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7452119066500496645}
-  m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: -0.7071068}
-  m_LocalPosition: {x: 0, y: -17.330002, z: -9.3615}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_Children: []
-  m_Father: {fileID: 785646628128145474}
-  m_RootOrder: 5
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &5509924768969598652
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7452119066500496645}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  refs: []
-  assetGUID: df2433759a9b7f446aa1f7f0ccbe76d5
-  childPath: PRF_SubSystems_PowerGenerator_MainTile_Optimised_3CxAx3C/PRF_SubSystems_PowerGenerator_MainUnit_2BxBx2A
-  enableChildHardpoints: 0
-  disabledChildren: []
-  lightRoomTypeGUID: 
-  lightDamagedChance: 0.2
-  lightBrokenChance: 0.1
-  componentsOnChildren: []
-  componentsOnChildrenPaths: []
 --- !u!1 &7489533910779237943
 GameObject:
   m_ObjectHideFlags: 0
@@ -1410,6 +1359,61 @@ MonoBehaviour:
   refs:
   - f2a98996e05c2204d89779c6650fe267
   - 922309cf07b82954aa007a7af6ca42f3
+--- !u!1 &9178285358581879081
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2069524189338870105}
+  - component: {fileID: 1030789557610854685}
+  m_Layer: 0
+  m_Name: PowerGenerator_Railgun_Lower
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2069524189338870105
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9178285358581879081}
+  m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: -0.7071068}
+  m_LocalPosition: {x: -1.875, y: -19.081799, z: -9.3615}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 785646628128145474}
+  m_RootOrder: 5
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1030789557610854685
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9178285358581879081}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80f628007aaa3b04ba14d3e7d011b83b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  refs: []
+  assetGUID: df2433759a9b7f446aa1f7f0ccbe76d5
+  childPath: PRF_SubSystems_PowerGenerator_MainTile_Optimised_3CxAx3C
+  enableChildHardpoints: 0
+  disabledChildren:
+  - GRP_Group
+  - Lights
+  lightRoomTypeGUID: 
+  lightDamagedChance: 0.2
+  lightBrokenChance: 0.1
+  componentsOnChildren: []
+  componentsOnChildrenPaths: []
 --- !u!1001 &2825603815350609385
 PrefabInstance:
   m_ObjectHideFlags: 0
