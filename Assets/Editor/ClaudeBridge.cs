@@ -2949,11 +2949,16 @@ public static class ClaudeBridge
                     if (target == null) { notFound.Add(rel); continue; }
                     var parentGo = target.parent != null ? target.parent.gameObject : null;
                     var nested = parentGo != null ? PrefabUtility.GetNearestPrefabInstanceRoot(parentGo) : null;
-                    if (nested != null && !PrefabUtility.IsAddedGameObjectOverride(target.gameObject))
+                    // An added object (plain GO or a whole prefab instance added under the nested instance) lives in THIS asset.
+                    bool added = PrefabUtility.IsAddedGameObjectOverride(target.gameObject) ||
+                        (nested != null && PrefabUtility.GetAddedGameObjects(nested).Any(a => a.instanceGameObject == target.gameObject));
+                    if (nested != null && !added)
                     {
                         var nestedAsset = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(nested);
                         if (!deferred.TryGetValue(nestedAsset, out var l)) deferred[nestedAsset] = l = new List<string>();
-                        l.Add(RelPathIdx(target, nested.transform));
+                        // path in the nested asset from the SOURCE object: the outer asset may rename it (m_Name override)
+                        var srcGo = PrefabUtility.GetCorrespondingObjectFromSource(target.gameObject);
+                        l.Add(srcGo != null ? RelPathIdx(srcGo.transform, srcGo.transform.root) : RelPathIdx(target, nested.transform));
                         continue;
                     }
                     UnityEngine.Object.DestroyImmediate(target.gameObject);
