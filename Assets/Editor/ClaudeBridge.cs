@@ -112,6 +112,7 @@ public static class ClaudeBridge
                 case "addrtree":  result = AddrTree(cmd); break;
                 case "addgroup":  result = AddGroup(cmd); break;
                 case "prefabnudge": result = PrefabNudge(cmd); break;
+                case "prefabloaders": result = PrefabLoaders(cmd); break;
                 case "group":     result = Group(cmd); break;
                 case "place":     result = Place(cmd); break;
                 case "move":      result = Move(cmd); break;
@@ -133,6 +134,8 @@ public static class ClaudeBridge
                 case "meshload":  result = MeshLoad(cmd); break;
                 case "meshparts": result = MeshParts(cmd); break;
                 case "meshassign": result = MeshAssign(cmd); break;
+                case "collidermesh": result = ColliderMesh(cmd); break;
+                case "makeinteractable": result = MakeInteractableOp(cmd); break;
                 case "worlddump": result = WorldDump(cmd); break;
                 case "jointpads": result = JointPads(cmd); break;
                 case "setsoloader": result = SetSoLoader(cmd); break;
@@ -874,7 +877,7 @@ public static class ClaudeBridge
     {
         var o = new JObject
         {
-            ["name"] = t.name, ["localPos"] = V(t.localPosition), ["worldPos"] = V(t.position), ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale),
+            ["name"] = t.name, ["localPos"] = V(t.localPosition), ["worldPos"] = V(t.position), ["worldRot"] = new JArray(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w), ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale),
             ["lossyScale"] = V(t.lossyScale),
             ["components"] = new JArray(t.GetComponents<Component>().Where(c => c != null && !(c is Transform)).Select(c => c.GetType().Name)),
         };
@@ -1497,9 +1500,19 @@ public static class ClaudeBridge
         var src = Find((string)cmd["source"]);
         if (src == null) throw new Exception("Source not found: " + cmd["source"]);
         var model = (string)cmd["model"]; var prefix = (string)cmd["prefix"];
-        var meshes = AssetDatabase.LoadAllAssetsAtPath(model).OfType<Mesh>().Where(m => m.name.StartsWith(prefix)).OrderBy(m => m.name).ToList();
-        if (meshes.Count == 0) throw new Exception("No meshes starting with '" + prefix + "' in " + model);
-        var modelRoot = AssetDatabase.LoadAssetAtPath<GameObject>(model);
+        List<Mesh> meshes; GameObject modelRoot = null;
+        if (cmd["assets"] != null)
+        {
+            // pieces given as mesh assets (e.g. built by meshassign / meshload); the copies keep the source's materials
+            meshes = cmd["assets"].Select(a => AssetDatabase.LoadAssetAtPath<Mesh>((string)a)).ToList();
+            if (meshes.Any(m => m == null)) throw new Exception("A listed mesh asset did not load");
+        }
+        else
+        {
+            meshes = AssetDatabase.LoadAllAssetsAtPath(model).OfType<Mesh>().Where(m => m.name.StartsWith(prefix)).OrderBy(m => m.name).ToList();
+            if (meshes.Count == 0) throw new Exception("No meshes starting with '" + prefix + "' in " + model);
+            modelRoot = AssetDatabase.LoadAssetAtPath<GameObject>(model);
+        }
         BBI.Unity.Game.AddressableComponentLoader acl = null;
         for (var t = src; t != null && acl == null; t = t.parent) acl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
         var srcAll = src.GetComponentsInChildren<Component>(true);
@@ -1794,6 +1807,62 @@ public static class ClaudeBridge
         if (cmd["disable"] != null)
             foreach (var d in cmd["disable"]) { var t = Find((string)d); if (t != null) { t.gameObject.SetActive(false); Dirty(t.gameObject); off.Add((string)d); } }
         return new JObject { ["made"] = made, ["disabled"] = off, ["acl"] = acl != null ? PathOf(acl.gameObject) : null, ["srcAclEntries"] = srcEntries != null ? srcEntries.Count : 0 };
+    }
+
+    // { op:"makeinteractable", path, sourceGuid, fitBox:true } — the Make Interactable window's "Direct Node Mapping" on
+    // one scene object: the source addressable's first InteractableObject node -> <path>/Interaction (created if
+    // missing), its StructurePart node's supporting components -> <path>. fitBox sizes the Interaction BoxCollider to
+    // the object's mesh bounds so the interact prompt can be aimed anywhere on it.
+    static JToken MakeInteractableOp(JObject cmd)
+    {
+        var t = Find((string)cmd["path"]);
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var source = AddressableBaker.LoadAddressableAsync((string)cmd["sourceGuid"]).Result;
+        if (source == null) throw new Exception("Could not load source " + cmd["sourceGuid"]);
+        var ios = source.GetComponentsInChildren<BBI.Unity.Game.InteractableObject>(true);
+        if (ios.Length == 0) throw new Exception("Source has no InteractableObject");
+        var acl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); if (acl == null) acl = t.gameObject.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();   // no ?? : Unity fake null
+        var notes = new List<string>();
+        var inter = t.Find("Interaction");
+        if (inter == null) { var g = new GameObject("Interaction"); g.transform.SetParent(t, false); inter = g.transform; notes.Add("created Interaction child"); }
+        // SP node first: it brings the root TriggerableSalvage that the Interaction node's progress-complete event is wired to
+        var sp = source.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).FirstOrDefault();
+        if (sp != null) MakeInteractableWindow.ApplyInteractionNode(sp.gameObject, t.gameObject, acl, notes);
+        MakeInteractableWindow.ApplyInteractionNode(ios[0].gameObject, inter.gameObject, acl, notes);
+        if ((bool?)cmd["fitBox"] ?? false)
+        {
+            var mf = t.GetComponent<MeshFilter>(); var bc = inter.GetComponent<BoxCollider>();
+            if (mf != null && mf.sharedMesh != null && bc != null)
+            {
+                inter.localPosition = Vector3.zero; inter.localRotation = Quaternion.identity; inter.localScale = Vector3.one;
+                bc.center = mf.sharedMesh.bounds.center; bc.size = mf.sharedMesh.bounds.size; EditorUtility.SetDirty(bc);
+                notes.Add("box fitted to mesh bounds " + mf.sharedMesh.bounds.size);
+            }
+        }
+        EditorUtility.SetDirty(t.gameObject); Dirty(t.gameObject);
+        return new JObject { ["path"] = (string)cmd["path"], ["source"] = source.name, ["notes"] = new JArray(notes),
+            ["interaction"] = new JArray(inter.GetComponents<Component>().Select(c => c.GetType().Name)),
+            ["root"] = new JArray(t.GetComponents<Component>().Select(c => c.GetType().Name)) };
+    }
+
+    // { op:"collidermesh", paths:[...], asset:"Assets/.../x.asset" } — puts the mesh asset on the MeshCollider ONLY (the
+    // MeshFilter, which jointing and rendering read, is left alone). The game's part mass = |signed volume of the
+    // MeshCollider mesh| x density, so a collider-only mesh with hidden inner volume changes mass and nothing else.
+    static JToken ColliderMesh(JObject cmd)
+    {
+        var m = AssetDatabase.LoadAllAssetsAtPath((string)cmd["asset"]).OfType<Mesh>().FirstOrDefault();
+        if (m == null) throw new Exception("No mesh in " + cmd["asset"]);
+        var done = new JArray();
+        foreach (var q in cmd["paths"])
+        {
+            var t = Find((string)q);
+            if (t == null) throw new Exception("Not found: " + q);
+            var mc = t.GetComponent<MeshCollider>(); if (mc == null) throw new Exception("No MeshCollider on " + q);
+            mc.sharedMesh = m; EditorUtility.SetDirty(mc); Dirty(t.gameObject);
+            var mf = t.GetComponent<MeshFilter>();
+            done.Add(new JObject { ["path"] = (string)q, ["collider"] = m.name, ["filter"] = mf != null && mf.sharedMesh != null ? mf.sharedMesh.name : null });
+        }
+        return done;
     }
 
     // { op:"meshassign", paths:[...], folder:"Assets/.../X", dir:"C:/.../json dir", name:"Suit_Hanging" }
@@ -3093,6 +3162,43 @@ public static class ClaudeBridge
         }
         finally { PrefabUtility.UnloadPrefabContents(root); }
         return new JObject { ["dry"] = dry, ["moves"] = outp };
+    }
+
+    // { op:"prefabloaders", prefab:"Assets/.../Tachi.prefab", edits:[{path, guid?, worldPos?:[x,y,z]}], delete:[paths], dry:true }
+    // Inside a prefab ASSET (root at identity): re-address addressable loaders, move them (world position of the
+    // transform), delete objects. Resolves every path before changing anything.
+    static JToken PrefabLoaders(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? true;
+        var root = PrefabUtility.LoadPrefabContents(ap); var outp = new JArray(); int n = 0;
+        try
+        {
+            var edits = (cmd["edits"] ?? new JArray()).Select(e => (e: (JObject)e, t: FindRel(root.transform, (string)e["path"]))).ToList();
+            var dels = (cmd["delete"] ?? new JArray()).Select(p => (p: (string)p, t: FindRel(root.transform, (string)p))).ToList();
+            foreach (var (e, t) in edits)
+            {
+                var o = new JObject { ["path"] = (string)e["path"] };
+                if (t == null) { o["error"] = "not found"; outp.Add(o); continue; }
+                var al = t.GetComponent<BBI.Unity.Game.AddressableLoader>();
+                if (e["guid"] != null)
+                {
+                    if (al == null) { o["error"] = "no loader"; outp.Add(o); continue; }
+                    o["guidFrom"] = al.assetGUID; al.assetGUID = (string)e["guid"]; o["guidTo"] = al.assetGUID; EditorUtility.SetDirty(al);
+                }
+                if (e["worldPos"] != null) { var w = e["worldPos"].Select(x => (float)x).ToArray(); o["from"] = V(t.position); t.position = new Vector3(w[0], w[1], w[2]); o["to"] = V(t.position); }
+                if (e["worldRot"] != null) { var q = e["worldRot"].Select(x => (float)x).ToArray(); o["rotFrom"] = V(t.eulerAngles); t.rotation = new Quaternion(q[0], q[1], q[2], q[3]); o["rotTo"] = V(t.eulerAngles); }
+                if (e["rename"] != null) { o["renamedFrom"] = t.name; t.name = (string)e["rename"]; }
+                n++; outp.Add(o);
+            }
+            foreach (var (p, t) in dels)
+            {
+                if (t == null) { outp.Add(new JObject { ["delete"] = p, ["error"] = "not found" }); continue; }
+                UnityEngine.Object.DestroyImmediate(t.gameObject); n++; outp.Add(new JObject { ["deleted"] = p });
+            }
+            if (!dry && n > 0) PrefabUtility.SaveAsPrefabAsset(root, ap);
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return new JObject { ["dry"] = dry, ["results"] = outp };
     }
 
     static Transform FindRel(Transform root, string rel)

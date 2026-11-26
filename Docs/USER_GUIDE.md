@@ -1414,8 +1414,14 @@ These are issues discovered during real ship building (primarily a test ship mod
 **Convex colliders fill hollow meshes**
 A convex `MeshCollider` on a ring or cylinder fills the interior with an implicit convex hull — the player cannot enter the inside. Use the **Segment Meshes** tool to split the mesh into wedge-shaped children, each of which is individually convex. The root collider stays enabled (required for the game to register the part on load) but the wedge children handle actual physics.
 
+**Some parts have a fixed mass**
+A part's mass is its density times the volume of its **MeshCollider** mesh, unless the StructurePartAsset's rigidbody asset is set to use a fixed mass. Pickup types use fixed masses (10 kg for most), whatever their size. To make something heavier, pick a StructurePartAsset whose rigidbody asset uses density and whose other settings (joint, yank, cut level, vitality) match; changing the mesh does nothing on a fixed-mass type. A StructurePartAsset cannot be partly copied, so a custom one with only a different mass is not possible.
+
+**Make Interactable and grants that use a vitality type**
+Patch kit, oxygen and med kit pickups grant through a component that refers to a vitality type from the game's data. That reference cannot be stored in a prefab; Make Interactable now records it in the AddressableComponentLoader, like the interactable asset. Parts made with older versions of the tool saved a broken reference, and their grant does nothing: run the tool on them again.
+
 **Read/Write must be enabled on FBX imports**
-The game reads raw vertex data from `MeshFilter.sharedMesh` to calculate part mass. If Read/Write is disabled on the FBX, the mesh data is not accessible at runtime and the part's mass will be wrong (often zero). The Custom Part Wizard enables this automatically; check manually for FBX files imported outside the wizard.
+The game reads raw vertex data from the meshes to calculate part mass (the MeshCollider's mesh) and joints (the MeshFilter's mesh). If Read/Write is disabled on the FBX, the mesh data is not accessible at runtime and the part's mass will be wrong (often zero). The Custom Part Wizard enables this automatically; check manually for FBX files imported outside the wizard.
 
 **Non-unit scale is invisible to the game's physics systems**
 Joint anchor points and mass are calculated from mesh vertex positions. Transform scale is applied visually but does not affect the raw mesh data the game reads. Always run **Lock In Rescale** before building any rescaled part.
@@ -1526,6 +1532,11 @@ These exceptions appear in the Unity console during normal editor use and do not
 | `inspect` | `{path, depth, fake}` — components, mesh and bounds per node; `fake:true` also walks the hidden preview children of addressable parts (`python .claude/inspect_fake.py <path>`; `python .claude/preview_missing.py <path>` lists loaders whose preview is not loaded, which is what makes the Joint Compatibility Check say "No StructurePart MeshFilters found") |
 | `worlddump` | `{paths, dir, preview}` — writes each object's render mesh in world space for the jointing emulator (`.claude/joint_emul.py`, run in Blender); `preview:true` dumps the preview meshes of addressable parts. The emulator pairs up neighbouring parts and reports which pairs find a joint plane |
 | `sodump` | `{guids:[..], depth, expand, png}` — read-only dump of game or mod ScriptableObjects by addressable GUID (object references as names, AssetReferences as GUIDs); `expand` follows referenced ScriptableObjects, `png` also writes a texture to `.claude/bridge/shots/` |
+| `meshassign`, `splitpart` | `{paths, folder, dir, name, materials}` builds (or overwrites in place, keeping its GUID) `<folder>/<name>.asset` from `<dir>/<name>.json` and puts it on the MeshFilter and MeshCollider of each object; omit `paths` to only write the asset. `splitpart` copies a part (SP, blueprint, collider and loader entries kept) for each extra piece of a split; pass `assets` for the pieces' meshes |
+| `collidermesh` | `{paths, asset}` puts a mesh on the MeshCollider only; the MeshFilter (rendering, jointing) is left alone |
+| `makeinteractable` | `{path, sourceGuid, fitBox}` runs Make Interactable's Direct Node Mapping on one object from a game pickup addressable, and with `fitBox` sizes the Interaction box to the object's mesh. The first addressable load after a recompile can come back empty: send the command again |
+| `addgroup`, `addrtree` | `addgroup` wraps parts in a StructureGroup object (with its own SP, blueprint and loader entries) so the group's SP sets their cut level, as stock ships do for fuel junction pipes; `addrtree` dumps a stock prefab's tree with each node's SP, blueprint and group SP names |
+| `prefabnudge`, `prefabloaders` | Move, re-address, rename or delete objects inside a nested prefab asset (by world delta or world pose) without opening it |
 | `manifest` | Write `placement_manifest.json` (see 10.2) |
 | `save`, `refresh`, `menu` | Save open scenes, recompile/reimport, run a menu item |
 
@@ -1694,6 +1705,23 @@ Keep the plates thin and closed (a slab, not a single sheet): the game works out
 - New plates lie in the same planes as neighbouring parts' faces and can change which joints the game finds. Compare the joint search before and after, then confirm with a spawn census.
 - Pipes are not held by hull panels: the pipe joint type cannot joint to an exterior panel. A hull part is released by cutting its hull joints; its pipes are released at their cut points.
 - A pipe piece of 6 cm joints like any other, but only if both its neighbours are still there.
+
+**Fewer invisible walls: plate or split**
+
+Where a convex hull spans open space the player can reach, the player meets an invisible wall and anything inside cannot be cut, scanned or blasted. Fix each such part one of two ways:
+
+| Method | When | How |
+|---|---|---|
+| Plate | The open side faces a room and the pocket is not needed | Add thin slabs on the hull faces that face a room (see above). Never on faces that open to space outside the ship |
+| Split | The part's shape is what makes the hull large (a frame with legs, a wall with a roof, a block with rods) | Cut the mesh in Blender with a capped cut, assign the first piece to the original object and copy the part for the rest, so each piece's hull follows its visible shape. Leave the cut faces 0.5 to 1 mm apart so the pieces joint to each other |
+
+Things learned doing this on a whole ship:
+- Decide "faces a room" with a flood fill of the free space around the ship, not by the face's direction. A slanted face can point inward and still open to space.
+- A slicer that caps cut faces must only re-map UVs on the faces it creates. Faces next to the cut keep their own UVs, or the texture streaks.
+- Give plates a plain tile from the hull atlas, tiled at the hull's texel density, not the UVs of a nearby face (that copies stripes and decals).
+- Check every changed part with textured renders of the original and the new mesh from two sides before calling it done.
+- A cap that closes the end of an open, U-shaped piece shows. Clip it to the area where the neighbouring piece sits right behind it.
+- New objects made by a split exist only in the base prefab's list of objects. A variant that swaps materials or switches parts off per object does not cover them: set its materials and switch them off in the variant too.
 
 **Parts that glow when a line reaches them**
 

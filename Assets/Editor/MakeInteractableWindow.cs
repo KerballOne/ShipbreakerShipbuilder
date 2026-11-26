@@ -306,7 +306,7 @@ public class MakeInteractableWindow : EditorWindow
     /// via AddressableBaker.ResolveAssetGuidByName (same pattern as SP_Mat/Blueprint). Also copies the
     /// node's layer and any Collider (Box/Sphere/Capsule — MeshCollider is already handled by
     /// AddressableBaker's own bake pass and shouldn't be duplicated here).</summary>
-    static void ApplyInteractionNode(GameObject srcNode, GameObject targetNode, AddressableComponentLoader acl, List<string> notes)
+    internal static void ApplyInteractionNode(GameObject srcNode, GameObject targetNode, AddressableComponentLoader acl, List<string> notes)
     {
         targetNode.layer = srcNode.layer;
 
@@ -394,8 +394,23 @@ public class MakeInteractableWindow : EditorWindow
         if (srcNode.TryGetComponent<TriggerableThrusterCharge>(out var srcCharge) && targetNode.GetComponent<TriggerableThrusterCharge>() == null)
             UnityEditor.EditorUtility.CopySerialized(srcCharge, targetNode.AddComponent<TriggerableThrusterCharge>());
 
-        if (srcNode.TryGetComponent<TriggerableVitalityChange>(out var srcVitality) && targetNode.GetComponent<TriggerableVitalityChange>() == null)
-            UnityEditor.EditorUtility.CopySerialized(srcVitality, targetNode.AddComponent<TriggerableVitalityChange>());
+        if (srcNode.TryGetComponent<TriggerableVitalityChange>(out var srcVitality))
+        {
+            // m_VitalityType (Suit/Oxygen/Health_VitalityTypeAsset) lives in the game bundle: a copied reference
+            // saves as a broken PPtr (guid 0000...) and the grant does nothing. Null it and let the
+            // AddressableComponentLoader fill it at load, same as InteractableObject.m_Asset. (Fixed 2026-11-26.)
+            var newVitality = targetNode.GetComponent<TriggerableVitalityChange>();
+            if (newVitality == null) newVitality = targetNode.AddComponent<TriggerableVitalityChange>();
+            UnityEditor.EditorUtility.CopySerialized(srcVitality, newVitality);
+            var srcVt = ReadObjectField(srcVitality, "m_VitalityType");
+            NullObjectField(newVitality, "m_VitalityType");
+            if (srcVt != null)
+            {
+                var vtGuid = AddressableBaker.ResolveAssetGuidByName(srcVt.name);
+                if (!string.IsNullOrEmpty(vtGuid)) UpsertAclEntry(acl, newVitality, "m_VitalityType", vtGuid);
+                else notes.Add($"⚠ Could not resolve GUID for VitalityTypeAsset '{srcVt.name}' — the grant will not work.");
+            }
+        }
 
         if (srcNode.TryGetComponent<NarrativeItemComponent>(out var srcNic))
         {

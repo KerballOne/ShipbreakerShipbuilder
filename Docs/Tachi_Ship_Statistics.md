@@ -2,7 +2,7 @@
 
 A custom salvage ship for Hardspace: Shipbreaker, modeled on the MCRN Corvette-class light frigate *Tachi* from *The Expanse*.
 
-Version 0.9.12, updated 25 November 2026. The figures are the first v0.9.12 figures (24 November) less 6 parts on every variant: the six point defense mounts were merged into their trusses and gun bodies. The Rocinante was loaded on this build and the game counted 5,221 parts, as calculated. The hanging suit's mesh was reduced, so the largest mesh is now a stock helmet (14,996 vertices) and the part ceiling rose to 8,950. The first v0.9.12 figures were the v0.9.11 figures below changed by simple arithmetic from the parts log kept while building, not a new census: on every variant 5 slot covers close the gaps in the Engineering ceiling, the four generators became the stock generator with its 3 status lights each (12 lights), 6 PDC ammo posters hang on the ammo crates, and the 8 reactor injector nozzles (6 pipe pieces each) became a 5-part thruster nozzle (8 parts fewer); the Rocinante also gains its railgun ammo poster and 2 generators on the railgun breech (17 parts). The Rocinante was then loaded on this build: the game counted 5,211 parts, 2 fewer than calculated. After that load, 16 reaction mass tanks were hung under the cryo deck plates on every variant (16 parts). A second Rocinante load with the tanks counted 5,227, as calculated. The v0.9.11 figures were the v0.9.10 measurements below changed by simple arithmetic: the cryo ring was rebuilt with longer pipes (12 straight pipes fewer, 2 cut points more, so 10 parts fewer on every variant), and ghost ships carry a 60th Protomolecule node. The Rocinante's count was logged on a load of this build (5,181 parts, normal ship). The paragraph below describes the v0.9.10 measurements. The MCRN Tachi figures, its categories and its loose parts are from a load of the v0.9.10 build on 23 November, with the mod's spawn census. The Gas Hauler's part counts, loose parts and cut points are from a load of the same day as a ghost ship; its normal-ship counts are those less its 59 nodes. The Rocinante was not loaded on this build: its figures are its v0.9.9 counts plus the 94 parts the base ship gained (the point defense housings rebuilt, the rings cut in eight, the fore hull regrouped). The section tables are from the v0.9.8 census and were not re-measured. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
+Version 0.9.13, 26 November 2026. The v0.9.13 figures are the v0.9.12 figures changed by the parts log: to cut down invisible walls, the four aft point defense end frames were split into a bridge and two legs, Engineering 25 and 27 into a wall and a roof, and the 16 heat exchangers into a block and a rod bank (26 parts more), and two fuel pipe runs were shortened (2 parts fewer). That is 24 parts more on the MCRN Tachi and the Rocinante, and 16 on the Gas variant, which switches the 8 legs off with its point defense nests. The Gas variant was loaded on this build and the game counted 5,766 parts, 6 more than calculated. The v0.9.12 figures (25 November) were the first v0.9.12 figures (24 November) less 6 parts on every variant: the six point defense mounts were merged into their trusses and gun bodies. The Rocinante was loaded on this build and the game counted 5,221 parts, as calculated. The hanging suit's mesh was reduced, so the largest mesh is now a stock helmet (14,996 vertices) and the part ceiling rose to 8,950. The first v0.9.12 figures were the v0.9.11 figures below changed by simple arithmetic from the parts log kept while building, not a new census: on every variant 5 slot covers close the gaps in the Engineering ceiling, the four generators became the stock generator with its 3 status lights each (12 lights), 6 PDC ammo posters hang on the ammo crates, and the 8 reactor injector nozzles (6 pipe pieces each) became a 5-part thruster nozzle (8 parts fewer); the Rocinante also gains its railgun ammo poster and 2 generators on the railgun breech (17 parts). The Rocinante was then loaded on this build: the game counted 5,211 parts, 2 fewer than calculated. After that load, 16 reaction mass tanks were hung under the cryo deck plates on every variant (16 parts). A second Rocinante load with the tanks counted 5,227, as calculated. The v0.9.11 figures were the v0.9.10 measurements below changed by simple arithmetic: the cryo ring was rebuilt with longer pipes (12 straight pipes fewer, 2 cut points more, so 10 parts fewer on every variant), and ghost ships carry a 60th Protomolecule node. The Rocinante's count was logged on a load of this build (5,181 parts, normal ship). The paragraph below describes the v0.9.10 measurements. The MCRN Tachi figures, its categories and its loose parts are from a load of the v0.9.10 build on 23 November, with the mod's spawn census. The Gas Hauler's part counts, loose parts and cut points are from a load of the same day as a ghost ship; its normal-ship counts are those less its 59 nodes. The Rocinante was not loaded on this build: its figures are its v0.9.9 counts plus the 94 parts the base ship gained (the point defense housings rebuilt, the rings cut in eight, the fore hull regrouped). The section tables are from the v0.9.8 census and were not re-measured. "Measured" means taken from the game or the editor on that build. "Estimate" means calculated, with the method given.
 
 ## At a glance
 
@@ -11,11 +11,11 @@ Version 0.9.12, updated 25 November 2026. The figures are the first v0.9.12 figu
 | Length (engine bell to antenna tip) | 133.7 m |
 | Beam (port to starboard, over the gun mounts) | 54.6 m (Gas variant, over the tank racks: 67.2 m) |
 | Height (dorsal to ventral) | 46.3 m (Gas variant: 55.1 m) |
-| Parts counted at load | 5,319 (MCRN Tachi) · 5,221 (Rocinante) · 5,744 (Gas variant), all v0.9.12 |
+| Parts counted at load | 5,343 (MCRN Tachi) · 5,245 (Rocinante) · 5,766 (Gas variant, logged), all v0.9.13 |
 | As a ghost ship | 60 Protomolecule nodes and 252 growth patches more (see Ghost ship content) |
 | Cut points | 260 (Gas variant: 343) |
 | Loose items at spawn | 183 (props, pickups and one floating corpse, in one of six places) |
-| Estimated mass | at least 268 t (Gas variant: about 394 t; see Mass) |
+| Estimated mass | at least 274 t (Gas variant: about 400 t; see Mass) |
 | Download size | 198 MB (zip, all three variants) |
 | Load time on the test PC | 45 to 138 s |
 
@@ -48,6 +48,7 @@ Measured on the test PC, from choosing the ship to being able to move:
 | 23 Nov, v0.9.10, Gas variant as a ghost ship | 62.2 s | 49.5 s | 12.7 s |
 | 24 Nov, v0.9.12, Rocinante | 50.7 s | 40.6 s | 10.1 s |
 | 24 Nov, v0.9.12, Rocinante with the tanks | 50.0 s | 39.9 s | 10.1 s |
+| 26 Nov, v0.9.13, Gas variant | 50.9 s | 41.0 s | 9.9 s |
 
 The v0.9.5 run had the mod's part-data capture switched on, which adds load time, so it overstates a normal load.
 
@@ -72,12 +73,12 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 
 | | |
 |---|---|
-| Live parts at spawn (every piece the game simulates) | 5,321 (v0.9.12; 5,296 on v0.9.11) |
-| Parts counted by the game's joint pass | 5,319 (v0.9.12; 5,294 on v0.9.11) |
+| Live parts at spawn (every piece the game simulates) | 5,345 (v0.9.13; 5,321 on v0.9.12) |
+| Parts counted by the game's joint pass | 5,343 (v0.9.13; 5,319 on v0.9.12) |
 | Objects in the ship that never become parts | 260 (see below) |
 | Largest mesh | `SM_Bodysuit_Mesh_Helmet` (a stock suit helmet), 14,996 vertices |
 | Part ceiling at that mesh size | 8,950 |
-| Headroom | 3,631 parts |
+| Headroom | 3,607 parts |
 
 **The part ceiling.** While the ship loads, the game multiplies the number of parts by the vertex count of the largest single mesh. If that product passes 134,217,728 the game crashes on load. With the current largest mesh that allows 8,950 parts. Adding parts, or adding one mesh larger than 14,996 vertices, both use up the headroom. The rebuilt point defense housings took the ship's own largest mesh (18,291 vertices) below the stock suit's, and in v0.9.12 the hanging suit's mesh was reduced from 17,136 to 4,813 vertices.
 
@@ -95,13 +96,13 @@ If the game sits on the loading screen for more than ten minutes, treat it as a 
 
 | Category | Parts | Share |
 |---|---|---|
-| Furniture and props | 1,730 | 32.5 % |
-| Decks, walls, stairs and doors | 1,015 | 19.1 % |
-| Machinery, power and weapons | 840 | 15.8 % |
-| Pipes and cables | 802 | 15.1 % |
+| Furniture and props | 1,746 | 32.7 % |
+| Decks, walls, stairs and doors | 1,015 | 19.0 % |
+| Machinery, power and weapons | 848 | 15.9 % |
+| Pipes and cables | 800 | 15.0 % |
 | Cut points | 260 | 4.9 % |
 | Lights | 258 | 4.8 % |
-| Hull panels | 212 | 4.0 % |
+| Hull panels | 214 | 4.0 % |
 | Structural frame | 204 | 3.8 % |
 
 The category table is from the v0.9.10 census of the MCRN Tachi. Against v0.9.9 the rebuilt point defense housings add 91 machinery parts, and the regrouped fore hull adds 4 cut points. In v0.9.11 the rebuilt cryo ring has 12 straight pipes fewer and 2 cut points more. In v0.9.12 the posters and the 16 reaction mass tanks add 22 furniture parts, the generator status lights 12 lights, the ceiling slot covers 5 hull panels, and the new injector nozzles count 8 pipe parts fewer. The six point defense mounts were also merged into their trusses and gun bodies (6 machinery parts fewer). The section tables are from the v0.9.8 census of the Rocinante, with the MCRN Tachi's 106 extra furniture parts added to the interior, where they all are. Four pipe pieces at the fore thermal vents carry the cut point type so that they do not joint to the vents; they are counted here as pipe.
@@ -123,11 +124,11 @@ The floating corpse and its suit (14 parts) spawn in one of six places. In this 
 
 ### Loose parts
 
-At spawn the main structure is one body of 5,138 parts (v0.9.12, calculated: every part added since the census is jointed to the ship). Two fittings are loose in this build: a railing and a thruster terminal.
+At spawn the main structure is one body of 5,162 parts (v0.9.13, calculated: every part added since the census is jointed to the ship). Two fittings are loose in this build: a railing and a thruster terminal.
 
 | | |
 |---|---|
-| Main structure | 5,138 parts in one body |
+| Main structure | 5,162 parts in one body |
 | Loose parts | 183, in 159 separate bodies |
 | Loose single items | 150 |
 | Loose bodies of more than one part | 9 |
@@ -219,14 +220,14 @@ The ship comes in three versions, each listed as its own ship in Free Play and o
 |---|---|---|---|
 | What differs | | Colors as an independent warship, keel railgun with its ammo crate and 2 generators on the breech, Belter posters, less furniture | Colors, 24 external tanks on trusses, point defense cannons removed, own bay pose, Belter posters, less furniture |
 | How it is picked | Own ship entry | Own ship entry | Own ship entry |
-| Live parts at spawn | 5,321 (v0.9.12, see Parts) | 5,223 (logged) | 5,746 (5,806 as a ghost ship) |
-| Parts counted by the joint pass | 5,319 | 5,221 as a normal ship (logged), 5,281 as a ghost ship | 5,744 as a normal ship, 5,804 as a ghost ship |
-| Headroom under the part ceiling | 3,631 | 3,729 (3,669 as a ghost ship) | 3,206 (3,146 as a ghost ship) |
-| Main structure | 5,138 | 5,045 | 5,616 as a ghost ship |
+| Live parts at spawn | 5,345 (v0.9.13, see Parts) | 5,247 | 5,768 (5,828 as a ghost ship) |
+| Parts counted by the joint pass | 5,343 | 5,245 as a normal ship, 5,305 as a ghost ship | 5,766 as a normal ship (logged), 5,826 as a ghost ship |
+| Headroom under the part ceiling | 3,607 | 3,705 (3,645 as a ghost ship) | 3,184 (3,124 as a ghost ship) |
+| Main structure | 5,162 | 5,069 | 5,638 as a ghost ship |
 | Loose parts | 183 in 159 bodies | about 180 in 156 bodies | 190 in 160 bodies, as a ghost ship |
 | Cut points | 260 | 260 | 343 |
 | Size (length x beam x height) | 133.7 x 54.6 x 46.3 m | same | 133.7 x 67.2 x 55.1 m |
-| Estimated mass | at least 268 t | same | about 394 t (see Mass) |
+| Estimated mass | at least 274 t | same | about 400 t (see Mass) |
 | Wall posters at 30 spots | MCRN | Belter | Belter |
 | Crew bunks (berths) | 28 | 12 | 12 |
 | Medbay beds | 5 | 5 | 5 |
@@ -284,11 +285,11 @@ The volume is an upper estimate: the outline of the hull parts was taken every m
 
 ### Mass
 
-Estimated total: **at least 268 t**.
+Estimated total: **at least 274 t**. In v0.9.13 the 10 torpedoes were given a part type whose mass comes from their size, about 600 kg each instead of a flat 10 kg (about 6 t more).
 
 The game works out a part's mass from its material density and the volume of its mesh. This figure adds that up for every custom mesh, and uses the mass the game reported for each stock part. It covers 2,592 of 3,461 objects (75 %). The rest could not be resolved, and stock assemblies made of several pieces are counted by their main piece only, so the true figure is higher.
 
-**Gas variant mass.** About 394 t, an estimate built on the base figure: 268 t, less up to 38 t for the point defense cannon parts the variant removes, plus 164 t for the 24 tank bodies (16 at 7,500 kg and 8 at 5,500 kg). The trusses, tank end caps and cradle cut points are not included, so the true figure is somewhat higher.
+**Gas variant mass.** About 400 t, an estimate built on the base figure: 274 t, less up to 38 t for the point defense cannon parts the variant removes, plus 164 t for the 24 tank bodies (16 at 7,500 kg and 8 at 5,500 kg). The trusses, tank end caps and cradle cut points are not included, so the true figure is somewhat higher.
 
 ### Cut points and joint groups
 
@@ -300,6 +301,7 @@ The game works out a part's mass from its material density and the volume of its
 | Forward hull groups | 9, tied by 15 internal cut points; the largest ventral panel is a group of its own |
 | Forward section to Engineering | 4 internal cut points |
 | Torpedo salvage value | 1,218,750 credits each, 12 aboard (flat value from the blueprint) |
+| Torpedo mass | about 600 kg each (v0.9.13; a flat 10 kg before) |
 
 ### By section
 
@@ -403,6 +405,7 @@ The lore gives performance figures for the Epstein drive in general, not for thi
 | Dimensions, per-section sizes | Part bounds in the Unity editor |
 | Volume | Calculated from part bounds, as described above |
 | Mass | Calculated with the game's own formula from mesh volume and material density, plus game-reported masses for stock parts |
+| v0.9.13 figures | The v0.9.12 figures changed by the parts log: 26 parts from the invisible-wall splits (8 point defense legs, 2 Engineering roofs, 16 heat exchanger rod banks) less 2 fuel pipe pieces; the Gas variant hides the 8 legs. Gas variant checked on a load of 26 November: 5,766 counted, 6 more than calculated |
 | v0.9.12 figures, 25 November | The 24 November figures less the 6 point defense mounts (merged into trusses and gun bodies); Rocinante checked on a load of 25 November: 5,221 counted, as calculated. Largest mesh and part ceiling from the same load's log |
 | v0.9.12 figures, 24 November | The v0.9.11 figures changed by the parts logged while building (`.claude/parts_ledger.md`): 5 ceiling slot covers, 12 generator status lights, 6 ammo posters, 8 injector nozzles of 5 parts replacing 8 of 6 pipe pieces; Rocinante also 1 railgun poster and 2 generators of 8 parts. Rocinante checked on a load of 24 November: 5,211 counted, 2 under the calculation. Then 16 reaction mass tanks on every variant; a second Rocinante load counted 5,227 |
 | v0.9.11 figures | The v0.9.10 figures changed by the parts added and removed since: the cryo ring (12 straight pipes fewer, 2 cut points more) and the 60th ghost-ship node. Rocinante: joint-pass count and main structure from the mod's spawn census on a load of 23 November, 11:16 |
