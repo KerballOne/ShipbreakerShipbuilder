@@ -16,7 +16,7 @@ Version 0.9.13, 26 November 2026. The v0.9.13 figures are the v0.9.12 figures ch
 | Cut points | 260 (Gas variant: 343) |
 | Loose items at spawn | 183 (props, pickups and one floating corpse, in one of six places) |
 | Estimated mass | at least 274 t (Gas variant: about 400 t; see Mass) |
-| Download size | 198 MB (zip, all three variants) |
+| Download size | 202 MB (zip, all three variants) |
 | Load time on the test PC | 45 to 138 s |
 
 ---
