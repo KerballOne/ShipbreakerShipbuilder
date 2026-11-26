@@ -109,6 +109,9 @@ public static class ClaudeBridge
                 case "hierarchy": result = Hierarchy(cmd); break;
                 case "capture":   result = Capture(cmd); break;
                 case "catalog":   result = Catalog(cmd); break;
+                case "addrtree":  result = AddrTree(cmd); break;
+                case "addgroup":  result = AddGroup(cmd); break;
+                case "prefabnudge": result = PrefabNudge(cmd); break;
                 case "group":     result = Group(cmd); break;
                 case "place":     result = Place(cmd); break;
                 case "move":      result = Move(cmd); break;
@@ -871,7 +874,7 @@ public static class ClaudeBridge
     {
         var o = new JObject
         {
-            ["name"] = t.name, ["localPos"] = V(t.localPosition), ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale),
+            ["name"] = t.name, ["localPos"] = V(t.localPosition), ["worldPos"] = V(t.position), ["localEuler"] = V(t.localEulerAngles), ["localScale"] = V(t.localScale),
             ["lossyScale"] = V(t.lossyScale),
             ["components"] = new JArray(t.GetComponents<Component>().Where(c => c != null && !(c is Transform)).Select(c => c.GetType().Name)),
         };
@@ -3014,6 +3017,84 @@ public static class ClaudeBridge
         return p;
     }
 
+    // { op:"addgroup", prefab:"Assets/.../Tachi.prefab", paths:["Interior Vessel/Crawlspace/Fuel/PRF_OmniPipe_Straight (4)"],
+    //   sp:"<StructurePartAsset address>", bp:"<EntityBlueprintAsset address>", prefix:"SG ", dry:true }
+    // For each path (an addressable loader inside the prefab): makes a wrapper object at the loader's place in the
+    // hierarchy (same parent and sibling index, identity local pose), moves the loader under it (world pose kept) and
+    // gives the wrapper StructureGroup + EntityBlueprintComponent + AddressableComponentLoader (group's
+    // m_StructurePartAsset = sp, m_BlueprintAsset = bp). The wrapper has no AddressableLoader, so ModdedShipLoader fills
+    // its references on the ship asset BEFORE instantiation (StructureGroup.Awake destroys itself when its asset is null).
+    // Parts spawned under the loader join the group (StructurePart looks up GetComponentInParent<StructureGroup>).
+    static JToken AddGroup(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? true;
+        string sp = (string)cmd["sp"], bp = (string)cmd["bp"], prefix = (string)cmd["prefix"] ?? "SG ";
+        if (string.IsNullOrEmpty(sp) || string.IsNullOrEmpty(bp)) throw new Exception("sp and bp addresses are required");
+        var root = PrefabUtility.LoadPrefabContents(ap); var done = new JArray(); var errs = new JArray();
+        try
+        {
+            // resolve every path BEFORE wrapping: wrapping moves a loader out of its same-named siblings and would shift "Name#k"
+            var resolved = cmd["paths"].Select(pj => (p: (string)pj, t: FindRel(root.transform, (string)pj))).ToList();
+            foreach (var (p, t) in resolved)
+            {
+                if (t == null) { errs.Add(p + ": not found"); continue; }
+                if (t.GetComponent<BBI.Unity.Game.AddressableLoader>() == null) { errs.Add(p + ": not an addressable loader"); continue; }
+                var pg = t.parent != null ? t.parent.GetComponent<BBI.Unity.Game.StructureGroup>() : null;
+                if (pg != null)
+                {
+                    // repair: point null ACL entries at the wrapper's own group / blueprint component
+                    var pacl = pg.GetComponent<BBI.Unity.Game.AddressableComponentLoader>(); int fixedN = 0;
+                    var pebc = pg.GetComponent<BBI.Unity.Game.EntityBlueprintComponent>();
+                    if (pacl != null)
+                        foreach (var v in pacl.componentValues)
+                            if (v.component == null) { v.component = v.field == "m_BlueprintAsset" ? (Component)pebc : pg; if (v.component != null) fixedN++; }
+                    if (fixedN > 0) { EditorUtility.SetDirty(pacl); done.Add(new JObject { ["path"] = p, ["repaired"] = fixedN }); }
+                    else errs.Add(p + ": already grouped");
+                    continue;
+                }
+                var w0 = t.localToWorldMatrix;
+                var wrap = new GameObject(prefix + t.name);
+                wrap.transform.SetParent(t.parent, false); wrap.transform.localPosition = Vector3.zero; wrap.transform.localRotation = Quaternion.identity; wrap.transform.localScale = Vector3.one;
+                wrap.transform.SetSiblingIndex(t.GetSiblingIndex());
+                t.SetParent(wrap.transform, true);
+                var g = wrap.AddComponent<BBI.Unity.Game.StructureGroup>();
+                var ebc = wrap.GetComponent<BBI.Unity.Game.EntityBlueprintComponent>();   // StructureGroup may add it (RequireComponent)
+                if (ebc == null) ebc = wrap.AddComponent<BBI.Unity.Game.EntityBlueprintComponent>();
+                var acl = wrap.AddComponent<BBI.Unity.Game.AddressableComponentLoader>();
+                acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = g, field = "m_StructurePartAsset", address = sp });
+                acl.componentValues.Add(new BBI.Unity.Game.AddressableComponentValue { component = ebc, field = "m_BlueprintAsset", address = bp });
+                float moved = (t.localToWorldMatrix.GetColumn(3) - w0.GetColumn(3)).magnitude;
+                done.Add(new JObject { ["path"] = p, ["wrapper"] = wrap.name, ["moved"] = Math.Round(moved, 6) });
+            }
+            if (!dry && done.Count > 0) PrefabUtility.SaveAsPrefabAsset(root, ap);
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return new JObject { ["dry"] = dry, ["done"] = done, ["errors"] = errs };
+    }
+
+    // { op:"prefabnudge", prefab:"Assets/.../Tachi.prefab", moves:[{path:"rel/path", delta:[x,y,z]}], dry:true }
+    // Moves objects inside a prefab ASSET by a world-space delta (prefab root at identity), so the open scene's
+    // unsaved state is not touched. Reports old/new world positions.
+    static JToken PrefabNudge(JObject cmd)
+    {
+        var ap = (string)cmd["prefab"]; bool dry = (bool?)cmd["dry"] ?? true;
+        var root = PrefabUtility.LoadPrefabContents(ap); var outp = new JArray(); int n = 0;
+        try
+        {
+            foreach (JObject m in cmd["moves"])
+            {
+                var p = (string)m["path"]; var t = FindRel(root.transform, p);
+                if (t == null) { outp.Add(new JObject { ["path"] = p, ["error"] = "not found" }); continue; }
+                var d = m["delta"].Select(x => (float)x).ToArray(); var before = t.position;
+                t.position = before + new Vector3(d[0], d[1], d[2]); n++;
+                outp.Add(new JObject { ["path"] = p, ["from"] = V(before), ["to"] = V(t.position) });
+            }
+            if (!dry && n > 0) PrefabUtility.SaveAsPrefabAsset(root, ap);
+        }
+        finally { PrefabUtility.UnloadPrefabContents(root); }
+        return new JObject { ["dry"] = dry, ["moves"] = outp };
+    }
+
     static Transform FindRel(Transform root, string rel)
     {
         var t = root;
@@ -3132,6 +3213,53 @@ public static class ClaudeBridge
             }
         }
         return new JObject { ["dir"] = dir, ["done"] = done.Count, ["failed"] = failed };
+    }
+
+    // { op:"addrtree", guids:["..."], depth:6 } — read-only: loads each addressable (no instantiate) and lists its
+    // hierarchy with, per node, the mesh name and the StructurePart's structure asset name (m_StructurePartAsset)
+    // and blueprint name (EntityBlueprintComponent.m_BlueprintAsset) when present.
+    static JToken AddrTree(JObject cmd)
+    {
+        int depth = (int?)cmd["depth"] ?? 6;
+        if (!LoadGameAssets.CheckHandlesValid()) throw new Exception("Game assets not loaded");
+        var outp = new JObject();
+        foreach (var g in cmd["guids"])
+        {
+            var guid = (string)g;
+            try
+            {
+                var src = AddressableBaker.LoadAddressableAsync(guid, "").Result;
+                if (src == null) { outp[guid] = "load failed"; continue; }
+                outp[guid] = AddrNode(src.transform, src.transform, depth);
+            }
+            catch (Exception ex) { outp[guid] = "error: " + (ex.InnerException?.Message ?? ex.Message); }
+        }
+        return outp;
+    }
+
+    static JObject AddrNode(Transform t, Transform root, int depth)
+    {
+        var n = new JObject { ["name"] = t.name };
+        if (t != root) n["path"] = RelPath(t, root);
+        var mf = t.GetComponent<MeshFilter>();
+        if (mf != null && mf.sharedMesh != null) { n["mesh"] = mf.sharedMesh.name; n["size"] = V(Vector3.Scale(mf.sharedMesh.bounds.size, t.lossyScale)); }
+        foreach (var c in t.GetComponents<Component>())
+        {
+            if (c == null) continue;
+            var tn = c.GetType().Name;
+            if (tn != "StructurePart" && tn != "EntityBlueprintComponent" && tn != "StructureGroup") continue;
+            var so = new SerializedObject(c);
+            var p = so.FindProperty(tn == "EntityBlueprintComponent" ? "m_BlueprintAsset" : "m_StructurePartAsset");
+            var key = tn == "StructurePart" ? "sp" : tn == "StructureGroup" ? "groupSp" : "bp";
+            n[key] = p == null ? "?" : (p.objectReferenceValue != null ? p.objectReferenceValue.name : "null");
+        }
+        if (depth > 0 && t.childCount > 0)
+        {
+            var kids = new JArray();
+            foreach (Transform c in t) kids.Add(AddrNode(c, root, depth - 1));
+            n["kids"] = kids;
+        }
+        return n;
     }
 
     // Game materials use a shader the editor can't draw; swap to the project's stand-in (as CustomStage does).

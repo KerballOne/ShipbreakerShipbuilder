@@ -944,6 +944,25 @@ public class JointAssistWindow : EditorWindow
     {
         var log = $"[JAW:GetJsaName] go='{go.name}' mapSize={enrichedJsaMap?.Count.ToString() ?? "null"} byNameSize={enrichedJsaByName?.Count.ToString() ?? "null"}";
 
+        // Path 0: StructureGroup above the part. In game StructurePart.StructurePartAsset returns the GROUP's asset
+        // when the part is in a group (IsPartOfGroup), so the group's StructurePartAsset decides the joint type, not
+        // the part's own (e.g. red fuel pipes wrapped in "SG ..." objects: SP_FuelPipe_Junction -> JOINT_PropMount).
+        // The group's asset is set by address in an AddressableComponentLoader on the group's own GameObject.
+        for (var t = go.transform; t != null; t = t.parent)
+        {
+            var grp = t.GetComponent<BBI.Unity.Game.StructureGroup>();
+            if (grp == null) continue;
+            var gacl = t.GetComponent<BBI.Unity.Game.AddressableComponentLoader>();
+            string addr = null;
+            if (gacl != null)
+                foreach (var cv in gacl.componentValues)
+                    if (cv.component == grp && cv.field == "m_StructurePartAsset") { addr = cv.address; break; }
+            var gjsa = addr != null ? EnrichedJsaName(addr) : null;
+            log += $"\n  P0: StructureGroup on '{t.name}' addr={addr ?? "none"} → {gjsa ?? "miss"}";
+            if (gjsa != null) { Debug.Log(log); return gjsa; }
+            break;   // nearest group decides; fall through to the part's own asset if it could not be resolved
+        }
+
         // Path 1: custom parts with AddressableSOLoader
         foreach (var loader in go.GetComponentsInChildren<BBI.Unity.Game.AddressableSOLoader>(true))
         {
