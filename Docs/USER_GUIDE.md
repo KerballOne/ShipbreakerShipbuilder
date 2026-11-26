@@ -873,6 +873,47 @@ Opens a configurable overlay window that draws debug gizmos in the scene view. E
 
 **Caveat — room overlaps:** If you see instant de-pressurisation when loading your ship, check the Overlap opening volumes (shown in the overlay). An extra or misplaced Overlap volume that intersects a SubVolume Include region causes the room to register as breached immediately. See [Room Caveats](#rooms-caveats) for the atmosphere regulator probe issue.
 
+#### `Shipbuilder / Visibility Tool`
+
+Hides or shows parts in the Scene view in bulk, so you can work inside a crowded ship: around one room, one deck, or everything matching a name. It uses Unity's own scene visibility (the eye and hand icons in the Hierarchy), so it **never** switches GameObjects off. The scene and prefab are not marked changed, and the build is the same.
+
+A *part* here is any saved object that draws something: it has a Renderer, or it is an addressable part whose preview mesh draws. A part's preview mesh is always hidden and shown together with the part.
+
+**Scope (top of the window)**
+
+| Setting | What it does |
+|---|---|
+| Affect | **Visibility** hides and shows parts (eye icon). **Picking** locks and unlocks them so clicks in the Scene view pass through (hand icon). Every button below follows this setting. |
+| Limit to | Only act on parts under this object. Leave it empty to act on the whole open scene, or on the prefab you are editing in Prefab Mode. |
+| Include non-rendering | Also count objects that draw nothing (rooms, collider-only objects, empty groups). |
+| Show all / Hide all / Invert | Act on every part in scope. |
+| Back | Undoes the last action of this window (up to 30 steps). Unity's Undo does not track scene visibility; use this instead. |
+| Re-hide previews | Hides the preview meshes of hidden parts again. This also runs by itself after every preview refresh, so you rarely need it. |
+
+**Selection**: hide or show the selected parts, everything *except* the selection, or **Isolate selected** (show the selection, hide the rest). With **Include children** on, selecting a group counts every part under it. Clicking a preview mesh in the Scene view counts as selecting its part.
+
+**By distance**: acts on parts within a radius.
+
+| Setting | What it does |
+|---|---|
+| Centre | **Selection** (follows what you select), **Scene View Pivot** (the point the Scene view orbits), or **Fixed Point** (type it in, or click **From selection**). |
+| From selection surface | With Centre = Selection: on, the radius is measured out from the selection's outer box, so a large selection keeps its neighbours; off, from its centre. |
+| Measure to part pivot | Off: a part is inside when any of its box is within the radius. On: only its pivot point counts. |
+| Radius (m) | Slider; the box to its right sets the slider's maximum. With **Draw radius** on, you can also drag the radius in the Scene view. |
+| Keep selected on | Distance actions never hide the selected parts. |
+| Live isolate | Re-runs **Isolate within radius** whenever the radius, centre or selection changes. Select a part and everything near it shows, the rest hides. |
+
+Buttons: **Isolate within radius**, and hide or show the parts **inside** or **outside** the radius.
+
+**By name or component**: type comma-separated terms in **Contains** (not case-sensitive). A part matches if any term appears in its name (or, for an addressable part, its preview's name), or with **Match = Component** in one of its component type names. Put `!` before a term to exclude parts that match it, e.g. `pipe, !bracket`. Then **Hide**, **Show**, **Isolate**, or **Select** the matches.
+
+**When to use:** Reaching parts buried inside the hull, checking one room's furniture without the walls in the way, or locking big hull panels so clicks reach the small parts behind them (Affect = Picking, select the panels, **Lock selected**).
+
+**Caveats:**
+- If the window warns that scene visibility is switched off in the Scene view toolbar, hidden parts still draw. Click **Switch it on**.
+- The hidden state is saved per user in `Library/` and is never committed or built. If a part seems to be missing from the Scene view, check the Hierarchy eye icon before anything else, or click **Show all**.
+- Hidden parts still exist for every other tool, the build and the game. Hiding is only a view.
+
 ---
 
 ### 1.7 Utility
