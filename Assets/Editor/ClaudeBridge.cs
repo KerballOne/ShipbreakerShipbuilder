@@ -145,6 +145,7 @@ public static class ClaudeBridge
                 case "prefabdelete": result = PrefabDelete(cmd); break;
                 case "aclpurge": result = AclPurge(cmd); break;
                 case "aclrepair": result = AclRepair(cmd); break;
+                case "aclrestore": result = AclRestore(cmd); break;
                 case "addmjc": result = AddMjc(cmd); break;
                 case "mjcgroups": result = MjcGroups(cmd); break;
                 case "mjcregroup": result = MjcRegroup(cmd); break;
@@ -2581,6 +2582,70 @@ public static class ClaudeBridge
         bool added = c == null;
         if (added) { t.gameObject.AddComponent<BBI.Unity.Game.MandatoryJointContainer>(); Dirty(t.gameObject); }
         return new JObject { ["path"] = PathOf(t.gameObject), ["added"] = added, ["parts"] = t.GetComponentsInChildren<BBI.Unity.Game.StructurePart>(true).Length };
+    }
+
+    // { op:"aclrestore", path:"Tachi", dry:true, only:["<acl GO path>", ...] }
+    // Finds AddressableComponentLoaders under `path` (prefab instances) whose list is missing entries that the
+    // ORIGINAL source asset (deepest prefab in the chain) has: e.g. an outer prefab's stale array-size override cut
+    // the tail off. Missing = source entry with a live component whose instance counterpart has no entry for that field.
+    // Restores them (appended, same field + address). `only` limits writes to loaders at those paths.
+    // `match:"<substring>"` also reports matching loaders' prefab chain counts and source components absent from the instance.
+    static IEnumerable<string> Chain(BBI.Unity.Game.AddressableComponentLoader a)
+    {
+        for (var s = a; s != null; s = PrefabUtility.GetCorrespondingObjectFromSource(s))
+            yield return (AssetDatabase.GetAssetPath(s) is string ap && ap.Length > 0 ? ap : "scene") + " n=" + s.componentValues.Count;
+    }
+
+    static JToken AclRestore(JObject cmd)
+    {
+        var t = Find((string)cmd["path"] ?? "Tachi"); bool dry = (bool?)cmd["dry"] ?? true;
+        if (t == null) throw new Exception("Not found: " + cmd["path"]);
+        var only = cmd["only"] is JArray oa ? new HashSet<string>(oa.Select(x => (string)x)) : null;
+        var res = new JArray(); int restored = 0, scanned = 0, sourced = 0, unmapped = 0;
+        foreach (var acl in t.GetComponentsInChildren<BBI.Unity.Game.AddressableComponentLoader>(true))
+        {
+            scanned++;
+            var deepest = acl; for (var s = PrefabUtility.GetCorrespondingObjectFromSource(deepest); s != null; s = PrefabUtility.GetCorrespondingObjectFromSource(s)) deepest = s;
+            if (deepest == acl || deepest.componentValues == null) continue;
+            sourced++;
+            // map every level of each instance component's source chain back to the instance component
+            var map = new Dictionary<Component, Component>();
+            foreach (var c in acl.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                for (var s = PrefabUtility.GetCorrespondingObjectFromSource(c); s != null; s = PrefabUtility.GetCorrespondingObjectFromSource(s))
+                    if (!map.ContainsKey(s)) map[s] = c;
+            }
+            var missing = new JArray(); var toAdd = new List<BBI.Unity.Game.AddressableComponentValue>();
+            foreach (var cv in deepest.componentValues)
+            {
+                if (cv == null || cv.component == null) continue;
+                if (!map.TryGetValue(cv.component, out var inst))   // component not in the instance
+                {
+                    unmapped++;
+                    if (cmd["match"] != null && PathOf(acl.gameObject).Contains((string)cmd["match"]))
+                        missing.Add(new JObject { ["unmapped"] = PathOf(cv.component.gameObject), ["field"] = cv.field, ["type"] = cv.component.GetType().Name });
+                    continue;
+                }
+                if (acl.componentValues.Any(x => x != null && x.component == inst && x.field == cv.field)) continue;
+                missing.Add(new JObject { ["object"] = PathOf(inst.gameObject), ["active"] = inst.gameObject.activeInHierarchy,
+                    ["type"] = inst.GetType().Name, ["field"] = cv.field, ["address"] = cv.address });
+                toAdd.Add(new BBI.Unity.Game.AddressableComponentValue { component = inst, field = cv.field, address = cv.address });
+            }
+            string p = PathOf(acl.gameObject);
+            if (cmd["match"] != null && p.Contains((string)cmd["match"]))
+                res.Add(new JObject { ["acl"] = p, ["entries"] = acl.componentValues.Count, ["sourceEntries"] = deepest.componentValues.Count,
+                    ["source"] = AssetDatabase.GetAssetPath(deepest), ["chain"] = new JArray(Chain(acl)), ["missing"] = missing, ["debug"] = true });
+            if (missing.Count == 0) continue; bool write = !dry && (only == null || only.Contains(p));
+            if (write)
+            {
+                acl.componentValues.AddRange(toAdd); restored += toAdd.Count;
+                EditorUtility.SetDirty(acl); PrefabUtility.RecordPrefabInstancePropertyModifications(acl); Dirty(acl.gameObject);
+            }
+            res.Add(new JObject { ["acl"] = p, ["entries"] = acl.componentValues.Count, ["sourceEntries"] = deepest.componentValues.Count,
+                ["source"] = AssetDatabase.GetAssetPath(deepest), ["written"] = write, ["missing"] = missing });
+        }
+        return new JObject { ["dry"] = dry, ["restored"] = restored, ["scanned"] = scanned, ["sourced"] = sourced, ["unmapped"] = unmapped, ["loaders"] = res };
     }
 
     // { op:"aclregister", path:"Tachi_Gas/.../Part", from:"Tachi_Gas/.../SiblingPart" }
