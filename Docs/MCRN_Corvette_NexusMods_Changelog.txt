@@ -1,27 +1,3 @@
-Combined changelog for the MCRN Corvette page on NexusMods.
-
-The page carries two files, each with its own version numbers: the ships and ModdedShipLoader.
-NexusMods keeps one changelog per page and shows them all in one dropdown, so every ModdedShipLoader line starts
-with its name. The ships are the page's main file, and their lines carry no prefix. One block per version: the first line is the version to enter, the lines
-under it are the changelog lines.
-
-TheExpanse has its own page; its changelog is in the ShipbreakerMods repository, TheExpanse/NexusMods_Changelog.txt.
-
-
-=== ModdedShipLoader (our fork of PieMods v1.2.0) ===
-
-1.2.2
-ModdedShipLoader v1.2.2-kb1: fixed large custom ships closing the game during the loading screen. While joining a ship's parts, the game set aside memory in proportion to the part count times the size of the most detailed part: about 36 GB for a ship of 5,700 parts. That is now a few hundred MB, and the same ship loads with the game using about 8.5 GB in total.
-ModdedShipLoader v1.2.2-kb1: fixed very large ships crashing on any PC, however much memory it has. The size limit that caused it is gone.
-ModdedShipLoader v1.2.2-kb1: added a memory report in BepInEx\LogOutput.log, on lines starting with [MSL-Diag]: Windows version, CPU, RAM, graphics card, free drive space, and memory free and used before and after a ship's parts are joined. No user name, PC name or file paths are recorded.
-
-1.2.1
-ModdedShipLoader v1.2.1-kb1: fixed continuing an in-progress custom ship in Career after restarting the game, which broke the ship. Parts lost their scanner info and highlight and could not be grappled or cut.
-ModdedShipLoader v1.2.1-kb1: fixed the Career job board showing the previous card's image and milestones for a custom ship read from a save, or for a ship type without rewards.
-ModdedShipLoader v1.2.1-kb1: fixed hazards, core systems and mass on the job board being wrong on the first card of a session.
-ModdedShipLoader v1.2.1-kb1: one missing asset no longer stops a whole ship from spawning.
-
-
 === Ships (MCRN Tachi, Rocinante, Beratnas Gas Hauler) ===
 
 0.9.13
