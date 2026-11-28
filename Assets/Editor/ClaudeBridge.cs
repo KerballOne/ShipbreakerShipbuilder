@@ -138,6 +138,17 @@ public static class ClaudeBridge
                 case "collidermesh": result = ColliderMesh(cmd); break;
                 case "makeinteractable": result = MakeInteractableOp(cmd); break;
                 case "worlddump": result = WorldDump(cmd); break;
+                case "rename":   // { op:"rename", items:[{path, name}] } - renames scene objects (components and references are untouched)
+                {
+                    var done = new JArray();
+                    foreach (var it in cmd["items"])
+                    {
+                        var t = Find((string)it["path"]);
+                        if (t == null) throw new Exception("Not found: " + it["path"]);
+                        t.gameObject.name = (string)it["name"]; Dirty(t.gameObject); done.Add(PathOf(t.gameObject));
+                    }
+                    result = done; break;
+                }
                 case "getselection": result = new JArray(Selection.gameObjects.Select(g => new JObject { ["path"] = PathOf(g), ["name"] = g.name,
                     ["hideFlags"] = g.hideFlags.ToString(), ["hasMesh"] = g.GetComponent<MeshFilter>() != null, ["pos"] = V(g.transform.position) })); break;
                 case "jointpads": result = JointPads(cmd); break;
