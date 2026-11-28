@@ -1758,6 +1758,7 @@ Where a convex hull spans open space the player can reach, the player meets an i
 
 Things learned doing this on a whole ship:
 - Decide "faces a room" with a flood fill of the free space around the ship, not by the face's direction. A slanted face can point inward and still open to space.
+- Also check faces behind parts the player can tear off with the grapple (vents, hatches, thrusters). A flood fill sees the space behind such a part as closed or as outside, but once the part is yanked the face is in the way. Cast a ray out of each invisible face: if the first part it hits is grapple-breakable, the face opens up after a yank.
 - A slicer that caps cut faces must only re-map UVs on the faces it creates. Faces next to the cut keep their own UVs, or the texture streaks.
 - Give plates a plain tile from the hull atlas, tiled at the hull's texel density, not the UVs of a nearby face (that copies stripes and decals).
 - Check every changed part with textured renders of the original and the new mesh from two sides before calling it done.
