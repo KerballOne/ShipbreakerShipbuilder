@@ -786,7 +786,11 @@ Set both to match whichever in-game scenario you're testing against.
 - Yellow text = an angle near-miss (the two faces were close enough together, but not opposite enough).
 - Red text = a distance near-miss (the two faces were angled correctly, but too far apart) — this also covers the rarer case where every individual triangle pair passed both tests but the two parts' full matched regions don't line up as a whole.
 
+**Search order matters.** The game searches each pair starting from the part that comes **first in the ship hierarchy** (depth-first, top to bottom), and the result can differ the other way round: a diagonal face can line up with a panel by plane alone, across a real gap of tens of centimetres. The Mesh result uses the game's order. The **⇄** mark beside it shows both orders: green = matches from either part, yellow = from one part only (hover to see which), grey = neither. When the parts match from one side only, the Mesh row shows a yellow warning instead of Pass or Fail: the joint depends on search order. Moving a part to a different place in the hierarchy can therefore make or break its joints.
+
 The scene view highlights this same closest pair: green highlights are a real coplanar match (the parts will joint); a colored triangle pair (yellow/red) or a purple arrow marks the near-miss and, for the arrow case, the actual direction one part needs to move to close the gap.
+
+**Joint Path (game census)**, below the Mesh result: select two parts and click **Find Path**. It reads the newest `joint_census_live.csv` (PartInfoLogger F10 in game) or `joint_census_spawn.csv` (reloaded by itself when F10 writes a newer one) and shows the shortest chain of joints the game actually made between them: numbered in the Scene view and listed in the window (the list scrolls when long). Each joint is drawn between the closest points of the two parts' meshes; one whose meshes are more than 5 cm apart is drawn red with its gap and marked "joint across a GAP" in the list. Stock parts without an editor mesh show as small boxes. **Skip cut points** and **Skip yankables** make the chain avoid those parts, as if every cut point were cut and every yankable part torn off; if no chain is left, the two parts come apart that way. A part counts as yankable when the census `Yank` column is 1 (the game's own grapple-throw check). **Select Parts** selects the chain in the Hierarchy, **Hide/Show Overlay** toggles the drawing, **✕** clears it. Use it to see why a section that looks free is still attached.
 
 **Triangle-pair budget:** the coplanar search is brute-force (every triangle in A against every triangle in B), so it's capped at 2,000,000 triangle-pair comparisons per MeshFilter pair to keep the Editor responsive on large/complex parts. If a pair hits this cap, its result may be a false negative — a dialog will offer to re-run the Check with a larger budget (sized to exactly what that pair needs, plus 10% headroom). The progress bar shows real triangle-pair throughput while a scan is in progress, and **Cancel** takes effect within a fraction of a second even mid-scan on a single large pair.
 
@@ -869,6 +873,8 @@ Opens a configurable overlay window that draws debug gizmos in the scene view. E
 | Joints | Joint marker positions, color-coded by type |
 | Joint collision | Collider bounds of each joint (shown as an outline) |
 
+**Joint census overlay**: reads the newest `joint_census_live.csv` (PartInfoLogger F10) or `joint_census_spawn.csv` and colours parts by cluster or cluster size. The joint path between two parts is in the Joint Compatibility Check.
+
 **When to use:** When diagnosing pressurisation issues, room overlap problems, or unexpected de-pressurisation on ship load. The overlays make the invisible room volumes visible without having to click into each prefab.
 
 **Caveat — room overlaps:** If you see instant de-pressurisation when loading your ship, check the Overlap opening volumes (shown in the overlay). An extra or misplaced Overlap volume that intersects a SubVolume Include region causes the room to register as breached immediately. See [Room Caveats](#rooms-caveats) for the atmosphere regulator probe issue.
@@ -906,7 +912,6 @@ A *part* here is any saved object that draws something: it has a Renderer, or it
 Buttons: **Isolate within radius**, and hide or show the parts **inside** or **outside** the radius.
 
 **By name or component**: type comma-separated terms in **Contains** (not case-sensitive). A part matches if any term appears in its name (or, for an addressable part, its preview's name), or with **Match = Component** in one of its component type names. Put `!` before a term to exclude parts that match it, e.g. `pipe, !bracket`. Then **Hide**, **Show**, **Isolate**, or **Select** the matches.
-
 **When to use:** Reaching parts buried inside the hull, checking one room's furniture without the walls in the way, or locking big hull panels so clicks reach the small parts behind them (Affect = Picking, select the panels, **Lock selected**).
 
 **Caveats:**

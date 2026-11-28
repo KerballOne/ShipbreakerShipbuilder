@@ -48,9 +48,266 @@ public static class JointCensusGizmos
         SceneView.duringSceneGui += OnSceneGUI;
     }
 
+    // Id-based census graph, kept for the two-part path finder: per entity id its part name, census
+    // position fitted into editor space, jointed neighbour ids, and the editor mesh it matched (if any).
+    static Dictionary<int, string> s_rowName = new Dictionary<int, string>();
+    static Dictionary<int, Vector3> s_rowPos = new Dictionary<int, Vector3>();
+    static Dictionary<int, HashSet<int>> s_adj = new Dictionary<int, HashSet<int>>();
+    static Dictionary<int, MeshFilter> s_idToMf = new Dictionary<int, MeshFilter>();
+    static Dictionary<int, int> s_goToId = new Dictionary<int, int>();
+    static List<int> s_path = new List<int>();
+    // Census parts the path may not pass through when the matching toggle is on (end parts are always allowed).
+    static HashSet<int> s_cutIds = new HashSet<int>();    // Jsa or name contains "CutPoint"
+    static HashSet<int> s_yankIds = new HashSet<int>();   // census Yank column = 1 (grapple-breakable joint)
+    public static bool HasYankColumn { get; private set; }
+
+    // Path settings, set from the Joint Assist window's Joint Path section.
+    public static bool SkipCut { get => EditorPrefs.GetBool("JCG.skipCut", false); set => EditorPrefs.SetBool("JCG.skipCut", value); }
+    public static bool SkipYank { get => EditorPrefs.GetBool("JCG.skipYank", false); set => EditorPrefs.SetBool("JCG.skipYank", value); }
+    public static bool ShowPath = true;
+    static readonly Color kPathColor = new Color(1f, 0.9f, 0f, 0.9f);
+    static string s_loadedFile; static DateTime s_loadedStamp;
+    public static bool HasPath => s_path.Count > 0;
+    public static string PathText { get; private set; } = "";
+
+    public static void ClearPath() { s_path.Clear(); s_links.Clear(); PathText = ""; SceneView.RepaintAll(); }
+
+    // Census entity id for a scene object: its own (or a child mesh's) match, else the census row of the
+    // same name nearest to it, else any census row within 0.5 m (stock parts that have no editor mesh).
+    static int ResolveId(GameObject go)
+    {
+        if (s_goToId.TryGetValue(go.GetInstanceID(), out var id)) return id;
+        foreach (var mf in go.GetComponentsInChildren<MeshFilter>(true))
+            if (s_goToId.TryGetValue(mf.gameObject.GetInstanceID(), out id)) return id;
+        var name = go.name.Replace("(Clone)", "").Trim(); var p = go.transform.position;
+        int best = -1; float bd = 1f;
+        foreach (var kv in s_rowName)
+            if (kv.Value == name) { var d = (s_rowPos[kv.Key] - p).magnitude; if (d < bd) { bd = d; best = kv.Key; } }
+        if (best >= 0) return best;
+        bd = 0.5f;
+        foreach (var kv in s_rowPos) { var d = (kv.Value - p).magnitude; if (d < bd) { bd = d; best = kv.Key; } }
+        return best;
+    }
+
+    // Shortest joint chain (fewest joints) between the two selected parts, from the census graph.
+    public static string FindPathFromSelection()
+    {
+        var newest = FindIdCensus();   // reload when F10 wrote a newer census
+        if (newest != null && (newest != s_loadedFile || File.GetLastWriteTime(newest) != s_loadedStamp)) ReloadCsv();
+        TryLoad();
+        s_path.Clear(); s_links.Clear(); PathText = "";
+        if (s_adj.Count == 0) return "No id-based census loaded (needs joint_census_live.csv or joint_census_spawn.csv with Id / NeighbourIds).";
+        var sel = Selection.gameObjects;
+        if (sel.Length != 2) return $"Select exactly two parts ({sel.Length} selected).";
+        int a = ResolveId(sel[0]), b = ResolveId(sel[1]);
+        if (a < 0) return $"'{sel[0].name}' is not in the census (not on the ship in that run, or no match).";
+        if (b < 0) return $"'{sel[1].name}' is not in the census (not on the ship in that run, or no match).";
+        if (a == b) return "Both selections are the same census part.";
+        bool skipCut = SkipCut, skipYank = SkipYank && HasYankColumn;
+        bool Blocked(int x) => x != a && x != b && ((skipCut && s_cutIds.Contains(x)) || (skipYank && s_yankIds.Contains(x)));
+        var prev = new Dictionary<int, int> { [a] = a }; var q = new Queue<int>(); q.Enqueue(a);
+        while (q.Count > 0 && !prev.ContainsKey(b))
+        {
+            var x = q.Dequeue();
+            if (!s_adj.TryGetValue(x, out var nb)) continue;
+            foreach (var y in nb) if (!prev.ContainsKey(y) && !Blocked(y)) { prev[y] = x; q.Enqueue(y); }
+        }
+        var skipped = (skipCut ? "cut points" : "") + (skipCut && skipYank ? " and " : "") + (skipYank ? "yankable parts" : "");
+        var yankNote = SkipYank && !HasYankColumn ? " (Yankable parts NOT skipped: this census has no Yank column; press F10 again with the updated PartInfoLogger.)" : "";
+        if (!prev.ContainsKey(b))
+            return skipped.Length > 0
+                ? $"No joint path without {skipped}: '{s_rowName[a]}' and '{s_rowName[b]}' come apart once those are cut or yanked.{yankNote}"
+                : $"No joint path: '{s_rowName[a]}' and '{s_rowName[b]}' are in different clusters (not attached to each other).";
+        for (int x = b; ; x = prev[x]) { s_path.Add(x); if (x == a) break; }
+        s_path.Reverse();
+        ComputeLinks();
+        var sb = new System.Text.StringBuilder(); int far = 0;
+        for (int i = 0; i < s_path.Count; i++)
+        {
+            var id = s_path[i];
+            sb.Append($"{i}. {s_rowName[id]}" + (s_cutIds.Contains(id) ? "  [cut point]" : "") + (s_yankIds.Contains(id) ? "  [yankable]" : "") +
+                      (s_idToMf.ContainsKey(id) ? "" : "  (stock part)"));
+            if (i < s_links.Count)
+            {
+                var l = s_links[i];
+                if (l == null) sb.Append("\n     | joint (no editor mesh to measure)");
+                else { if (l.Value.D > kGapWarn) far++; sb.Append(l.Value.D > kGapWarn ? $"\n     | joint across a {l.Value.D:0.00} m GAP" : $"\n     | joint, touching ({l.Value.D * 100:0.0} cm)"); }
+            }
+            sb.Append('\n');
+        }
+        PathText = sb.ToString().TrimEnd();
+        if (far > 0) PathText = $"{far} joint(s) on this chain span more than {kGapWarn * 100:0} cm between the editor meshes (red in the Scene view).\n\n" + PathText;
+        SceneView.RepaintAll();
+        return $"{s_path.Count - 2} part(s) between them, {s_path.Count - 1} joint(s) on the shortest chain" +
+               (skipped.Length > 0 ? $" that avoids {skipped}." : ".") + yankNote;
+    }
+
+    // Selects the scene objects of the highlighted chain: matched editor meshes directly; stock parts by
+    // the scene object of the same name nearest their census position (within 1 m), e.g. addressable loaders.
+    // Scene object of a census part: its matched mesh, else the saved scene object of the same name nearest its
+    // census position (within 1 m), e.g. an addressable loader whose preview draws the stock part.
+    static GameObject SceneObjectFor(int id, List<Transform> scene)
+    {
+        if (s_idToMf.TryGetValue(id, out var mf) && mf != null) return mf.gameObject;
+        var name = s_rowName[id]; var p = s_rowPos[id]; Transform best = null; float bd = 1f;
+        foreach (var t in scene)
+        {
+            if (t.hideFlags != HideFlags.None || t.name.Replace("(Clone)", "").Trim() != name) continue;
+            var d = (t.position - p).magnitude; if (d < bd) { bd = d; best = t; }
+        }
+        return best != null ? best.gameObject : null;
+    }
+
+    static List<Transform> SceneTransforms()
+    {
+        var scene = new List<Transform>();
+        foreach (var root in GetActiveRootObjects()) scene.AddRange(root.GetComponentsInChildren<Transform>(false));
+        return scene;
+    }
+
+    // World-space triangles of a part: its own mesh, or every mesh under it (incl. addressable preview children).
+    static (Vector3[] V, int[] T) WorldMesh(GameObject go)
+    {
+        if (go == null) return (null, null);
+        var own = go.GetComponent<MeshFilter>();
+        var mfs = own != null && own.sharedMesh != null ? new[] { own } : go.GetComponentsInChildren<MeshFilter>(true);
+        var V = new List<Vector3>(); var T = new List<int>();
+        foreach (var mf in mfs)
+        {
+            if (mf == null || mf.sharedMesh == null) continue;
+            var m = mf.transform.localToWorldMatrix; int b = V.Count;
+            foreach (var v in mf.sharedMesh.vertices) V.Add(m.MultiplyPoint3x4(v));
+            foreach (var i in mf.sharedMesh.triangles) T.Add(b + i);
+        }
+        return V.Count > 0 ? (V.ToArray(), T.ToArray()) : (null, null);
+    }
+
+    // Closest point pair between two triangle meshes: vertices of each side against the other side's triangles,
+    // only triangles whose box comes within the best distance found so far (seeded by a vertex-vertex pass).
+    static (Vector3 A, Vector3 B, float D) ClosestPoints((Vector3[] V, int[] T) a, (Vector3[] V, int[] T) b)
+    {
+        int sa = Mathf.Max(1, a.V.Length / 1500), sb = Mathf.Max(1, b.V.Length / 1500);
+        Vector3 pa = a.V[0], pb = b.V[0]; float best = float.MaxValue;
+        for (int i = 0; i < a.V.Length; i += sa)
+            for (int j = 0; j < b.V.Length; j += sb)
+            { var d = (a.V[i] - b.V[j]).sqrMagnitude; if (d < best) { best = d; pa = a.V[i]; pb = b.V[j]; } }
+        best = Mathf.Sqrt(best);
+        void Refine((Vector3[] V, int[] T) pts, (Vector3[] V, int[] T) tris, bool ptsAreA)
+        {
+            for (int t = 0; t < tris.T.Length; t += 3)
+            {
+                Vector3 x = tris.V[tris.T[t]], y = tris.V[tris.T[t + 1]], z = tris.V[tris.T[t + 2]];
+                var lo = Vector3.Min(Vector3.Min(x, y), z) - Vector3.one * best; var hi = Vector3.Max(Vector3.Max(x, y), z) + Vector3.one * best;
+                foreach (var p in pts.V)
+                {
+                    if (p.x < lo.x || p.y < lo.y || p.z < lo.z || p.x > hi.x || p.y > hi.y || p.z > hi.z) continue;
+                    var q = ClosestOnTriangle(p, x, y, z); var d = (p - q).magnitude;
+                    if (d < best) { best = d; if (ptsAreA) { pa = p; pb = q; } else { pa = q; pb = p; } lo = Vector3.Min(Vector3.Min(x, y), z) - Vector3.one * best; hi = Vector3.Max(Vector3.Max(x, y), z) + Vector3.one * best; }
+                }
+            }
+        }
+        Refine(a, b, true); Refine(b, a, false);
+        return (pa, pb, best);
+    }
+
+    // Ericson, Real-Time Collision Detection 5.1.5.
+    static Vector3 ClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0 && d2 <= 0) return a;
+        Vector3 bp = p - b; float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0 && d4 <= d3) return b;
+        float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) return a + ab * (d1 / (d1 - d3));
+        Vector3 cp = p - c; float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0 && d5 <= d6) return c;
+        float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) return a + ac * (d2 / (d2 - d6));
+        float va = d3 * d6 - d5 * d4;
+        if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+        float denom = 1f / (va + vb + vc);
+        return a + ab * (vb * denom) + ac * (vc * denom);
+    }
+
+    // Contact for each joint on the path: closest mesh points of the two parts (null when a part has no mesh in the editor).
+    static List<(Vector3 A, Vector3 B, float D)?> s_links = new List<(Vector3, Vector3, float)?>();
+    const float kGapWarn = 0.05f;   // spawn coplanar threshold: a joint across more than this is not a direct contact
+
+    static void ComputeLinks()
+    {
+        s_links.Clear();
+        var scene = SceneTransforms();
+        var meshes = s_path.Select(id => WorldMesh(SceneObjectFor(id, scene))).ToList();
+        for (int i = 0; i + 1 < s_path.Count; i++)
+            s_links.Add(meshes[i].V != null && meshes[i + 1].V != null ? ClosestPoints(meshes[i], meshes[i + 1]) : ((Vector3, Vector3, float)?)null);
+    }
+
+    public static string SelectPathParts()
+    {
+        if (s_path.Count == 0) return "No path to select. Click Find Path first.";
+        var scene = SceneTransforms();
+        var picked = new List<GameObject>(); int missing = 0;
+        foreach (var id in s_path)
+        {
+            var go = SceneObjectFor(id, scene);
+            if (go != null) picked.Add(go); else missing++;
+        }
+        Selection.objects = picked.Distinct().Cast<UnityEngine.Object>().ToArray();
+        return $"Selected {Selection.objects.Length} of {s_path.Count} path parts" + (missing > 0 ? $"; {missing} not found in the scene." : ".");
+    }
+
+    static void DrawPath()
+    {
+        var col = kPathColor;
+        var gapCol = new Color(1f, 0.25f, 0.2f, 1f);
+        var pts = s_path.Select(id => s_rowPos[id]).ToArray();
+        for (int i = 0; i < s_path.Count; i++)
+        {
+            var id = s_path[i];
+            if (s_idToMf.TryGetValue(id, out var mf) && mf != null && mf.sharedMesh != null)
+                using (new Handles.DrawingScope(col, mf.transform.localToWorldMatrix))
+                    Handles.DrawLines(GetSegments(mf.sharedMesh, false));
+            else
+                using (new Handles.DrawingScope(col))
+                    Handles.DrawWireCube(pts[i], Vector3.one * 0.5f);
+        }
+        // Joints: drawn between the closest points of the two meshes. Inside each part, a dotted line links
+        // where the chain enters to where it leaves. Labels sit at each part's entry point.
+        for (int i = 0; i < s_path.Count; i++)
+        {
+            var into = i > 0 && s_links[i - 1] != null ? s_links[i - 1].Value.B : (Vector3?)null;
+            var outOf = i < s_links.Count && s_links[i] != null ? s_links[i].Value.A : (Vector3?)null;
+            var at = into ?? outOf ?? pts[i];
+            Handles.Label(at, $"{i}. {s_rowName[s_path[i]]}", EditorStyles.whiteMiniLabel);
+            if (into.HasValue && outOf.HasValue)
+                using (new Handles.DrawingScope(col)) Handles.DrawDottedLine(into.Value, outOf.Value, 3f);
+        }
+        for (int i = 0; i < s_links.Count; i++)
+        {
+            var l = s_links[i];
+            if (l == null)
+            {
+                using (new Handles.DrawingScope(new Color(col.r, col.g, col.b, 0.4f))) Handles.DrawDottedLine(pts[i], pts[i + 1], 4f);
+                continue;
+            }
+            bool gap = l.Value.D > kGapWarn; var c = gap ? gapCol : col;
+            using (new Handles.DrawingScope(c))
+            {
+                float s = HandleUtility.GetHandleSize(l.Value.A) * 0.06f;
+                Handles.SphereHandleCap(0, l.Value.A, Quaternion.identity, s, EventType.Repaint);
+                Handles.SphereHandleCap(0, l.Value.B, Quaternion.identity, s, EventType.Repaint);
+                Handles.DrawAAPolyLine(gap ? 6f : 4f, l.Value.A, l.Value.B);
+            }
+            if (gap) Handles.Label((l.Value.A + l.Value.B) * 0.5f, $"gap {l.Value.D:0.00} m", EditorStyles.boldLabel);
+        }
+    }
+
     public static void ReloadCsv()
     {
         s_loaded = false;
+        s_rowName.Clear(); s_rowPos.Clear(); s_adj.Clear(); s_idToMf.Clear(); s_goToId.Clear(); s_path.Clear(); s_links.Clear(); PathText = "";
+        s_cutIds.Clear(); s_yankIds.Clear(); HasYankColumn = false;
         s_parts.Clear(); s_byObj.Clear(); s_drawable.Clear(); s_clusterBounds.Clear(); SourceDescription = "";
         s_clusterSizes.Clear();
         s_clusterNames.Clear();
@@ -112,7 +369,8 @@ public static class JointCensusGizmos
         if (lines.Length < 2) return false;
         var header = SplitCsvLine(lines[0]);
         int iName = header.IndexOf("PartName"), iPos = header.IndexOf("WorldPos"), iCount = header.IndexOf("JointedNeighbours"),
-            iId = header.IndexOf("Id"), iNb = header.IndexOf("NeighbourIds");
+            iId = header.IndexOf("Id"), iNb = header.IndexOf("NeighbourIds"), iJsa = header.IndexOf("Jsa"), iYank = header.IndexOf("Yank");
+        HasYankColumn = iYank >= 0;
         if (iName < 0 || iPos < 0 || iId < 0 || iNb < 0) return false;
 
         var rows = new List<(string Name, Vector3 Pos, int Count, int Id, int[] Nb)>();
@@ -126,6 +384,10 @@ public static class JointCensusGizmos
             int.TryParse(iCount >= 0 ? f[iCount] : "0", out var count);
             var nb = f[iNb].Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(x => int.TryParse(x, out var v) ? v : -1).Where(v => v >= 0).ToArray();
             rows.Add((f[iName], ParseVec(f[iPos]), count, id, nb));
+            var jsa = iJsa >= 0 && f.Count > iJsa ? f[iJsa] : "";
+            if (jsa.IndexOf("CutPoint", StringComparison.OrdinalIgnoreCase) >= 0 || f[iName].IndexOf("CutPoint", StringComparison.OrdinalIgnoreCase) >= 0)
+                s_cutIds.Add(id);
+            if (iYank >= 0 && f.Count > iYank && f[iYank] == "1") s_yankIds.Add(id);
         }
         if (rows.Count == 0) return false;
 
@@ -192,8 +454,23 @@ public static class JointCensusGizmos
             var cl = rowCluster[bestId];
             var info = new PartInfo { NeighborCount = bestCount, ClusterId = cl, ClusterSize = s_clusterSizes[cl] };
             s_byObj[s.Go.GetInstanceID()] = info;
+            s_goToId[s.Go.GetInstanceID()] = bestId;
             var mf = s.Go.GetComponent<MeshFilter>();
-            if (mf != null) s_drawable.Add((mf, info));
+            if (mf != null) { s_drawable.Add((mf, info)); s_idToMf[bestId] = mf; }
+        }
+        // Graph for the path finder (joints listed by either side count).
+        foreach (var r in rows)
+        {
+            s_rowName[r.Id] = r.Name;
+            s_rowPos[r.Id] = rot.MultiplyVector(r.Pos - gOrigin) + uOrigin;
+            if (!s_adj.TryGetValue(r.Id, out var set)) s_adj[r.Id] = set = new HashSet<int>();
+            foreach (var n in r.Nb)
+            {
+                if (!parent.ContainsKey(n) || n == r.Id) continue;
+                set.Add(n);
+                if (!s_adj.TryGetValue(n, out var back)) s_adj[n] = back = new HashSet<int>();
+                back.Add(r.Id);
+            }
         }
         // Every cluster can be framed from its census positions (fitted into editor space), even when
         // none of its parts exist as meshes in the editor (stock parts loaded from the game).
@@ -217,7 +494,7 @@ public static class JointCensusGizmos
         try
         {
             var idPath = FindIdCensus();
-            if (idPath != null && TryLoadIdCensus(idPath)) { LoadFailed = false; return; }
+            if (idPath != null && TryLoadIdCensus(idPath)) { LoadFailed = false; s_loadedFile = idPath; s_loadedStamp = File.GetLastWriteTime(idPath); return; }
 
             var path = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "joint_census.csv"));
             SourceDescription = "joint_census.csv (old name-only format)";
@@ -489,6 +766,9 @@ public static class JointCensusGizmos
 
     static void OnSceneGUI(SceneView sv)
     {
+        // Joint path (Joint Assist window): drawn on its own, whether or not the census overlay is on.
+        if (ShowPath && s_path.Count > 0) DrawPath();
+
         if (!GameRenderWindow.drawJointCensus) return;
 
         TryLoad();

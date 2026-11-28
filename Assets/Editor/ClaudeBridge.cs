@@ -123,6 +123,7 @@ public static class ClaudeBridge
                 case "rescale":   result = Rescale(cmd); break;
                 case "room":      result = Room(cmd); break;
                 case "rooms":     result = Rooms(cmd); break;
+                case "roomgraph": result = RoomGraph(cmd); break;
                 case "partcount": result = PartCount(cmd); break;
                 case "setactive": result = SetActiveOp(cmd); break;
                 case "mats": result = Mats(cmd); break;
@@ -137,6 +138,8 @@ public static class ClaudeBridge
                 case "collidermesh": result = ColliderMesh(cmd); break;
                 case "makeinteractable": result = MakeInteractableOp(cmd); break;
                 case "worlddump": result = WorldDump(cmd); break;
+                case "getselection": result = new JArray(Selection.gameObjects.Select(g => new JObject { ["path"] = PathOf(g), ["name"] = g.name,
+                    ["hideFlags"] = g.hideFlags.ToString(), ["hasMesh"] = g.GetComponent<MeshFilter>() != null, ["pos"] = V(g.transform.position) })); break;
                 case "jointpads": result = JointPads(cmd); break;
                 case "setsoloader": result = SetSoLoader(cmd); break;
                 case "placesub":  result = PlaceSub(cmd); break;
@@ -1469,6 +1472,38 @@ public static class ClaudeBridge
         return arr;
     }
 
+    // { op:"roomgraph" } — raw data to replay the game's opening->room linking offline: every RoomSubVolumeDefinition
+    // (room path, mode 0 include/1 exclude) and every RoomOpeningDefinition (incl. hidden addressable preview children),
+    // each as the full world matrix transform.localToWorld * TRS(center, I, size) (the game's LocalMatrix; unit cube -0.5..0.5).
+    static JToken RoomGraph(JObject cmd)
+    {
+        JArray M(Transform t, Vector3 c, Vector3 s)
+        {
+            var m = t.localToWorldMatrix * Matrix4x4.TRS(c, Quaternion.identity, s); var a = new JArray();
+            for (int r = 0; r < 4; r++) for (int k = 0; k < 4; k++) a.Add(m[r, k]);
+            return a;
+        }
+        var vols = new JArray(); var opens = new JArray();
+        foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+        {
+            foreach (var sv in root.GetComponentsInChildren<BBI.Unity.Game.RoomSubVolumeDefinition>(true))
+            {
+                var so = new SerializedObject(sv);
+                BBI.Unity.Game.RoomContainerDefinition rcd = null; for (var p = sv.transform; p != null && rcd == null; p = p.parent) rcd = p.GetComponent<BBI.Unity.Game.RoomContainerDefinition>();
+                vols.Add(new JObject { ["path"] = PathOf(sv.gameObject), ["room"] = rcd != null ? PathOf(rcd.gameObject) : null,
+                    ["active"] = sv.gameObject.activeInHierarchy, ["mode"] = so.FindProperty("m_Mode").intValue,
+                    ["m"] = M(sv.transform, so.FindProperty("m_Center").vector3Value, so.FindProperty("m_Size").vector3Value) });
+            }
+            foreach (var od in root.GetComponentsInChildren<BBI.Unity.Game.RoomOpeningDefinition>(true))
+            {
+                bool fake = false; for (var p = od.transform; p != null && !fake; p = p.parent) fake = p.GetComponent<FakePrefabDisplay>() != null;
+                opens.Add(new JObject { ["path"] = PathOf(od.gameObject), ["active"] = od.gameObject.activeInHierarchy, ["fake"] = fake,
+                    ["type"] = (int)od.Type, ["canSeal"] = od.CanSeal, ["m"] = M(od.transform, od.Center, od.Size) });
+            }
+        }
+        return new JObject { ["volumes"] = vols, ["openings"] = opens };
+    }
+
     // { op:"roomvolume", room:"<path of a '[ ] name' room made by op room>", name, center:[..], size:[..] }
     // Adds another world-aligned Include box to an existing room, so one room can cover an L- or U-shaped space.
     static JToken RoomVolume(JObject cmd)
@@ -1480,11 +1515,23 @@ public static class ClaudeBridge
         var vol = new GameObject(UniqueName(rcd.transform, (string)cmd["name"] ?? "Volume"));
         vol.transform.SetParent(rcd.transform, false);
         vol.transform.position = ToV(cmd["center"], Vector3.zero); vol.transform.rotation = Quaternion.identity;
+        var size = ToV(cmd["size"], Vector3.one);
+        if (cmd["like"] != null)   // like:"<path of a RoomSubVolumeDefinition>" -> same world box (pose + size)
+        {
+            var lt = Find((string)cmd["like"]);
+            var ls = lt != null ? lt.GetComponent<BBI.Unity.Game.RoomSubVolumeDefinition>() : null;
+            if (ls == null) throw new Exception("No RoomSubVolumeDefinition at " + cmd["like"]);
+            var lso = new SerializedObject(ls);
+            vol.transform.position = lt.TransformPoint(lso.FindProperty("m_Center").vector3Value);
+            vol.transform.rotation = lt.rotation;
+            size = Vector3.Scale(lt.lossyScale, lso.FindProperty("m_Size").vector3Value);
+            var ps = vol.transform.lossyScale; size = new Vector3(size.x / ps.x, size.y / ps.y, size.z / ps.z);
+        }
         var sub = vol.AddComponent<BBI.Unity.Game.RoomSubVolumeDefinition>();
         var so = new SerializedObject(sub);
         so.FindProperty("m_Center").vector3Value = Vector3.zero;
-        so.FindProperty("m_Size").vector3Value = ToV(cmd["size"], Vector3.one);
-        so.FindProperty("m_Mode").intValue = 0;
+        so.FindProperty("m_Size").vector3Value = size;
+        so.FindProperty("m_Mode").intValue = (int?)cmd["mode"] ?? 0;   // 0 include, 1 exclude
         so.ApplyModifiedPropertiesWithoutUndo();
         Dirty(vol);
         return PathOf(vol);

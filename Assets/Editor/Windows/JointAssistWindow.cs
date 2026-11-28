@@ -79,6 +79,8 @@ public class JointAssistWindow : EditorWindow
         public enum State { None, Pass, Warn, Fail }
         public State state;
         public string message;
+        public string dirTip;     // Mesh row only: ⇄ marker tooltip (null = no marker)
+        public Color dirColor;
     }
     CompatResult compatSPMat  = new CompatResult { state = CompatResult.State.None };
     CompatResult compatMJC    = new CompatResult { state = CompatResult.State.None };
@@ -315,6 +317,11 @@ public class JointAssistWindow : EditorWindow
         // render-mesh triangle-pair search + 2D convex hull + polygon clip, matching
         // BBI.Unity.Game.JointHelper.TryFindJointPolygonsJob (see [[project_game_jointing_algorithm]]).
         DrawCompatMeshResult(compatHull, jsaMjcBothFail);
+
+        EditorGUILayout.Space(4);
+        DrawSeparator();
+        EditorGUILayout.Space(4);
+        DrawJointPathSection();
 
         // ── Section break ─────────────────────────────────────────────────────
         GUILayout.Space(12);
@@ -702,6 +709,8 @@ public class JointAssistWindow : EditorWindow
 
         float minGap = float.MaxValue;
         int overlapCount = 0;
+        var oneWay = new List<string>();   // mesh pairs that match from one side only ("from → to" = the side that matches)
+        int bothWays = 0;
         float areaSum = 0f;
         var overlapPoly = new List<Vector2>();
 
@@ -737,14 +746,23 @@ public class JointAssistWindow : EditorWindow
                 if (!expandedA.Intersects(boundsB)) { continue; }
 
                 // The game's search is order-dependent (it locks onto the closest plane from part A's
-                // side), and which part it treats as A is not under our control — so a pair joints if
-                // EITHER order finds a polygon. Census-confirmed case: A_221_2.007 -> tunnel tile joints,
-                // tile -> A_221_2.007 does not. Keep the first order's near-miss if both fail.
-                bool found = TryFindJointPolygon(mfA, mfB, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
+                // side). At spawn, A is the part that comes FIRST in the ship hierarchy: parts are
+                // collected with root.GetComponentsInChildren<StructurePart>() (depth-first), candidate
+                // pairs are built as (lower index, higher index) and never swapped
+                // (JointingIdentifyCandidatesJob / JointingJobCandidate, decompiled). Census-confirmed:
+                // A_221_2.007 (A_Section) -> tunnel tile (Interior Vessel) joints; tunnel tile ->
+                // Engineering_12 (B_Section) is rejected by the box gate across a 0.47 m gap, although
+                // Engineering_12 -> tile would pass. The other order is still run, for the message only.
+                var first = HierarchyCompare(mfA.transform, mfB.transform) <= 0 ? mfA : mfB;
+                var second = first == mfA ? mfB : mfA;
+                // Reverse order first (result only feeds the ⇄ marker), so the game-order scan's state is what stays shown.
+                bool reverse = TryFindJointPolygon(second, first, out _, out _, out _, out _, new List<Vector2>(), out _, pairLabel);
+                if (checkCanceled) yield break;
+                bool found = TryFindJointPolygon(first, second, out var planeOrigin, out var faceNorm, out var tan, out var bitan, overlapPoly,
                     out var nearMiss, pairLabel);
-                if (!found && !checkCanceled)
-                    found = TryFindJointPolygon(mfB, mfA, out planeOrigin, out faceNorm, out tan, out bitan, overlapPoly,
-                        out _, pairLabel);
+                if (found != reverse)
+                    oneWay.Add(found ? $"{first.name} → {second.name}" : $"{second.name} → {first.name}");
+                else if (found) bothWays++;
                 if (found)
                 {
                     overlapCount++;
@@ -845,6 +863,18 @@ public class JointAssistWindow : EditorWindow
             compatHull = new CompatResult { state = CompatResult.State.Fail,
                 message = $"Mesh: no valid coplanar match — parts will not auto-joint{polySuffix}.{nearMissLine}" };
         }
+        // No pair matches from both sides but some match from one side only: the joint depends on search order
+        // (hierarchy position, and other orders in runtime re-jointing), so report it as a warning, not Pass/Fail.
+        if (bothWays == 0 && oneWay.Count > 0)
+            compatHull = new CompatResult { state = CompatResult.State.Warn,
+                message = $"Mesh: matches from one side only — joint depends on search order{polySuffix}." };
+        // ⇄ marker: green = matches searched from either part, yellow = from one part only (the result above is the
+        // game's order: from the part higher in the hierarchy), grey = neither.
+        compatHull.dirTip = oneWay.Count > 0
+            ? "Matches from one side only: " + string.Join(", ", oneWay.Take(4)) + (oneWay.Count > 4 ? " …" : "") +
+              ". The game searches from the part higher in the hierarchy; the result shown uses that order."
+            : bothWays > 0 ? "Matches searched from either part." : "No match from either part.";
+        compatHull.dirColor = oneWay.Count > 0 ? new Color(0.95f, 0.8f, 0.2f) : bothWays > 0 ? new Color(0.3f, 0.85f, 0.3f) : new Color(0.55f, 0.55f, 0.55f);
 
         var newNearMiss = bestNearMiss;
         ApplyCheckResults(newJointFaces, newNearMiss);
@@ -1607,6 +1637,73 @@ public class JointAssistWindow : EditorWindow
         return clipArea > 1e-9f;
     }
 
+    // ── Joint Path (from the in-game census) ─────────────────────────────────
+    // The shortest chain of REAL in-game joints between the two selected parts, read from the newest PartInfoLogger
+    // census (joint_census_live.csv from F10, or joint_census_spawn.csv). Drawing lives in JointCensusGizmos.
+    string pathStatus;
+    Vector2 pathScroll;
+
+    void DrawJointPathSection()
+    {
+        EditorGUILayout.LabelField(new GUIContent("Joint Path (game census)",
+            "What the game actually jointed (PartInfoLogger census, F10 in game), not a prediction."), EditorStyles.boldLabel);
+        EditorGUILayout.BeginHorizontal();
+        JointCensusGizmos.SkipCut = GUILayout.Toggle(JointCensusGizmos.SkipCut, new GUIContent("Skip cut points",
+            "The chain may not pass through cut points (as if all were cut). The two selected parts are always allowed."));
+        JointCensusGizmos.SkipYank = GUILayout.Toggle(JointCensusGizmos.SkipYank, new GUIContent("Skip yankables",
+            "The chain may not pass through parts whose joint breaks when grapple-thrown (census Yank column)."));
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.BeginHorizontal();
+        using (new EditorGUI.DisabledScope(Selection.gameObjects.Length != 2))
+            if (GUILayout.Button($"Find Path  ({Selection.gameObjects.Length})", GUILayout.Height(24), GUILayout.MinWidth(0)))
+            {
+                pathStatus = JointCensusGizmos.FindPathFromSelection();
+                JointCensusGizmos.ShowPath = true; pathScroll = Vector2.zero;
+            }
+        using (new EditorGUI.DisabledScope(!JointCensusGizmos.HasPath))
+        {
+            if (GUILayout.Button("Select Parts", GUILayout.Height(24), GUILayout.MinWidth(0)))
+                pathStatus = JointCensusGizmos.SelectPathParts();
+            var prevBG = GUI.backgroundColor;
+            if (JointCensusGizmos.HasPath && JointCensusGizmos.ShowPath) GUI.backgroundColor = new Color(0.2f, 0.8f, 0.4f);
+            if (GUILayout.Button(JointCensusGizmos.ShowPath ? "Hide Overlay" : "Show Overlay", GUILayout.Height(24), GUILayout.ExpandWidth(false)))
+            { JointCensusGizmos.ShowPath = !JointCensusGizmos.ShowPath; SceneView.RepaintAll(); }
+            GUI.backgroundColor = prevBG;
+            if (GUILayout.Button("✕", GUILayout.Height(24), GUILayout.Width(26)))
+            { JointCensusGizmos.ClearPath(); pathStatus = null; }
+        }
+        EditorGUILayout.EndHorizontal();
+
+        var wrap = new GUIStyle(EditorStyles.helpBox) { wordWrap = true };
+        if (!string.IsNullOrEmpty(pathStatus))
+            EditorGUILayout.LabelField(pathStatus, wrap);
+        if (JointCensusGizmos.HasPath)
+        {
+            // Word-wrapped, measured at the current width, inside its own scroll view capped at 260 px so a long
+            // chain never pushes the rest of the window out of reach.
+            var area = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
+            var text = JointCensusGizmos.PathText;
+            float w = EditorGUIUtility.currentViewWidth - 40f;
+            float h = area.CalcHeight(new GUIContent(text), w);
+            pathScroll = EditorGUILayout.BeginScrollView(pathScroll, GUILayout.Height(Mathf.Min(h + 6f, 260f)));
+            EditorGUILayout.SelectableLabel(text, area, GUILayout.Height(h), GUILayout.Width(w));
+            EditorGUILayout.EndScrollView();
+        }
+        if (!string.IsNullOrEmpty(JointCensusGizmos.SourceDescription))
+            EditorGUILayout.LabelField(JointCensusGizmos.SourceDescription, EditorStyles.wordWrappedMiniLabel);
+    }
+
+    // Depth-first hierarchy order (the order GetComponentsInChildren returns): < 0 when a comes before b.
+    static int HierarchyCompare(Transform a, Transform b)
+    {
+        var pa = new List<int>(); for (var t = a; t != null; t = t.parent) pa.Insert(0, t.GetSiblingIndex());
+        var pb = new List<int>(); for (var t = b; t != null; t = t.parent) pb.Insert(0, t.GetSiblingIndex());
+        for (int i = 0; i < Mathf.Min(pa.Count, pb.Count); i++)
+            if (pa[i] != pb[i]) return pa[i].CompareTo(pb[i]);
+        return pa.Count.CompareTo(pb.Count);   // an ancestor comes before its children
+    }
+
     static Vector2 ToPlane2D(Vector3 v, Vector3 origin, Vector3 tan, Vector3 bitan)
         => new Vector2(Vector3.Dot(v - origin, tan), Vector3.Dot(v - origin, bitan));
 
@@ -1782,17 +1879,23 @@ public class JointAssistWindow : EditorWindow
     {
         if (r.state == CompatResult.State.None) return;
         if (r.state == CompatResult.State.Pass)
-            DrawCompatRow("d_winbtn_mac_max", r.message);
+            DrawCompatRow("d_winbtn_mac_max", r.message, r);
         else if (r.state == CompatResult.State.Fail)
-            DrawCompatRow("d_winbtn_mac_close_h", r.message);
+            DrawCompatRow("d_winbtn_mac_close_h", r.message, r);
         else
-            DrawCompatRow("console.warnicon.sml", r.message);
+            DrawCompatRow("console.warnicon.sml", r.message, r);
     }
 
-    void DrawCompatRow(string iconName, string message)
+    void DrawCompatRow(string iconName, string message, CompatResult? dir = null)
     {
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label(EditorGUIUtility.IconContent(iconName), GUILayout.Width(20), GUILayout.Height(20));
+        if (dir.HasValue && !string.IsNullOrEmpty(dir.Value.dirTip))
+        {
+            var ds = new GUIStyle(EditorStyles.boldLabel) { fontSize = 14, alignment = TextAnchor.MiddleCenter };
+            ds.normal.textColor = dir.Value.dirColor;
+            GUILayout.Label(new GUIContent("⇄", dir.Value.dirTip), ds, GUILayout.Width(18), GUILayout.Height(20));
+        }
         var style = new GUIStyle(EditorStyles.helpBox) { richText = true };
         string msg = message
             .Replace("Compatible",               "<color=#44cc44>Compatible</color>")
